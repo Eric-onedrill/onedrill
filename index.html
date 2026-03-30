@@ -28,19 +28,31 @@
 }
 html,body{width:100%;height:100%;overflow:hidden}
 body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex;flex-direction:column;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-#login-screen{position:fixed;inset:0;background:var(--dark);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:32px}
-.login-logo{font-family:var(--mono);font-size:28px;color:#fff;letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
-.login-logo-dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
-.login-box{background:var(--dark2);border:1px solid #333;border-radius:var(--r-xl);padding:32px;width:320px}
-.login-title{font-size:16px;font-weight:600;color:#fff;margin-bottom:6px}
-.login-sub{font-size:13px;color:#666;margin-bottom:24px}
-.login-inp{width:100%;background:#111;border:1px solid #333;color:#fff;padding:10px 12px;border-radius:var(--r);font-size:14px;font-family:var(--font);outline:none;transition:border-color .15s;margin-bottom:12px}
-.login-inp:focus{border-color:var(--accent)}
-.login-btn{width:100%;background:var(--accent);color:#fff;border:none;padding:11px;border-radius:var(--r);font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font);transition:opacity .15s}
-.login-btn:hover{opacity:.9}
-.login-view-btn{width:100%;background:transparent;color:#555;border:1px solid #333;padding:11px;border-radius:var(--r);font-size:13px;cursor:pointer;font-family:var(--font);margin-top:8px;transition:all .15s}
-.login-view-btn:hover{color:#aaa;border-color:#555}
-.login-err{font-size:12px;color:var(--red);margin-top:8px;display:none}
+#login-screen{position:fixed;inset:0;background:#1a1a14;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:0;overflow:hidden}
+#login-screen::before{content:'';position:absolute;width:600px;height:600px;border-radius:50%;border:60px solid rgba(180,40,30,.08);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+#login-screen::after{content:'';position:absolute;width:900px;height:900px;border-radius:50%;border:80px solid rgba(180,40,30,.04);top:50%;right:-300px;transform:translateY(-50%);pointer-events:none}
+.login-brand{display:flex;flex-direction:column;align-items:center;margin-bottom:40px;position:relative;z-index:1}
+.login-emblem{width:120px;height:120px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#c42b20,#8b1a12);border:5px solid #b8922f;display:flex;align-items:center;justify-content:center;box-shadow:0 0 60px rgba(196,43,32,.3),0 4px 20px rgba(0,0,0,.5);margin-bottom:20px}
+.login-emblem-num{font-family:var(--font);font-size:52px;font-weight:900;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.4)}
+.login-brand-name{font-family:var(--font);font-size:32px;font-weight:800;color:#b8922f;letter-spacing:.08em;font-style:italic;text-shadow:0 2px 12px rgba(184,146,47,.2)}
+.login-box{background:rgba(30,30,22,.8);border:1px solid rgba(184,146,47,.15);border-radius:var(--r-xl);padding:32px;width:340px;position:relative;z-index:1;backdrop-filter:blur(10px)}
+.login-enter-section{margin-bottom:20px}
+.login-btn{width:100%;background:linear-gradient(135deg,#b8922f,#d4a93a);color:#1a1a14;border:none;padding:14px;border-radius:var(--r);font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;letter-spacing:.02em;box-shadow:0 4px 16px rgba(184,146,47,.3)}
+.login-btn:hover{transform:translateY(-1px);box-shadow:0 6px 24px rgba(184,146,47,.4)}
+.login-view-btn{width:100%;background:transparent;color:rgba(184,146,47,.6);border:1px solid rgba(184,146,47,.2);padding:12px;border-radius:var(--r);font-size:13px;cursor:pointer;font-family:var(--font);margin-top:10px;transition:all .2s}
+.login-view-btn:hover{color:#b8922f;border-color:rgba(184,146,47,.5);background:rgba(184,146,47,.05)}
+.login-divider{display:flex;align-items:center;gap:12px;margin:24px 0 16px;color:rgba(255,255,255,.15);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+.login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.08)}
+.login-admin-section{opacity:.5;transition:opacity .3s}
+.login-admin-section:hover,.login-admin-section:focus-within{opacity:1}
+.login-admin-label{font-size:11px;color:rgba(184,146,47,.4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;font-weight:600}
+.login-inp{width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08);color:#fff;padding:10px 12px;border-radius:var(--r);font-size:13px;font-family:var(--font);outline:none;transition:all .2s;margin-bottom:10px}
+.login-inp:focus{border-color:rgba(184,146,47,.4);background:rgba(0,0,0,.5)}
+.login-inp::placeholder{color:rgba(255,255,255,.2)}
+.login-admin-btn{width:100%;background:transparent;color:rgba(255,255,255,.3);border:1px solid rgba(255,255,255,.08);padding:9px;border-radius:var(--r);font-size:12px;cursor:pointer;font-family:var(--font);transition:all .2s}
+.login-admin-btn:hover{color:#fff;border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+.login-err{font-size:11px;color:#c42b20;margin-top:6px;display:none}
+.login-footer{position:absolute;bottom:20px;font-size:11px;color:rgba(255,255,255,.1);font-family:var(--mono);letter-spacing:.05em}
 .topbar{display:flex;align-items:center;height:52px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--white);padding:0 20px;gap:0;z-index:100}
 .logo{font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.01em;color:var(--text);margin-right:28px;white-space:nowrap;display:flex;align-items:center;gap:8px}
 .logo-dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
@@ -222,10 +234,10 @@ tbody td{padding:10px 13px;color:var(--text)}
 .toast{position:fixed;bottom:20px;right:20px;z-index:9999;background:var(--text);color:var(--white);border-radius:var(--r-lg);padding:11px 16px;font-size:13px;display:flex;align-items:center;gap:9px;transform:translateY(60px);opacity:0;transition:all .3s cubic-bezier(.34,1.56,.64,1);pointer-events:none;max-width:340px;box-shadow:var(--shadow-lg)}
 .toast.show{transform:translateY(0);opacity:1}
 .tdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-#loading-screen{position:fixed;inset:0;background:var(--dark);display:flex;align-items:center;justify-content:center;z-index:8888;flex-direction:column;gap:16px}
-.loading-logo{font-family:var(--mono);font-size:22px;color:#fff;letter-spacing:-.02em}
-.loading-bar{width:200px;height:2px;background:#333;border-radius:2px;overflow:hidden}
-.loading-fill{height:100%;background:var(--accent);border-radius:2px;animation:loading 1.5s ease-in-out infinite}
+#loading-screen{position:fixed;inset:0;background:#1a1a14;display:flex;align-items:center;justify-content:center;z-index:8888;flex-direction:column;gap:16px}
+.loading-logo{font-family:var(--font);font-size:24px;color:#b8922f;letter-spacing:.08em;font-weight:800;font-style:italic}
+.loading-bar{width:200px;height:2px;background:rgba(184,146,47,.15);border-radius:2px;overflow:hidden}
+.loading-fill{height:100%;background:#b8922f;border-radius:2px;animation:loading 1.5s ease-in-out infinite}
 @keyframes loading{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
 .leaflet-container{background:#e8e8e5!important}
 .leaflet-popup-content-wrapper{background:var(--white)!important;color:var(--text)!important;border:1px solid var(--border)!important;border-radius:var(--r-lg)!important;font-family:var(--font)!important;box-shadow:var(--shadow-lg)!important}
@@ -306,21 +318,31 @@ tbody td{padding:10px 13px;color:var(--text)}
 <body>
 
 <div id="loading-screen">
-  <div class="loading-logo">● OneDrill</div>
+  <div style="width:60px;height:60px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#c42b20,#8b1a12);border:3px solid #b8922f;display:flex;align-items:center;justify-content:center;box-shadow:0 0 40px rgba(196,43,32,.2)"><span style="font-size:28px;font-weight:900;color:#fff">1</span></div>
+  <div class="loading-logo">ONEDRILL</div>
   <div class="loading-bar"><div class="loading-fill"></div></div>
-  <div style="font-size:12px;color:#444;font-family:var(--mono);margin-top:8px">Conectando ao banco de dados...</div>
+  <div style="font-size:11px;color:rgba(184,146,47,.4);font-family:var(--mono);margin-top:8px">Conectando ao banco de dados...</div>
 </div>
 
 <div id="login-screen" style="display:none">
-  <div class="login-logo"><div class="login-logo-dot"></div>OneDrill</div>
-  <div class="login-box">
-    <div class="login-title">Acesso</div>
-    <div class="login-sub">Digite a senha para continuar</div>
-    <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
-    <div class="login-err" id="login-err">Senha incorreta</div>
-    <button class="login-btn" onclick="tryLogin()">Entrar como Admin</button>
-    <button class="login-view-btn" onclick="enterViewer()">Continuar como Manager / Visualizador →</button>
+  <div class="login-brand">
+    <div class="login-emblem"><span class="login-emblem-num">1</span></div>
+    <div class="login-brand-name">ONEDRILL</div>
   </div>
+  <div class="login-box">
+    <div class="login-enter-section">
+      <button class="login-btn" onclick="enterViewer()">Entrar →</button>
+      <button class="login-view-btn" onclick="enterViewer()">Continuar como Manager / Visualizador</button>
+    </div>
+    <div class="login-divider"><span>Admin</span></div>
+    <div class="login-admin-section">
+      <div class="login-admin-label">Acesso administrativo</div>
+      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
+      <button class="login-admin-btn" onclick="tryLogin()">Entrar como Admin</button>
+      <div class="login-err" id="login-err">Senha incorreta</div>
+    </div>
+  </div>
+  <div class="login-footer">OneDrill Ticket Management System</div>
 </div>
 
 <div class="topbar" id="topbar" style="display:none">

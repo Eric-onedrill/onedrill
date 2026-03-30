@@ -313,6 +313,16 @@ tbody td{padding:10px 13px;color:var(--text)}
   .stat-card{padding:10px}
   .stat-val{font-size:18px}
 }
+/* standalone project responsive */
+@media(max-width:600px){
+  #pg-standalone .prog-legend{font-size:10px;gap:6px}
+  #pg-standalone .pstat-val{font-size:14px}
+  #pg-standalone .pstat-lbl{font-size:8px}
+  #pg-standalone>div:last-child{padding:12px!important}
+  #pg-standalone>div:last-child>div:nth-child(2){grid-template-columns:repeat(2,1fr)!important}
+  #pg-standalone>div:last-child>div:nth-child(2)>div:first-child{grid-column:1/-1}
+  #pg-standalone>div:last-child>div:nth-child(5){grid-template-columns:repeat(3,1fr)!important}
+}
 </style>
 </head>
 <body>
@@ -991,6 +1001,13 @@ window.addEventListener('load',async()=>{
   document.querySelector('#loading-screen div:last-child').textContent='Conectando ao Supabase...';
   const ok=await initSupabase();
   document.getElementById('loading-screen').style.display='none';
+  // If ?p= param, skip login and show standalone project
+  const params=new URLSearchParams(window.location.search);
+  if(params.get('p')&&ok){
+    const pid=params.get('p');
+    const p=projects.find(x=>x.id===pid||x.name===pid)||projects.find(x=>x.name.toLowerCase().includes(pid.toLowerCase()));
+    if(p){renderStandaloneProject(p);return;}
+  }
   if(!ok){document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
   document.getElementById('login-screen').style.display='flex';
 });

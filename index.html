@@ -28,31 +28,19 @@
 }
 html,body{width:100%;height:100%;overflow:hidden}
 body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex;flex-direction:column;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-#login-screen{position:fixed;inset:0;background:#1a1a14;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:0;overflow:hidden}
-#login-screen::before{content:'';position:absolute;width:600px;height:600px;border-radius:50%;border:60px solid rgba(180,40,30,.08);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
-#login-screen::after{content:'';position:absolute;width:900px;height:900px;border-radius:50%;border:80px solid rgba(180,40,30,.04);top:50%;right:-300px;transform:translateY(-50%);pointer-events:none}
-.login-brand{display:flex;flex-direction:column;align-items:center;margin-bottom:40px;position:relative;z-index:1}
-.login-emblem{width:120px;height:120px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#c42b20,#8b1a12);border:5px solid #b8922f;display:flex;align-items:center;justify-content:center;box-shadow:0 0 60px rgba(196,43,32,.3),0 4px 20px rgba(0,0,0,.5);margin-bottom:20px}
-.login-emblem-num{font-family:var(--font);font-size:52px;font-weight:900;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.4)}
-.login-brand-name{font-family:var(--font);font-size:32px;font-weight:800;color:#b8922f;letter-spacing:.08em;font-style:italic;text-shadow:0 2px 12px rgba(184,146,47,.2)}
-.login-box{background:rgba(30,30,22,.8);border:1px solid rgba(184,146,47,.15);border-radius:var(--r-xl);padding:32px;width:340px;position:relative;z-index:1;backdrop-filter:blur(10px)}
-.login-enter-section{margin-bottom:20px}
-.login-btn{width:100%;background:linear-gradient(135deg,#b8922f,#d4a93a);color:#1a1a14;border:none;padding:14px;border-radius:var(--r);font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;letter-spacing:.02em;box-shadow:0 4px 16px rgba(184,146,47,.3)}
-.login-btn:hover{transform:translateY(-1px);box-shadow:0 6px 24px rgba(184,146,47,.4)}
-.login-view-btn{width:100%;background:transparent;color:rgba(184,146,47,.6);border:1px solid rgba(184,146,47,.2);padding:12px;border-radius:var(--r);font-size:13px;cursor:pointer;font-family:var(--font);margin-top:10px;transition:all .2s}
-.login-view-btn:hover{color:#b8922f;border-color:rgba(184,146,47,.5);background:rgba(184,146,47,.05)}
-.login-divider{display:flex;align-items:center;gap:12px;margin:24px 0 16px;color:rgba(255,255,255,.15);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
-.login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.08)}
-.login-admin-section{opacity:.5;transition:opacity .3s}
-.login-admin-section:hover,.login-admin-section:focus-within{opacity:1}
-.login-admin-label{font-size:11px;color:rgba(184,146,47,.4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;font-weight:600}
-.login-inp{width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08);color:#fff;padding:10px 12px;border-radius:var(--r);font-size:13px;font-family:var(--font);outline:none;transition:all .2s;margin-bottom:10px}
-.login-inp:focus{border-color:rgba(184,146,47,.4);background:rgba(0,0,0,.5)}
-.login-inp::placeholder{color:rgba(255,255,255,.2)}
-.login-admin-btn{width:100%;background:transparent;color:rgba(255,255,255,.3);border:1px solid rgba(255,255,255,.08);padding:9px;border-radius:var(--r);font-size:12px;cursor:pointer;font-family:var(--font);transition:all .2s}
-.login-admin-btn:hover{color:#fff;border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
-.login-err{font-size:11px;color:#c42b20;margin-top:6px;display:none}
-.login-footer{position:absolute;bottom:20px;font-size:11px;color:rgba(255,255,255,.1);font-family:var(--mono);letter-spacing:.05em}
+#login-screen{position:fixed;inset:0;background:var(--dark);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:32px}
+.login-logo{font-family:var(--mono);font-size:28px;color:#fff;letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.login-logo-dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.login-box{background:var(--dark2);border:1px solid #333;border-radius:var(--r-xl);padding:32px;width:320px}
+.login-title{font-size:16px;font-weight:600;color:#fff;margin-bottom:6px}
+.login-sub{font-size:13px;color:#666;margin-bottom:24px}
+.login-inp{width:100%;background:#111;border:1px solid #333;color:#fff;padding:10px 12px;border-radius:var(--r);font-size:14px;font-family:var(--font);outline:none;transition:border-color .15s;margin-bottom:12px}
+.login-inp:focus{border-color:var(--accent)}
+.login-btn{width:100%;background:var(--accent);color:#fff;border:none;padding:11px;border-radius:var(--r);font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font);transition:opacity .15s}
+.login-btn:hover{opacity:.9}
+.login-view-btn{width:100%;background:transparent;color:#555;border:1px solid #333;padding:11px;border-radius:var(--r);font-size:13px;cursor:pointer;font-family:var(--font);margin-top:8px;transition:all .15s}
+.login-view-btn:hover{color:#aaa;border-color:#555}
+.login-err{font-size:12px;color:var(--red);margin-top:8px;display:none}
 .topbar{display:flex;align-items:center;height:52px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--white);padding:0 20px;gap:0;z-index:100}
 .logo{font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.01em;color:var(--text);margin-right:28px;white-space:nowrap;display:flex;align-items:center;gap:8px}
 .logo-dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
@@ -234,10 +222,10 @@ tbody td{padding:10px 13px;color:var(--text)}
 .toast{position:fixed;bottom:20px;right:20px;z-index:9999;background:var(--text);color:var(--white);border-radius:var(--r-lg);padding:11px 16px;font-size:13px;display:flex;align-items:center;gap:9px;transform:translateY(60px);opacity:0;transition:all .3s cubic-bezier(.34,1.56,.64,1);pointer-events:none;max-width:340px;box-shadow:var(--shadow-lg)}
 .toast.show{transform:translateY(0);opacity:1}
 .tdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-#loading-screen{position:fixed;inset:0;background:#1a1a14;display:flex;align-items:center;justify-content:center;z-index:8888;flex-direction:column;gap:16px}
-.loading-logo{font-family:var(--font);font-size:24px;color:#b8922f;letter-spacing:.08em;font-weight:800;font-style:italic}
-.loading-bar{width:200px;height:2px;background:rgba(184,146,47,.15);border-radius:2px;overflow:hidden}
-.loading-fill{height:100%;background:#b8922f;border-radius:2px;animation:loading 1.5s ease-in-out infinite}
+#loading-screen{position:fixed;inset:0;background:var(--dark);display:flex;align-items:center;justify-content:center;z-index:8888;flex-direction:column;gap:16px}
+.loading-logo{font-family:var(--mono);font-size:22px;color:#fff;letter-spacing:-.02em}
+.loading-bar{width:200px;height:2px;background:#333;border-radius:2px;overflow:hidden}
+.loading-fill{height:100%;background:var(--accent);border-radius:2px;animation:loading 1.5s ease-in-out infinite}
 @keyframes loading{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
 .leaflet-container{background:#e8e8e5!important}
 .leaflet-popup-content-wrapper{background:var(--white)!important;color:var(--text)!important;border:1px solid var(--border)!important;border-radius:var(--r-lg)!important;font-family:var(--font)!important;box-shadow:var(--shadow-lg)!important}
@@ -254,7 +242,27 @@ tbody td{padding:10px 13px;color:var(--text)}
 .ub-pending{background:var(--red-bg);color:var(--red)}
 .ub-private{background:var(--purple-bg);color:var(--purple)}
 .locked-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-border);font-family:var(--mono)}
-.modal-narrow2{width:400px}
+
+/* ── SHARED PROJECT VIEW ── */
+#pg-shared{flex-direction:column;overflow:hidden}
+.shared-topbar{display:flex;align-items:center;height:52px;border-bottom:1px solid var(--border);background:var(--white);padding:0 16px;gap:12px;flex-shrink:0}
+.shared-logo{font-family:var(--mono);font-weight:500;font-size:13px;color:var(--text);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.shared-proj-name{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shared-body{display:flex;flex:1;min-height:0;overflow:hidden}
+.shared-map{flex:1;position:relative}
+.shared-map #shared-map-el{width:100%;height:100%}
+.shared-sidebar{width:320px;flex-shrink:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--white);overflow:hidden}
+.shared-stats{padding:14px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.shared-stat{text-align:center;padding:8px 4px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)}
+.shared-stat-val{font-size:16px;font-weight:700;font-family:var(--mono);display:block}
+.shared-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase}
+.shared-filters{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap}
+.shared-list{flex:1;overflow-y:auto;padding:8px}
+.shared-list::-webkit-scrollbar{width:3px}
+.shared-list::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.shared-count{font-size:11px;color:var(--muted);padding:6px 14px 0;font-family:var(--mono)}
+.shared-mob-toggle{display:none;position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:1002;background:var(--white);border:1px solid var(--border);border-radius:20px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-lg);gap:6px;align-items:center}
+.shared-panel-overlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,.3);z-index:1000}
 
 /* ── MOBILE ── */
 .sb-toggle{display:none;position:absolute;top:10px;left:10px;z-index:1002;background:var(--white);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;font-size:16px;cursor:pointer;box-shadow:var(--shadow)}
@@ -262,15 +270,16 @@ tbody td{padding:10px 13px;color:var(--text)}
 .sidebar-overlay.open{display:block}
 
 @media(max-width:768px){
-  .topbar{padding:0 8px;height:46px}
-  .logo{margin-right:8px;font-size:12px}
-  .navtabs{overflow-x:auto;flex:1;-webkit-overflow-scrolling:touch}
+  .topbar{padding:0 10px;height:48px;gap:6px}
+  .logo{margin-right:0;font-size:12px;flex-shrink:0}
+  .logo span{display:none}
+  .navtabs{overflow-x:auto;flex:1;-webkit-overflow-scrolling:touch;gap:0;margin:0 4px}
   .navtabs::-webkit-scrollbar{display:none}
   .ntab{font-size:11px;padding:5px 8px;flex-shrink:0}
-  .hactions{gap:3px}
+  .hactions{gap:4px;flex-shrink:0}
   .hactions .btn{font-size:10px;padding:4px 7px}
+  .hactions .sync-indicator{display:none}
   .role-badge{font-size:9px;padding:2px 6px}
-  .sync-indicator{display:none}
 
   .stat-grid{grid-template-columns:repeat(2,1fr);gap:6px}
   .stat-card{padding:12px}
@@ -279,14 +288,16 @@ tbody td{padding:10px 13px;color:var(--text)}
   .dash-inner,.proj-inner{padding:14px}
   .page-title{font-size:17px}
 
-  #pg-map{flex-direction:column}
+  #pg-map{flex-direction:column;position:relative}
   .sidebar{position:absolute;z-index:1001;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);transition:transform .25s ease}
   .sidebar.mob-open{transform:translateX(0)}
-  .sb-toggle{display:flex}
+  .sb-toggle{display:flex;align-items:center;gap:6px;font-size:13px;padding:8px 14px;border-radius:20px;top:auto;bottom:16px;left:50%;transform:translateX(-50%)}
   .mapc{width:100%;height:100%}
   .mctrl{top:10px;right:8px}
   .mbtn{font-size:11px;padding:5px 8px}
   .map-legend{font-size:10px;padding:7px}
+  .map-panel{bottom:60px;left:8px;right:8px;width:auto}
+  #field-draw-panel{min-width:0;width:calc(100% - 24px);left:12px;transform:none}
 
   .proj-grid{grid-template-columns:1fr}
   .pcard-stats{grid-template-columns:repeat(3,1fr)}
@@ -306,6 +317,17 @@ tbody td{padding:10px 13px;color:var(--text)}
 
   .warn-chips{gap:3px}
   .warn-chip{font-size:10px;padding:2px 7px}
+
+  /* Shared project mobile */
+  .shared-body{flex-direction:column}
+  .shared-sidebar{width:100%;position:absolute;z-index:1001;bottom:0;left:0;right:0;height:55vh;transform:translateY(100%);transition:transform .25s ease;border-top:1px solid var(--border);border-left:none;border-radius:var(--r-xl) var(--r-xl) 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.15)}
+  .shared-sidebar.mob-open{transform:translateY(0)}
+  .shared-mob-toggle{display:flex}
+  .shared-panel-overlay.open{display:block;z-index:1000}
+  .shared-map{width:100%;height:100%}
+  .shared-topbar{padding:0 10px;height:44px;gap:8px}
+  .shared-topbar .shared-proj-name{font-size:13px}
+  .shared-stats{grid-template-columns:repeat(2,1fr);padding:10px}
 }
 @media(max-width:480px){
   .hactions .btn:not(.btn-primary):not(#btn-import){display:none}
@@ -313,48 +335,63 @@ tbody td{padding:10px 13px;color:var(--text)}
   .stat-card{padding:10px}
   .stat-val{font-size:18px}
 }
-/* standalone project responsive */
-@media(max-width:600px){
-  #pg-standalone .prog-legend{font-size:10px;gap:6px}
-  #pg-standalone .pstat-val{font-size:14px}
-  #pg-standalone .pstat-lbl{font-size:8px}
-  #pg-standalone>div:last-child{padding:12px!important}
-  #pg-standalone>div:last-child>div:nth-child(2){grid-template-columns:repeat(2,1fr)!important}
-  #pg-standalone>div:last-child>div:nth-child(2)>div:first-child{grid-column:1/-1}
-  #pg-standalone>div:last-child>div:nth-child(5){grid-template-columns:repeat(3,1fr)!important}
-}
 </style>
 </head>
 <body>
 
 <div id="loading-screen">
-  <div style="width:60px;height:60px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#c42b20,#8b1a12);border:3px solid #b8922f;display:flex;align-items:center;justify-content:center;box-shadow:0 0 40px rgba(196,43,32,.2)"><span style="font-size:28px;font-weight:900;color:#fff">1</span></div>
-  <div class="loading-logo">ONEDRILL</div>
+  <div class="loading-logo">● OneDrill</div>
   <div class="loading-bar"><div class="loading-fill"></div></div>
-  <div style="font-size:11px;color:rgba(184,146,47,.4);font-family:var(--mono);margin-top:8px">Conectando ao banco de dados...</div>
+  <div style="font-size:12px;color:#444;font-family:var(--mono);margin-top:8px">Conectando ao banco de dados...</div>
 </div>
 
 <div id="login-screen" style="display:none">
-  <div class="login-brand">
-    <div class="login-emblem"><span class="login-emblem-num">1</span></div>
-    <div class="login-brand-name">ONEDRILL</div>
-  </div>
+  <div class="login-logo"><div class="login-logo-dot"></div>OneDrill</div>
   <div class="login-box">
-    <div class="login-enter-section">
-      <button class="login-btn" onclick="enterViewer()">Entrar →</button>
-      <button class="login-view-btn" onclick="enterViewer()">Continuar como Manager / Visualizador</button>
-    </div>
-    <div class="login-divider"><span>Admin</span></div>
-    <div class="login-admin-section">
-      <div class="login-admin-label">Acesso administrativo</div>
-      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
-      <button class="login-admin-btn" onclick="tryLogin()">Entrar como Admin</button>
-      <div class="login-err" id="login-err">Senha incorreta</div>
-    </div>
+    <div class="login-title">Acesso</div>
+    <div class="login-sub">Digite a senha para continuar</div>
+    <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
+    <div class="login-err" id="login-err">Senha incorreta</div>
+    <button class="login-btn" onclick="tryLogin()">Entrar como Admin</button>
+    <button class="login-view-btn" onclick="enterViewer()">Continuar como Manager / Visualizador →</button>
   </div>
-  <div class="login-footer">OneDrill Ticket Management System</div>
 </div>
 
+<!-- ===== SHARED PROJECT VIEW (standalone) ===== -->
+<div class="page" id="pg-shared">
+  <div class="shared-topbar">
+    <div class="shared-logo"><div class="logo-dot"></div>OneDrill</div>
+    <div class="shared-proj-name" id="shared-proj-name"></div>
+    <button class="btn btn-sm" id="shared-enter-btn" onclick="exitSharedView()">Abrir app completo →</button>
+  </div>
+  <div class="shared-body" style="position:relative">
+    <div class="shared-panel-overlay" id="shared-overlay" onclick="toggleSharedPanel()"></div>
+    <div class="shared-map">
+      <div id="shared-map-el"></div>
+      <div class="mctrl" style="top:10px;right:10px">
+        <button class="mbtn" id="sh-bsat" onclick="shSetLayer('sat')">Satélite</button>
+        <button class="mbtn active" id="sh-bhyb" onclick="shSetLayer('hyb')">Híbrido</button>
+        <button class="mbtn" id="sh-bstr" onclick="shSetLayer('str')">Ruas</button>
+        <div class="map-divider"></div>
+        <button class="mbtn" onclick="shFitAll()">Ver todos</button>
+      </div>
+      <button class="shared-mob-toggle" id="shared-mob-toggle" onclick="toggleSharedPanel()">📋 <span id="shared-toggle-label">Ver tickets</span></button>
+    </div>
+    <div class="shared-sidebar" id="shared-sidebar">
+      <div class="shared-stats" id="shared-stats"></div>
+      <div class="shared-filters">
+        <input class="fi" id="sh-srch" placeholder="Buscar ticket..." oninput="renderSharedList()" style="flex:1">
+        <select class="fi" id="sh-stat" onchange="renderSharedList()" style="width:auto">
+          <option value="">Todos</option><option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option>
+        </select>
+      </div>
+      <div class="shared-count" id="shared-count"></div>
+      <div class="shared-list" id="shared-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
 <div class="topbar" id="topbar" style="display:none">
   <div class="logo"><div class="logo-dot"></div>OneDrill</div>
   <div class="navtabs">
@@ -366,8 +403,8 @@ tbody td{padding:10px 13px;color:var(--text)}
   <div class="hactions">
     <div class="sync-indicator"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
     <span class="role-badge" id="role-badge">VIEWER</span>
-    <button class="btn" onclick="exportExcel()">↓ Exportar Excel</button>
-    <button class="btn" id="btn-import" onclick="openImport()" style="display:none">↑ Importar Excel</button>
+    <button class="btn" onclick="exportExcel()">↓ Excel</button>
+    <button class="btn" id="btn-import" onclick="openImport()" style="display:none">↑ Importar</button>
     <button class="btn btn-primary" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
   </div>
 </div>
@@ -375,7 +412,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 <div class="page active" id="pg-dash"><div class="dash-inner" id="dash-content"></div></div>
 <div class="page" id="pg-proj"><div class="proj-inner"><div class="proj-header"><div class="page-title">Projetos</div><button class="btn btn-primary" id="btn-new-proj" onclick="openNewProject()" style="display:none">+ Projeto</button></div><div class="proj-grid" id="proj-grid"></div></div></div>
 <div class="page" id="pg-map">
-  <button class="sb-toggle" id="sb-toggle" onclick="toggleSidebar()">☰ Tickets</button>
+  <button class="sb-toggle" id="sb-toggle" onclick="toggleSidebar()">📋 Tickets</button>
   <div class="sidebar-overlay" id="sb-overlay" onclick="toggleSidebar()"></div>
   <div class="sidebar" id="map-sidebar">
     <div class="sb-filters">
@@ -482,7 +519,7 @@ tbody td{padding:10px 13px;color:var(--text)}
   <div class="modal wide">
     <div class="modal-head">
       <div><div class="mtitle" id="det-title"></div><div style="font-size:13px;color:var(--muted);margin-top:2px" id="det-sub"></div></div>
-      <div style="display:flex;gap:7px;align-items:center">
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-sm" id="det-draw-btn" onclick="goDrawField(currentDetailId)" style="display:none;background:var(--purple-bg);color:var(--purple);border-color:var(--purple-border)">✏️ Desenhar</button>
         <button class="btn btn-sm" id="det-proj-btn" onclick="openMoveProj(currentDetailId)" style="background:var(--accent-bg);color:var(--accent);border-color:#c3d7ff">📁 Projeto</button>
         <button class="btn btn-sm" id="det-edit-btn" onclick="editCurrentTicket()" style="display:none">Editar</button>
@@ -490,7 +527,7 @@ tbody td{padding:10px 13px;color:var(--text)}
         <button class="modal-close" onclick="closeModal('ov-detail')">×</button>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="det-grid">
       <div>
         <div class="fsection" style="margin-top:0"><div class="fsection-lbl">Informações</div><div id="det-info"></div></div>
         <div class="fsection"><div class="fsection-lbl">Histórico</div><div id="det-hist" style="max-height:160px;overflow-y:auto"></div></div>
@@ -547,7 +584,6 @@ tbody td{padding:10px 13px;color:var(--text)}
     <div class="fgrid">
       <div class="fg full"><label class="fl">Ticket #</label><input class="finp" id="tm-t" placeholder="Número do ticket"></div>
       <div class="fg"><label class="fl">Status</label><select class="fsel" id="tm-s"><option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option></select></div>
-<!-- Cancel option included above -->
       <div class="fg"><label class="fl">Projeto</label><select class="fsel" id="tm-proj"><option value="">Sem projeto</option></select></div>
       <div class="fg"><label class="fl">Empresa</label><input class="finp" id="tm-co" placeholder="One Drill"></div>
       <div class="fg"><label class="fl">Cliente</label><input class="finp" id="tm-c" placeholder="Duke Energy..."></div>
@@ -585,10 +621,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 <div class="overlay" id="ov-import">
   <div class="modal wide">
     <div class="modal-head"><div class="mtitle">Importar Excel</div><button class="modal-close" onclick="closeModal('ov-import')">×</button></div>
-    <div class="import-note">
-      Compatível com <strong>Controle_Tickets.xlsx</strong><br>
-      Colunas: <strong>Ticket#, Company, State, Location, Status, Expire on, Footage, Client, Prime, Tipo, Main Address, Pending, Old Ticket #, Status Old, Old Expiration Date</strong>
-    </div>
+    <div class="import-note">Compatível com <strong>Controle_Tickets.xlsx</strong><br>Colunas: <strong>Ticket#, Company, State, Location, Status, Expire on, Footage, Client, Prime, Tipo, Main Address, Pending, Old Ticket #, Status Old, Old Expiration Date</strong></div>
     <div class="uzone" id="uzone" onclick="document.getElementById('ffile').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="onDrop(event)">
       <div style="font-size:24px;margin-bottom:6px">📂</div>
       <div style="font-size:14px;color:var(--text2);margin-bottom:3px;font-weight:600">Clique ou arraste o arquivo aqui</div>
@@ -626,9 +659,7 @@ tbody td{padding:10px 13px;color:var(--text)}
   <div class="modal narrow">
     <div class="modal-head"><div class="mtitle" style="color:var(--red)">Excluir projeto</div><button class="modal-close" onclick="closeModal('ov-del-proj')">×</button></div>
     <div style="font-size:13px;color:var(--text2);margin-bottom:20px" id="del-proj-info"></div>
-    <div style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:16px">
-      ⚠️ Os tickets deste projeto <strong>não serão excluídos</strong>, apenas desvinculados.
-    </div>
+    <div style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:16px">⚠️ Os tickets deste projeto <strong>não serão excluídos</strong>, apenas desvinculados.</div>
     <div class="factions"><button class="btn" onclick="closeModal('ov-del-proj')">Cancelar</button><button class="btn btn-danger" onclick="confirmDelProj()">Excluir projeto</button></div>
   </div>
 </div>
@@ -649,11 +680,12 @@ const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 const ADMIN_PASSWORD='Conquest@Onedrill';
 
 let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoords={};
-let isAdmin=false,role='viewer';
+let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
 let map,satL,strL,hybL,mkrs=[],lines=[],labels=[],drawn=[];
+let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
 let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let _tt;
 
@@ -680,7 +712,7 @@ function dbToTicket(r){return{id:r.id,ticket:r.ticket,projectId:r.project_id||''
 function ticketToDb(t){return{ticket:t.ticket,project_id:t.projectId||null,company:t.company||'',state:t.state||'',location:t.location||'',status:t.status||'Open',expire:t.expire||'',footage:t.footage||0,client:t.client||'',prime:t.prime||'',job:t.job||'',tipo:t.tipo||'',address:t.address||'',pending:t.pending||'',old_ticket2:t.oldTicket2||'',status_old:t.statusOld||'',expire_old:t.expireOld||'',notes:t.notes||'',field_path:t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null,geocoded_lat:t._geocoded?t._geocoded[0]:null,geocoded_lon:t._geocoded?t._geocoded[1]:null,history:t.history||[],attachments:t.attachments||[],status_locked:t.status_locked||false};}
 function projectToDb(p){return{id:p.id,name:p.name,client:p.client||'',state:p.state||'',status:p.status||'Active',description:p.desc||'',total_feet:p.totalFeet||0,center_lat:p.centerCoords?p.centerCoords[0]:null,center_lon:p.centerCoords?p.centerCoords[1]:null,is_manual:p._manual||false};}
 
-function setSyncStatus(ok,msg){document.getElementById('sync-dot').style.background=ok?'var(--green)':'var(--red)';document.getElementById('sync-label').textContent=msg;}
+function setSyncStatus(ok,msg){const d=document.getElementById('sync-dot');const l=document.getElementById('sync-label');if(d)d.style.background=ok?'var(--green)':'var(--red)';if(l)l.textContent=msg;}
 
 async function saveTicketToDb(t){
   setSyncStatus(true,'Salvando...');
@@ -690,22 +722,132 @@ async function saveTicketToDb(t){
   if(res.error){setSyncStatus(false,'Erro ao salvar');toast('Erro: '+res.error.message,'danger');return false;}
   setSyncStatus(true,'Salvo ✓');return true;
 }
-
 async function saveProjectToDb(p){const data=projectToDb(p);const res=await sb.from('projects').upsert(data,{onConflict:'id'});if(res.error){toast('Erro ao salvar projeto: '+res.error.message,'danger');return false;}return true;}
 async function deleteProjectFromDb(id){await sb.from('tickets').update({project_id:null}).eq('project_id',id);const res=await sb.from('projects').delete().eq('id',id);return!res.error;}
 
 function tryLogin(){const pw=document.getElementById('admin-pw').value;if(pw===ADMIN_PASSWORD){isAdmin=true;role='admin';document.getElementById('login-screen').style.display='none';enterApp();}else{document.getElementById('login-err').style.display='block';}}
 function enterViewer(){isAdmin=false;role='viewer';document.getElementById('login-screen').style.display='none';enterApp();}
+
 function enterApp(){
   document.getElementById('topbar').style.display='flex';
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
-  if(isAdmin){document.getElementById('btn-import').style.display='';document.getElementById('btn-new-ticket').style.display='';document.getElementById('btn-new-proj').style.display='';document.getElementById('det-edit-btn').style.display='';document.getElementById('det-draw-btn').style.display='';document.getElementById('det-attach-btn').style.display='';document.getElementById('note-section').style.display='';}
+  if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','det-attach-btn'].forEach(id=>document.getElementById(id).style.display='');document.getElementById('note-section').style.display='';}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','det-attach-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
-  if(!checkProjectUrl()){/* stay on dash */}
 }
+
+/* ========== SHARED PROJECT VIEW ========== */
+function enterSharedView(pid){
+  isSharedView=true;sharedProjectId=pid;
+  const p=projects.find(x=>x.id===pid||x.name===pid);
+  if(!p){toast('Projeto não encontrado','danger');enterViewer();return;}
+  sharedProjectId=p.id;
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('topbar').style.display='none';
+  document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
+  document.getElementById('pg-shared').classList.add('active');
+  document.getElementById('shared-proj-name').textContent=p.name+(p.client?' · '+p.client:'')+(p.state?' · '+p.state:'');
+
+  const ts=tickets.filter(t=>t.projectId===p.id);
+  const open=ts.filter(t=>t.status==='Open').length;
+  const clear=ts.filter(t=>t.status==='Clear').length;
+  const damage=ts.filter(t=>t.status==='Damage').length;
+  const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
+  document.getElementById('shared-stats').innerHTML=`
+    <div class="shared-stat"><span class="shared-stat-val">${ts.length}</span><span class="shared-stat-lbl">Total</span></div>
+    <div class="shared-stat" style="border-color:var(--red-border)"><span class="shared-stat-val" style="color:var(--red)">${open}</span><span class="shared-stat-lbl">Open</span></div>
+    <div class="shared-stat" style="border-color:var(--green-border)"><span class="shared-stat-val" style="color:var(--green)">${clear}</span><span class="shared-stat-lbl">Clear</span></div>
+    <div class="shared-stat" style="border-color:var(--amber-border)"><span class="shared-stat-val" style="color:var(--amber)">${damage}</span><span class="shared-stat-lbl">Damage</span></div>`;
+
+  renderSharedList();
+  setTimeout(()=>initSharedMap(p),150);
+}
+
+function exitSharedView(){
+  isSharedView=false;
+  document.getElementById('pg-shared').classList.remove('active');
+  history.replaceState(null,'',window.location.pathname);
+  document.getElementById('login-screen').style.display='flex';
+}
+
+function toggleSharedPanel(){
+  const sb=document.getElementById('shared-sidebar');
+  const ov=document.getElementById('shared-overlay');
+  const open=sb.classList.toggle('mob-open');
+  ov.classList.toggle('open',open);
+  document.getElementById('shared-toggle-label').textContent=open?'Fechar':'Ver tickets';
+}
+
+function sharedFiltered(){
+  const sr=(document.getElementById('sh-srch')?.value||'').toLowerCase();
+  const st=document.getElementById('sh-stat')?.value||'';
+  return tickets.filter(t=>{
+    if(t.projectId!==sharedProjectId)return false;
+    if(st&&t.status!==st)return false;
+    if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.address||'').toLowerCase().includes(sr))return false;
+    return true;
+  });
+}
+
+function renderSharedList(){
+  const f=sharedFiltered();
+  document.getElementById('shared-count').textContent=`${f.length} ticket${f.length!==1?'s':''}`;
+  document.getElementById('shared-list').innerHTML=f.length?f.map(t=>`<div class="tcard s-${(t.status||'').toLowerCase()}" data-id="${t.id}" onclick="shFocusTicket(${t.id})"><div class="tcard-top"><span class="tcard-num">${t.ticket}</span><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div><div class="tcard-client">${t.client}${t.prime?' · '+t.prime:''}</div><div class="tcard-meta"><span>${t.location}, ${t.state}</span><span>${t.footage} ft</span>${t.tipo?`<span>${t.tipo}</span>`:''}</div></div>`).join(''):'<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
+  renderSharedMap();
+}
+
+function initSharedMap(p){
+  if(shMap)return;
+  const center=p.centerCoords||[28.5,-81.4];
+  shMap=L.map('shared-map-el',{zoomControl:false,preferCanvas:true}).setView(center,14);
+  shSatL=L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxZoom:21});
+  shHybL=L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:21});
+  shStrL=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20});
+  shHybL.addTo(shMap);
+  L.control.zoom({position:'bottomright'}).addTo(shMap);
+  renderSharedMap();
+  setTimeout(()=>shFitAll(),300);
+}
+
+function renderSharedMap(){
+  if(!shMap)return;
+  shMkrs.forEach(m=>shMap.removeLayer(m));shLines.forEach(l=>shMap.removeLayer(l));shLabels.forEach(l=>shMap.removeLayer(l));
+  shMkrs=[];shLines=[];shLabels=[];
+  const f=sharedFiltered();
+  for(const t of f){
+    const c=scol(t.status),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
+    if(coords){
+      const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});
+      const m1=L.marker(coords[0],{icon:mi(1)}).addTo(shMap);const m2=L.marker(coords[coords.length-1],{icon:mi(.7)}).addTo(shMap);
+      m1.bindPopup(buildPopup(t,c));m2.bindPopup(buildPopup(t,c));shMkrs.push(m1,m2);
+      const ln=L.polyline(coords,{color:c,weight:lw,opacity:.92,dashArray:dash}).addTo(shMap);shLines.push(ln);
+      const mid=coords[Math.floor(coords.length/2)]||coords[0];
+      const lbl=L.marker(mid,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="border-left:3px solid ${c}">${t.ticket}</a>`,iconAnchor:[32,10]})}).addTo(shMap);shLabels.push(lbl);
+    }else{
+      let pos=t._geocoded||null;
+      if(!pos){const p=projects.find(x=>x.id===sharedProjectId);const cc=p?.centerCoords||cityCoords(t.location);const jitter=()=>(Math.random()-.5)*0.002;pos=[cc[0]+jitter(),cc[1]+jitter()];
+        if(t.address&&t.address!=='—'&&!t._geocoding){t._geocoding=true;geocodeAddress(t.address,t.location,t.state).then(coords=>{if(coords){t._geocoded=coords;t._geocoding=false;renderSharedMap();}else t._geocoding=false;});}}
+      const mi=L.divIcon({className:'',html:`<div style="width:11px;height:11px;border-radius:50%;background:${c};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3);opacity:${t._geocoded?1:.6}"></div>`,iconSize:[11,11],iconAnchor:[5,5]});
+      const mk=L.marker(pos,{icon:mi}).addTo(shMap);mk.bindPopup(buildPopup(t,c));shMkrs.push(mk);
+      const lbl=L.marker(pos,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="margin-top:12px;display:block;border-left:3px solid ${c}">${t.ticket}</a>`,iconAnchor:[32,-2]})}).addTo(shMap);shLabels.push(lbl);
+    }
+  }
+}
+
+function shFocusTicket(id){
+  if(window.innerWidth<=768){const sb=document.getElementById('shared-sidebar');const ov=document.getElementById('shared-overlay');sb.classList.remove('mob-open');ov.classList.remove('open');document.getElementById('shared-toggle-label').textContent='Ver tickets';}
+  const t=tickets.find(x=>x.id===id);if(!t||!shMap)return;
+  document.querySelectorAll('#shared-list .tcard').forEach(c=>c.classList.remove('active'));const cd=document.querySelector(`#shared-list [data-id="${id}"]`);if(cd)cd.classList.add('active');
+  if(t.fieldPath&&t.fieldPath.length>=2){shMap.fitBounds(L.latLngBounds(t.fieldPath),{padding:[60,60],maxZoom:19});}else if(t._geocoded){shMap.setView(t._geocoded,18);}
+}
+
+function shSetLayer(t){[shSatL,shStrL,shHybL].forEach(l=>{try{shMap.removeLayer(l)}catch{}});['sh-bsat','sh-bstr','sh-bhyb'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('active')});if(t==='sat'){shSatL.addTo(shMap);document.getElementById('sh-bsat').classList.add('active');}else if(t==='hyb'){shHybL.addTo(shMap);document.getElementById('sh-bhyb').classList.add('active');}else{shStrL.addTo(shMap);document.getElementById('sh-bstr').classList.add('active');}}
+function shFitAll(){if(!shMap)return;const ts=tickets.filter(t=>t.projectId===sharedProjectId);const wc=ts.filter(t=>t.fieldPath&&t.fieldPath.length>=2);if(wc.length)shMap.fitBounds(L.latLngBounds(wc.flatMap(t=>t.fieldPath)),{padding:[40,40]});else{const p=projects.find(x=>x.id===sharedProjectId);if(p?.centerCoords)shMap.setView(p.centerCoords,15);}}
+
+/* ========== END SHARED VIEW ========== */
 
 const CITY_COORDS={'vigo - terre haute':[39.4667,-87.4139],'terre haute':[39.4667,-87.4139],'vigo':[39.4667,-87.4139],'orlando - tangelo park':[28.4538,-81.4503],'tangelo park':[28.4538,-81.4503],'orlando':[28.5383,-81.3792],'arcadia':[27.2142,-81.8579],'volusia - deland':[29.0283,-81.3031],'deland':[29.0283,-81.3031],'pinelas - st. petersburg':[27.7676,-82.6403],'st. petersburg':[27.7676,-82.6403],'default':[28.5383,-81.3792]};
 function cityCoords(l){const k=(l||'').toLowerCase().trim();if(CITY_COORDS[k])return CITY_COORDS[k];for(const[kk,v]of Object.entries(CITY_COORDS)){if(kk!=='default'&&(k.includes(kk)||kk.includes(k)))return v;}return CITY_COORDS['default']}
@@ -799,7 +941,8 @@ function openTicketDetail(id){
   document.getElementById('det-info').innerHTML=`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${t.status}${t.status_locked?' 🔒':''}</span></div><div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${t.company||'—'}</span></div>${t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${t.prime}</span></div>`:''}<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${t.location}, ${t.state}</span></div><div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val">${t.footage} ft</span></div><div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${t.tipo||'—'}</span></div><div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${t.job||'—'}</span></div><div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${t.address||'—'}</span></div><div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val">${t.expire||'—'}</span></div><div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>${t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${t.notes}</div>`:''}${hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>${t.pending?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Pending</span><span class="mp-val" style="color:var(--amber)">${t.pending}</span></div>`:''}${t.oldTicket2?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Old Ticket #</span><span class="mp-val" style="font-family:var(--mono);color:#b45309">${t.oldTicket2}</span></div>`:''}${t.statusOld?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Status Ant.</span><span class="mp-val" style="color:#92400e">${t.statusOld}</span></div>`:''}${t.expireOld?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Exp. Ant.</span><span class="mp-val" style="color:#92400e">${t.expireOld}</span></div>`:''}</div>`:''}`;
   const lockBadge=document.getElementById('det-lock-badge');const unlockBtn=document.getElementById('det-unlock-btn');
   if(t.status_locked){lockBadge.style.display='';unlockBtn.style.display='';}else{lockBadge.style.display='none';unlockBtn.style.display='none';}
-  renderHistory(t);renderPhotos(t);renderMiniMap(t);renderUtils(t);document.getElementById('note-input').value='';openModal('ov-detail');
+  if(!isSharedView&&isAdmin){document.getElementById('det-edit-btn').style.display='';document.getElementById('det-draw-btn').style.display='';document.getElementById('det-attach-btn').style.display='';document.getElementById('note-section').style.display='';document.getElementById('field-status-section').style.display='';}else{document.getElementById('det-edit-btn').style.display='none';document.getElementById('det-draw-btn').style.display='none';document.getElementById('det-attach-btn').style.display='none';document.getElementById('note-section').style.display='none';document.getElementById('field-status-section').style.display='none';}
+  renderHistory(t);renderPhotos(t);renderMiniMap(t);renderUtils(t);const ni=document.getElementById('note-input');if(ni)ni.value='';openModal('ov-detail');
 }
 
 function renderHistory(t){document.getElementById('det-hist').innerHTML=t.history?.length?[...t.history].reverse().map(h=>`<div class="hist-item"><div class="hist-dot" style="background:${h.color||'#9a9888'}"></div><div style="flex:1"><div style="color:var(--text2);font-size:12px">${h.action}</div><div class="hist-time">${fmtDt(h.ts)}</div></div></div>`).join(''):'<div style="color:var(--muted);font-size:12px">Sem histórico</div>';}
@@ -824,7 +967,7 @@ function renderMiniMap(t){
   container.innerHTML='<div class="mini-map-wrap"><div id="mini-map"></div></div>';
   setTimeout(()=>{try{miniMap=L.map('mini-map',{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false});L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:21}).addTo(miniMap);const c=scol(t.status);if(hasPath){const ln=L.polyline(t.fieldPath,{color:c,weight:4,opacity:0.9}).addTo(miniMap);miniMap.fitBounds(ln.getBounds(),{padding:[14,14]});}else{miniMap.setView(t._geocoded,17);L.circleMarker(t._geocoded,{radius:8,color:c,fillColor:c,fillOpacity:0.9,weight:2}).addTo(miniMap);}}catch(e){console.error('Mini map:',e);}},120);
 }
-function openFullMap(id){closeModal('ov-detail');nav('map');setTimeout(()=>{initMap();const t=tickets.find(x=>x.id===id);if(!t)return;if(t.fieldPath&&t.fieldPath.length>=2){map.fitBounds(L.latLngBounds(t.fieldPath),{padding:[60,60],maxZoom:19});}else if(t._geocoded){map.setView(t._geocoded,18);}hiT(id);},200);}
+function openFullMap(id){closeModal('ov-detail');if(isSharedView){if(shMap){const t=tickets.find(x=>x.id===id);if(t?.fieldPath?.length>=2)shMap.fitBounds(L.latLngBounds(t.fieldPath),{padding:[60,60],maxZoom:19});else if(t?._geocoded)shMap.setView(t._geocoded,18);}return;}nav('map');setTimeout(()=>{initMap();const t=tickets.find(x=>x.id===id);if(!t)return;if(t.fieldPath&&t.fieldPath.length>=2){map.fitBounds(L.latLngBounds(t.fieldPath),{padding:[60,60],maxZoom:19});}else if(t._geocoded){map.setView(t._geocoded,18);}hiT(id);},200);}
 
 async function renderUtils(t){
   const el=document.getElementById('util-list');const sm=document.getElementById('util-summary');if(!el)return;
@@ -832,7 +975,7 @@ async function renderUtils(t){
   try{
     const r=await fetch(`${SUPABASE_URL}/rest/v1/ticket_811_responses?ticket_num=eq.${t.ticket}&select=utility_name,status,response_text,responded_at&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
     const data=await r.json();
-    if(!data||!data.length){el.innerHTML='<div style="color:var(--muted);font-size:12px">Sem dados de utilities — rode o sync 811</div>';if(sm)sm.textContent='';return;}
+    if(!data||!data.length){el.innerHTML='<div style="color:var(--muted);font-size:12px">Sem dados de utilities</div>';if(sm)sm.textContent='';return;}
     const pending=data.filter(u=>u.status==='Pending');const cleared=data.filter(u=>u.status==='Clear'||u.status==='Private');const marked=data.filter(u=>u.status==='Marked');
     if(sm){const parts=[];if(pending.length)parts.push(`<span style="color:var(--red)">${pending.length} pendente${pending.length>1?'s':''}</span>`);if(marked.length)parts.push(`<span style="color:var(--amber)">${marked.length} marcada${marked.length>1?'s':''}</span>`);if(cleared.length)parts.push(`<span style="color:var(--green)">${cleared.length} clear</span>`);sm.innerHTML=parts.join(' · ');}
     const badgeClass={Pending:'ub-pending',Clear:'ub-clear',Marked:'ub-marked',Private:'ub-private',Unmarked:'ub-clear'};
@@ -848,7 +991,7 @@ function renderTable(){
   let f=tickets.filter(t=>{if(st&&t.status!==st)return false;if(pr&&t.projectId!==pr)return false;if(cl&&t.client!==cl)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;return true;});
   f.sort((a,b)=>{if(sortCol==='footage')return sortAsc?(a.footage||0)-(b.footage||0):(b.footage||0)-(a.footage||0);return sortAsc?String(a[sortCol]||'').localeCompare(String(b[sortCol]||'')):String(b[sortCol]||'').localeCompare(String(a[sortCol]||''));});
   document.getElementById('tbl-count').textContent=`${f.length} tickets`;
-  document.getElementById('tbl-body').innerHTML=f.map(t=>{const proj=projects.find(p=>p.id===t.projectId);return`<tr onclick="openTicketDetail(${t.id})"><td style="font-family:var(--mono);font-weight:500">${t.ticket}</td><td style="color:var(--text2);font-size:12px">${t.client}</td><td style="color:var(--muted);font-size:12px">${t.prime||'—'}</td><td>${t.location}, ${t.state}</td><td class="tc-${(t.status||'').toLowerCase()}">${t.status}</td><td style="font-family:var(--mono)">${t.footage} ft</td><td style="font-family:var(--mono);font-size:12px">${t.expire||'—'}</td><td style="color:var(--muted)">${t.tipo||'—'}</td><td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td></tr>`;}).join('');
+  document.getElementById('tbl-body').innerHTML=f.map(t=>`<tr onclick="openTicketDetail(${t.id})"><td style="font-family:var(--mono);font-weight:500">${t.ticket}</td><td style="color:var(--text2);font-size:12px">${t.client}</td><td style="color:var(--muted);font-size:12px">${t.prime||'—'}</td><td>${t.location}, ${t.state}</td><td class="tc-${(t.status||'').toLowerCase()}">${t.status}</td><td style="font-family:var(--mono)">${t.footage} ft</td><td style="font-family:var(--mono);font-size:12px">${t.expire||'—'}</td><td style="color:var(--muted)">${t.tipo||'—'}</td><td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td></tr>`).join('');
 }
 function sortBy(col){sortAsc=sortCol===col?!sortAsc:true;sortCol=col;renderTable();}
 function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
@@ -863,16 +1006,14 @@ function renderDash(){
   const soon=tickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=10&&t.status!=='Clear'&&t.status!=='Closed';});
   const projStats=projects.filter(p=>p.status!=='Completed').map(p=>{const ts=tickets.filter(t=>t.projectId===p.id);const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);const damageFtP=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const totalFt=p.totalFeet||ticketFt||1;const locs=[...new Set(ts.map(t=>t.location).filter(Boolean))].join(', ')||'';return{name:p.name,id:p.id,count:ts.length,clearFtP,openFtP,concluidoFt,damageFt:damageFtP,ticketFt,totalFt,pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0,pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0,pctDamage:totalFt>0?Math.round(damageFtP/totalFt*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||''};}).sort((a,b)=>b.count-a.count);
   const recent=[...tickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
-  document.getElementById('dash-content').innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto no mapa</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  <div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div>${projStats.length?projStats.map(p=>`<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">${p.name}</span>${p.locs?`<span style="font-size:11px;color:var(--accent);font-weight:500">📍 ${p.locs}${p.state?' · '+p.state:''}</span>`:''}</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft em tickets${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Em aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sem projetos</div>'}</div></div>
-  ${projects.filter(p=>p.status==='Completed').length?`<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between"><div style="font-size:13px;color:var(--green);font-weight:600">✅ ${projects.filter(p=>p.status==='Completed').length} projeto(s) concluído(s)</div><button onclick="nav('proj')" class="btn btn-sm" style="background:var(--green);color:white;border-color:var(--green)">Ver em Projetos</button></div>`:''}
-  <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];const c=scol(t.status);return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática a cada hora</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div>📊 <strong>Excel:</strong> Exportado às 18h</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar: envie o link desta página.<br>Todos veem os mesmos dados em tempo real.</div></div></div></div>`;
+  const el=document.getElementById('dash-content');if(!el)return;
+  el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
+  <div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div>${projStats.length?projStats.map(p=>`<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px"><span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">${p.name}</span>${p.locs?`<span style="font-size:11px;color:var(--accent);font-weight:500">📍 ${p.locs}${p.state?' · '+p.state:''}</span>`:''}</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sem projetos</div>'}</div></div>
+  <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar um projeto: use 📤 Compartilhar na tela de Projetos.</div></div></div></div>`;
 }
 
-function toggleProjDetail(pid){const el=document.getElementById('pd-'+pid);const btn=document.getElementById('pb-'+pid);if(!el)return;const isOpen=el.classList.toggle('open');btn.classList.toggle('open',isOpen);btn.innerHTML=isOpen?'▲ Recolher':'▼ Ver detalhes';}
-
 function renderProjects(){
-  const g=document.getElementById('proj-grid');
+  const g=document.getElementById('proj-grid');if(!g)return;
   if(!projects.length){g.innerHTML='<div style="color:var(--muted);font-size:13px">Nenhum projeto.</div>';return}
   const active=projects.filter(p=>p.status!=='Completed');
   const completed=projects.filter(p=>p.status==='Completed');
@@ -889,11 +1030,9 @@ function renderProjects(){
     const pctOpen=projTotal>0?Math.round(openFtP/projTotal*100):0;
     const pctDamage=projTotal>0?Math.round(damageFt/projTotal*100):0;
     const locations=[...new Set(ts.map(t=>t.location).filter(Boolean))].join(', ')||p.state;
-    const byLoc={};ts.forEach(t=>{const l=t.location||'—';if(!byLoc[l])byLoc[l]={tickets:[]};byLoc[l].tickets.push(t);});
-    const locRows=Object.entries(byLoc).map(([loc,d])=>`<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;display:flex;justify-content:space-between"><span>📍 ${loc}</span><span style="font-weight:400;color:var(--muted);font-family:var(--mono)">${d.tickets.reduce((s,t)=>s+(t.footage||0),0).toLocaleString()} ft · ${d.tickets.length}</span></div>${d.tickets.map(t=>`<div class="ticket-row-proj" onclick="openTicketDetail(${t.id})"><span style="font-family:var(--mono);color:var(--text)">${t.ticket}</span><span style="color:var(--muted);font-size:11px;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.tipo||'—'} · ${t.address||t.location}</span><span style="display:flex;align-items:center;gap:6px;flex-shrink:0"><span style="font-family:var(--mono);font-size:11px;color:var(--muted)">${t.footage} ft</span><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></span></div>`).join('')}</div>`).join('');
-    return `<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${p.name}</div><div style="font-size:11px;color:var(--accent);font-weight:500">📍 ${locations}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${p.status}</span></div><div class="pcard-meta">${p.client} · ${p.state}</div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:10px"><div style="padding:7px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--mono)">${projTotal.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);margin-top:1px">Total ft${p.totalFeet?'*':''}</div></div><div style="padding:7px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--green)">${clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);margin-top:1px">Clear ${pctClear}%</div></div><div style="padding:7px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--red)">${openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);margin-top:1px">Em aberto ${pctOpen}%</div></div><div style="padding:7px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--amber)">${damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);margin-top:1px">Damage ${pctDamage}%</div></div><div style="padding:7px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text)">${concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);margin-top:1px">Concluído ${pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend" style="margin-bottom:10px"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Em aberto ${pctOpen}%</span>${damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${pctConcluido}%</span></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${open}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clear}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damage}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closed}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent-bg);color:var(--accent);border-color:#c3d7ff">📤 Compartilhar</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}<button class="pcard-expand" id="pb-${p.id}" onclick="toggleProjDetail('${p.id}')">▼ Ver detalhes</button></div><div class="pcard-detail" id="pd-${p.id}"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Tickets por localização</div><div style="max-height:340px;overflow-y:auto">${locRows}</div></div></div>`;
+    return `<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${p.name}</div><div style="font-size:11px;color:var(--accent);font-weight:500">📍 ${locations}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${p.status}</span></div><div class="pcard-meta">${p.client} · ${p.state}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${open}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clear}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damage}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closed}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
-  g.innerHTML=(active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px;padding:20px">Nenhum projeto ativo.</div>')+(completed.length?`<div style="grid-column:1/-1;margin-top:24px;padding-top:20px;border-top:2px solid var(--border)"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px;display:flex;align-items:center;gap:8px"><span>✅ Projetos Concluídos</span><span style="font-size:11px;background:var(--bg);border:1px solid var(--border);padding:2px 8px;border-radius:20px;font-weight:400">${completed.length}</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">${completed.map(p=>{const ts=tickets.filter(t=>t.projectId===p.id);const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);const closed=ts.filter(t=>t.status==='Closed').length;return`<div class="pcard" style="opacity:.8;border-color:var(--border)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div class="pcard-name" style="color:var(--text2)">${p.name}</div><span class="status-pill pill-done">Completed</span></div><div class="pcard-meta">${p.client} · ${p.state}</div><div style="display:flex;gap:16px;font-size:13px;color:var(--muted);margin-top:8px;font-family:var(--mono)"><span>${ts.length} tickets</span><span>${totalFt.toLocaleString()} ft</span><span style="color:var(--green)">${closed} closed</span></div><div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent-bg);color:var(--accent);border-color:#c3d7ff">📤 Compartilhar</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;}).join('')}</div></div>`:'');
+  g.innerHTML=(active.length?active.map(renderCard).join(''):'')+(completed.length?`<div style="grid-column:1/-1;margin-top:24px;padding-top:20px;border-top:2px solid var(--border)"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">✅ Projetos Concluídos (${completed.length})</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">${completed.map(renderCard).join('')}</div></div>`:'');
 }
 
 function openProjectMap(pid){nav('map');document.getElementById('proj-filter').value=pid;onProjFilter();}
@@ -970,45 +1109,44 @@ function exportExcel(){
 }
 
 function syncProjectSelects(){
-  const mkOpts=(label)=>'<option value="">'+label+'</option>'+projects.map(p=>{const ts=tickets.filter(t=>t.projectId===p.id);const locs=[...new Set(ts.map(t=>t.location).filter(Boolean))].join(', ')||'';const state=p.state||'';const lbl=`${p.name}${locs?' — '+locs:''}${state?' ('+state+')':''}`;return`<option value="${p.id}">${lbl}</option>`;}).join('');
-  document.getElementById('proj-filter').innerHTML=mkOpts('Todos os projetos');
-  document.getElementById('tbl-proj').innerHTML=mkOpts('Todos projetos');
-  document.getElementById('tm-proj').innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  const mkOpts=(label)=>'<option value="">'+label+'</option>'+projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  const pf=document.getElementById('proj-filter');if(pf)pf.innerHTML=mkOpts('Todos os projetos');
+  const tp=document.getElementById('tbl-proj');if(tp)tp.innerHTML=mkOpts('Todos projetos');
+  const tm=document.getElementById('tm-proj');if(tm)tm.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
 }
-function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{document.getElementById(id).innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
-function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();document.getElementById('floc').innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
+function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
+function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
 function syncAll(){syncProjectSelects();syncClients();syncLocations();renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
 
-function nav(page){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;
 function toast(msg,type='success'){const bg={success:'#16803d',danger:'#dc2626',warn:'#b45309',info:'#1a6cf0'};const dot={success:'#86efac',danger:'#fca5a5',warn:'#fde68a',info:'#93c5fd'};document.getElementById('toast').style.background=bg[type]||bg.success;document.getElementById('tdot').style.background=dot[type]||dot.success;document.getElementById('tmsg').textContent=msg;document.getElementById('toast').classList.add('show');clearTimeout(_t2);_t2=setTimeout(()=>document.getElementById('toast').classList.remove('show'),4000);}
 
-// Mobile sidebar toggle
 function toggleSidebar(){const sb=document.getElementById('map-sidebar');const ov=document.getElementById('sb-overlay');sb.classList.toggle('mob-open');ov.classList.toggle('open');}
 
-// Project URL parameter support (?p=projectId)
-function checkProjectUrl(){const params=new URLSearchParams(window.location.search);const pid=params.get('p');if(pid){const p=projects.find(x=>x.id===pid||x.name===pid);if(p){nav('proj');setTimeout(()=>{const el=document.getElementById('pd-'+p.id);if(el&&!el.classList.contains('open'))toggleProjDetail(p.id);const card=el?.closest('.pcard');if(card)card.scrollIntoView({behavior:'smooth',block:'start'});},300);return true;}const pByName=projects.find(x=>x.name.toLowerCase().includes(pid.toLowerCase()));if(pByName){nav('proj');setTimeout(()=>{const el=document.getElementById('pd-'+pByName.id);if(el&&!el.classList.contains('open'))toggleProjDetail(pByName.id);const card=el?.closest('.pcard');if(card)card.scrollIntoView({behavior:'smooth',block:'start'});},300);return true;}}  const pg=params.get('pg');if(pg){nav(pg);const pf=params.get('pf');if(pg==='map'&&pf){setTimeout(()=>{document.getElementById('proj-filter').value=pf;onProjFilter();},500);}return true;}return false;}
+function shareProject(pid){const p=projects.find(x=>x.id===pid);if(!p)return;const url=window.location.origin+window.location.pathname+'?p='+encodeURIComponent(p.id);if(navigator.clipboard){navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Quem abrir verá só este projeto.','success')).catch(()=>{prompt('Copie o link:',url);});}else{prompt('Copie o link:',url);}}
 
-// Share project link
-function shareProject(pid){const p=projects.find(x=>x.id===pid);if(!p)return;const url=window.location.origin+window.location.pathname+'?p='+encodeURIComponent(p.id);if(navigator.clipboard){navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Compartilhe com o time.','success')).catch(()=>{prompt('Copie o link:',url);});}else{prompt('Copie o link:',url);}}
-
-// Share project map link
-function shareProjectMap(pid){const url=window.location.origin+window.location.pathname+'?pg=map&pf='+encodeURIComponent(pid);if(navigator.clipboard){navigator.clipboard.writeText(url).then(()=>toast('Link do mapa copiado!','success')).catch(()=>{prompt('Copie o link:',url);});}else{prompt('Copie o link:',url);}}
+function checkProjectUrl(){
+  const params=new URLSearchParams(window.location.search);
+  const pid=params.get('p');
+  if(pid){
+    let p=projects.find(x=>x.id===pid);
+    if(!p)p=projects.find(x=>x.name===pid);
+    if(!p)p=projects.find(x=>x.name.toLowerCase().includes(pid.toLowerCase()));
+    if(p){enterSharedView(p.id);return true;}
+  }
+  return false;
+}
 
 window.addEventListener('load',async()=>{
   document.querySelector('#loading-screen div:last-child').textContent='Conectando ao Supabase...';
   const ok=await initSupabase();
   document.getElementById('loading-screen').style.display='none';
-  // If ?p= param, skip login and show standalone project
-  const params=new URLSearchParams(window.location.search);
-  if(params.get('p')&&ok){
-    const pid=params.get('p');
-    const p=projects.find(x=>x.id===pid||x.name===pid)||projects.find(x=>x.name.toLowerCase().includes(pid.toLowerCase()));
-    if(p){renderStandaloneProject(p);return;}
-  }
   if(!ok){document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
+  // Check if shared project link
+  if(checkProjectUrl())return;
   document.getElementById('login-screen').style.display='flex';
 });
 </script>

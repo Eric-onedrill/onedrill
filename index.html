@@ -353,7 +353,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 <body>
 
 <div id="loading-screen">
-  <div style="width:70px;height:70px"><img src="logo.svg" alt="OneDrill" style="width:100%;height:100%"></div>
+  <div style="width:70px;height:70px"><img src="logo.png" alt="OneDrill" style="width:100%;height:100%"></div>
   <div class="loading-logo">ONEDRILL</div>
   <div class="loading-bar"><div class="loading-fill"></div></div>
   <div style="font-size:11px;color:rgba(184,146,47,.4);font-family:var(--mono);margin-top:8px">Conectando ao banco de dados...</div>
@@ -361,7 +361,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 
 <div id="login-screen" style="display:none">
   <div class="login-brand">
-    <div class="login-emblem"><img src="logo.svg" alt="OneDrill"></div>
+    <div class="login-emblem"><img src="logo.png" alt="OneDrill"></div>
     <div class="login-brand-name">ONEDRILL</div>
   </div>
   <div class="login-box">
@@ -383,7 +383,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 <!-- ===== SHARED PROJECT VIEW (standalone) ===== -->
 <div class="page" id="pg-shared">
   <div class="shared-topbar">
-    <div class="shared-logo"><div class="logo-emblem"><img src="logo.svg" alt=""></div>ONEDRILL</div>
+    <div class="shared-logo"><div class="logo-emblem"><img src="logo.png" alt=""></div>ONEDRILL</div>
     <div class="shared-proj-name" id="shared-proj-name"></div>
     <button class="btn btn-sm" id="shared-enter-btn" onclick="exitSharedView()">Abrir app completo →</button>
   </div>
@@ -416,7 +416,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 
 <!-- ===== MAIN APP ===== -->
 <div class="topbar" id="topbar" style="display:none">
-  <div class="logo"><div class="logo-emblem"><img src="logo.svg" alt=""></div>ONEDRILL</div>
+  <div class="logo"><div class="logo-emblem"><img src="logo.png" alt=""></div>ONEDRILL</div>
   <div class="navtabs">
     <button class="ntab active" onclick="nav('dash')">Dashboard</button>
     <button class="ntab" onclick="nav('proj')">Projetos</button>
@@ -717,46 +717,58 @@ let utilCache={},utilCacheLoaded=false;
 
 async function loadUtilCache(){
   try{
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/ticket_811_responses?select=ticket_num,utility_name,status,response_text&order=ticket_num`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/ticket_811_responses?select=ticket_num,utility_name,status,response_text&order=ticket_num&limit=10000`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Range':'0-9999'}});
     const data=await r.json();
     utilCache={};
     if(data&&data.length){
       for(const u of data){
-        const key=String(u.ticket_num).trim();
+        const key=String(u.ticket_num||'').trim();
+        if(!key)continue;
         if(!utilCache[key])utilCache[key]=[];
         utilCache[key].push(u);
       }
     }
     utilCacheLoaded=true;
-    log.info&&console.log(`[UtilCache] ${Object.keys(utilCache).length} tickets, ${data.length} respostas`);
+    console.log(`[UtilCache] ${data.length} respostas, ${Object.keys(utilCache).length} tickets`);
+    // Debug: mostrar match entre tickets e cache
+    let matched=0,unmatched=0;
+    for(const t of tickets){
+      const key=String(t.ticket||'').trim();
+      if(utilCache[key])matched++;else unmatched++;
+    }
+    console.log(`[UtilCache] Match: ${matched} tickets com dados 811, ${unmatched} sem dados`);
     syncUtilFilter();
   }catch(e){console.error('Util cache error:',e);}
 }
 
 function getTicketPendingUtils(ticketNum){
-  const key=String(ticketNum).trim();
+  const key=String(ticketNum||'').trim();
   const utils=utilCache[key]||[];
   return utils.filter(u=>u.status==='Pending');
 }
-function getTicketUtils(ticketNum){const key=String(ticketNum).trim();return utilCache[key]||[];}
+function getTicketUtils(ticketNum){const key=String(ticketNum||'').trim();return utilCache[key]||[];}
 
 function syncUtilFilter(){
-  const allUtils=new Set();
-  for(const tnum of Object.keys(utilCache)){
-    const t=tickets.find(x=>String(x.ticket).trim()===tnum);
-    if(!t||t.status==='Closed'||t.status==='Cancel')continue;
-    for(const u of utilCache[tnum]){
-      if(u.status==='Pending')allUtils.add(u.utility_name);
+  if(!utilCacheLoaded)return;
+  const allUtils={};
+  const openTicketNums=new Set(tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket||'').trim()));
+  for(const[tnum,resps]of Object.entries(utilCache)){
+    if(!openTicketNums.has(tnum))continue;
+    for(const u of resps){
+      if(u.status==='Pending'){
+        if(!allUtils[u.utility_name])allUtils[u.utility_name]=0;
+        allUtils[u.utility_name]++;
+      }
     }
   }
-  const sorted=[...allUtils].sort();
+  const sorted=Object.entries(allUtils).sort((a,b)=>b[1]-a[1]);
   const el=document.getElementById('tbl-util');
   if(el){
     const prev=el.value;
-    el.innerHTML='<option value="">Utilities pendentes</option><option value="__any_pending__">⚠ Qualquer pendente</option><option value="__all_clear__">✅ Todas clear</option>'+sorted.map(u=>`<option value="${u}">🔴 ${u}</option>`).join('');
+    el.innerHTML='<option value="">Todas utilities</option><option value="__any_pending__">⚠ Qualquer pendente</option><option value="__all_clear__">✅ Todas clear</option>'+sorted.map(([name,count])=>`<option value="${name}">🔴 ${name} (${count})</option>`).join('');
     if(prev)el.value=prev;
   }
-  console.log(`[UtilFilter] ${sorted.length} utilities pendentes: ${sorted.join(', ')}`);
+  console.log(`[UtilFilter] ${sorted.length} utilities pendentes:`,sorted.map(s=>s[0]+':'+s[1]));
 }
 
 async function initSupabase(){
@@ -1207,7 +1219,7 @@ function syncProjectSelects(){
 }
 function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
 function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
-function syncAll(){syncProjectSelects();syncClients();syncLocations();renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
+function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded)syncUtilFilter();renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
 
 function renderUtilSummaryHtml(){
   if(!utilCacheLoaded)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811 — Pendentes</div><div style="color:var(--muted);font-size:12px">Carregando dados de utilities...</div></div>';

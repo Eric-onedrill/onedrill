@@ -54,8 +54,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .login-err{font-size:11px;color:#c42b20;margin-top:6px;display:none}
 .login-footer{position:absolute;bottom:20px;font-size:11px;color:rgba(255,255,255,.1);font-family:var(--mono);letter-spacing:.05em}
 .topbar{display:flex;align-items:center;height:52px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--white);padding:0 20px;gap:0;z-index:100}
-.logo{font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.01em;color:var(--text);margin-right:28px;white-space:nowrap;display:flex;align-items:center;gap:8px}
-.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.logo{font-family:var(--font);font-weight:800;font-size:14px;letter-spacing:.04em;color:var(--text);margin-right:28px;white-space:nowrap;display:flex;align-items:center;gap:7px}
+.logo-emblem{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#c42b20,#8b1a12);border:2px solid #b8922f;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.logo-emblem span{font-size:12px;font-weight:900;color:#fff;line-height:1}
 .navtabs{display:flex;gap:2px;flex:1}
 .ntab{font-family:var(--font);font-size:13px;font-weight:500;padding:6px 12px;border-radius:6px;border:none;background:transparent;color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
 .ntab:hover{color:var(--text);background:var(--bg)}
@@ -258,7 +259,8 @@ tbody td{padding:10px 13px;color:var(--text)}
 /* ── SHARED PROJECT VIEW ── */
 #pg-shared{flex-direction:column;overflow:hidden}
 .shared-topbar{display:flex;align-items:center;height:52px;border-bottom:1px solid var(--border);background:var(--white);padding:0 16px;gap:12px;flex-shrink:0}
-.shared-logo{font-family:var(--mono);font-weight:500;font-size:13px;color:var(--text);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.shared-logo{font-family:var(--font);font-weight:800;font-size:13px;color:var(--text);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.shared-logo .logo-emblem{width:20px;height:20px}
 .shared-proj-name{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .shared-body{display:flex;flex:1;min-height:0;overflow:hidden}
 .shared-map{flex:1;position:relative}
@@ -283,7 +285,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 
 @media(max-width:768px){
   .topbar{padding:0 10px;height:48px;gap:6px}
-  .logo{margin-right:8px;font-size:12px;flex-shrink:0}
+  .logo{margin-right:8px;font-size:12px;flex-shrink:0;letter-spacing:.02em}
   .navtabs{overflow-x:auto;flex:1;-webkit-overflow-scrolling:touch;gap:0;margin:0 4px}
   .navtabs::-webkit-scrollbar{display:none}
   .ntab{font-size:11px;padding:5px 8px;flex-shrink:0}
@@ -381,7 +383,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 <!-- ===== SHARED PROJECT VIEW (standalone) ===== -->
 <div class="page" id="pg-shared">
   <div class="shared-topbar">
-    <div class="shared-logo"><div class="logo-dot"></div>OneDrill</div>
+    <div class="shared-logo"><div class="logo-emblem"><span>1</span></div>ONEDRILL</div>
     <div class="shared-proj-name" id="shared-proj-name"></div>
     <button class="btn btn-sm" id="shared-enter-btn" onclick="exitSharedView()">Abrir app completo →</button>
   </div>
@@ -414,7 +416,7 @@ tbody td{padding:10px 13px;color:var(--text)}
 
 <!-- ===== MAIN APP ===== -->
 <div class="topbar" id="topbar" style="display:none">
-  <div class="logo"><div class="logo-dot"></div>OneDrill</div>
+  <div class="logo"><div class="logo-emblem"><span>1</span></div>ONEDRILL</div>
   <div class="navtabs">
     <button class="ntab active" onclick="nav('dash')">Dashboard</button>
     <button class="ntab" onclick="nav('proj')">Projetos</button>
@@ -515,6 +517,7 @@ tbody td{padding:10px 13px;color:var(--text)}
     </select>
     <select class="fi" style="max-width:180px" id="tbl-proj" onchange="renderTable()"><option value="">Todos projetos</option></select>
     <select class="fi" style="max-width:150px" id="tbl-cli" onchange="renderTable()"><option value="">Todos clientes</option></select>
+    <select class="fi" style="max-width:200px" id="tbl-util" onchange="renderTable()"><option value="">Todas utilities</option></select>
     <span style="font-size:12px;color:var(--muted);margin-left:4px;font-family:var(--mono)" id="tbl-count"></span>
   </div>
   <div class="tbl-wrap"><div class="tbl-inner">
@@ -710,6 +713,43 @@ let map,satL,strL,hybL,mkrs=[],lines=[],labels=[],drawn=[];
 let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
 let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let _tt;
+let utilCache={},utilCacheLoaded=false;
+
+async function loadUtilCache(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/ticket_811_responses?select=ticket_num,utility_name,status,response_text&order=ticket_num`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+    const data=await r.json();
+    utilCache={};
+    if(data&&data.length){
+      for(const u of data){
+        if(!utilCache[u.ticket_num])utilCache[u.ticket_num]=[];
+        utilCache[u.ticket_num].push(u);
+      }
+    }
+    utilCacheLoaded=true;
+    syncUtilFilter();
+  }catch(e){console.error('Util cache error:',e);}
+}
+
+function getTicketPendingUtils(ticketNum){
+  const utils=utilCache[ticketNum]||[];
+  return utils.filter(u=>u.status==='Pending');
+}
+function getTicketUtils(ticketNum){return utilCache[ticketNum]||[];}
+
+function syncUtilFilter(){
+  const allUtils=new Set();
+  for(const tnum of Object.keys(utilCache)){
+    const t=tickets.find(x=>x.ticket===tnum);
+    if(!t||t.status==='Closed'||t.status==='Cancel')continue;
+    for(const u of utilCache[tnum]){
+      if(u.status==='Pending')allUtils.add(u.utility_name);
+    }
+  }
+  const sorted=[...allUtils].sort();
+  const el=document.getElementById('tbl-util');
+  if(el)el.innerHTML='<option value="">Utilities pendentes</option><option value="__any_pending__">⚠ Qualquer pendente</option><option value="__all_clear__">✅ Todas clear</option>'+sorted.map(u=>`<option value="${u}">🔴 ${u}</option>`).join('');
+}
 
 async function initSupabase(){
   try{
@@ -758,6 +798,7 @@ function enterApp(){
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','det-attach-btn'].forEach(id=>document.getElementById(id).style.display='');document.getElementById('note-section').style.display='';}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','det-attach-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
+  loadUtilCache().then(()=>{renderDash();renderTable();});
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -1019,11 +1060,18 @@ async function renderUtils(t){
 }
 
 function renderTable(){
-  const sr=(document.getElementById('tbl-srch').value||'').toLowerCase();const st=document.getElementById('tbl-stat').value;const pr=document.getElementById('tbl-proj').value;const cl=document.getElementById('tbl-cli').value;
-  let f=tickets.filter(t=>{if(st&&t.status!==st)return false;if(pr&&t.projectId!==pr)return false;if(cl&&t.client!==cl)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;return true;});
+  const sr=(document.getElementById('tbl-srch').value||'').toLowerCase();const st=document.getElementById('tbl-stat').value;const pr=document.getElementById('tbl-proj').value;const cl=document.getElementById('tbl-cli').value;const ut=document.getElementById('tbl-util')?.value||'';
+  let f=tickets.filter(t=>{if(st&&t.status!==st)return false;if(pr&&t.projectId!==pr)return false;if(cl&&t.client!==cl)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;
+    if(ut){
+      const pends=getTicketPendingUtils(t.ticket);
+      if(ut==='__any_pending__'){if(!pends.length)return false;}
+      else if(ut==='__all_clear__'){if(pends.length>0)return false;const all=getTicketUtils(t.ticket);if(!all.length)return false;}
+      else{if(!pends.some(p=>p.utility_name===ut))return false;}
+    }
+    return true;});
   f.sort((a,b)=>{if(sortCol==='footage')return sortAsc?(a.footage||0)-(b.footage||0):(b.footage||0)-(a.footage||0);return sortAsc?String(a[sortCol]||'').localeCompare(String(b[sortCol]||'')):String(b[sortCol]||'').localeCompare(String(a[sortCol]||''));});
   document.getElementById('tbl-count').textContent=`${f.length} tickets`;
-  document.getElementById('tbl-body').innerHTML=f.map(t=>`<tr onclick="openTicketDetail(${t.id})"><td style="font-family:var(--mono);font-weight:500">${t.ticket}</td><td style="color:var(--text2);font-size:12px">${t.client}</td><td style="color:var(--muted);font-size:12px">${t.prime||'—'}</td><td>${t.location}, ${t.state}</td><td class="tc-${(t.status||'').toLowerCase()}">${t.status}</td><td style="font-family:var(--mono)">${t.footage} ft</td><td style="font-family:var(--mono);font-size:12px">${t.expire||'—'}</td><td style="color:var(--muted)">${t.tipo||'—'}</td><td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td></tr>`).join('');
+  document.getElementById('tbl-body').innerHTML=f.map(t=>{const pends=getTicketPendingUtils(t.ticket);const pendNames=pends.map(p=>p.utility_name);const pendChips=pendNames.length?`<div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:3px">${pendNames.slice(0,3).map(n=>`<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">${n.length>20?n.substring(0,20)+'…':n}</span>`).join('')}${pendNames.length>3?`<span style="font-size:9px;color:var(--muted)">+${pendNames.length-3}</span>`:''}</div>`:'';return`<tr onclick="openTicketDetail(${t.id})"><td style="font-family:var(--mono);font-weight:500">${t.ticket}</td><td style="color:var(--text2);font-size:12px">${t.client}</td><td style="color:var(--muted);font-size:12px">${t.prime||'—'}</td><td>${t.location}, ${t.state}</td><td class="tc-${(t.status||'').toLowerCase()}">${t.status}${pendChips}</td><td style="font-family:var(--mono)">${t.footage} ft</td><td style="font-family:var(--mono);font-size:12px">${t.expire||'—'}</td><td style="color:var(--muted)">${t.tipo||'—'}</td><td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td></tr>`;}).join('');
 }
 function sortBy(col){sortAsc=sortCol===col?!sortAsc:true;sortCol=col;renderTable();}
 function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
@@ -1150,6 +1198,35 @@ function syncProjectSelects(){
 function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
 function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
 function syncAll(){syncProjectSelects();syncClients();syncLocations();renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
+
+function renderUtilSummaryHtml(){
+  if(!utilCacheLoaded)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811 — Pendentes</div><div style="color:var(--muted);font-size:12px">Carregando dados de utilities...</div></div>';
+  const utilCount={};const utilTickets={};
+  const openTickets=tickets.filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
+  for(const t of openTickets){
+    const pends=getTicketPendingUtils(t.ticket);
+    for(const p of pends){
+      if(!utilCount[p.utility_name])utilCount[p.utility_name]=0;
+      if(!utilTickets[p.utility_name])utilTickets[p.utility_name]=[];
+      utilCount[p.utility_name]++;
+      utilTickets[p.utility_name].push(t);
+    }
+  }
+  const sorted=Object.entries(utilCount).sort((a,b)=>b[1]-a[1]);
+  const totalPending=sorted.reduce((s,e)=>s+e[1],0);
+  const ticketsWithPending=new Set();
+  for(const t of openTickets){if(getTicketPendingUtils(t.ticket).length>0)ticketsWithPending.add(t.ticket);}
+  if(!sorted.length)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811</div><div style="color:var(--green);font-size:13px;font-weight:600">✅ Nenhuma utility pendente nos tickets ativos!</div></div>';
+  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;font-size:12px;font-family:var(--mono)"><span style="color:var(--red);font-weight:600">${totalPending} pendências</span><span style="color:var(--muted)">${ticketsWithPending.size} tickets afetados</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px;cursor:pointer" onclick="filterByUtil('${name.replace(/'/g,"\\'")}')"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text)">${name}</span><span style="font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono);background:var(--red-bg);padding:2px 8px;border-radius:10px">${count}</span></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div></div>`;}).join('')}</div></div></div>`;
+}
+
+function filterByUtil(utilName){
+  nav('tickets');
+  setTimeout(()=>{
+    const sel=document.getElementById('tbl-util');
+    if(sel){sel.value=utilName;renderTable();}
+  },100);
+}
 
 function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
 function openModal(id){document.getElementById(id).classList.add('open');}

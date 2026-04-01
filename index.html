@@ -714,6 +714,7 @@ let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
 let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let _tt;
 let utilCache={},utilCacheLoaded=false;
+let dashStateVal='';
 
 async function loadUtilCache(){
   try{
@@ -1007,8 +1008,34 @@ function mapFiltered(){const pf=document.getElementById('proj-filter')?.value||'
 
 function toggleMF(key){mf[key]=!mf[key];const btn=document.getElementById('ft-'+key);const oc={open:'on-open',damage:'on-damage',clear:'on-clear',closed:'on-closed',cancel:'on-cancel'};btn.className='ftog'+(mf[key]?' '+oc[key]:'');redrawAll();}
 function redrawAll(){renderList();renderMap();}
-function onProjFilter(){const pf=document.getElementById('proj-filter').value;if(pf){const p=projects.find(x=>x.id===pf);if(p?.centerCoords&&map)map.setView(p.centerCoords,16);}redrawAll();}
-function fitAll(){if(!map)return;const wc=tickets.filter(t=>t.fieldPath&&t.fieldPath.length>=2);if(wc.length)map.fitBounds(L.latLngBounds(wc.flatMap(t=>t.fieldPath)),{padding:[40,40]});else map.setView([28.4,-81.4],10);}
+function onProjFilter(){
+  const pf=document.getElementById('proj-filter').value;
+  if(pf&&map){
+    const p=projects.find(x=>x.id===pf);
+    if(p?.centerCoords){
+      map.setView(p.centerCoords,16);
+    }else{
+      // Calcula centro a partir dos tickets do projeto
+      const pts=tickets.filter(t=>t.projectId===pf);
+      const allCoords=[];
+      for(const t of pts){
+        if(t.fieldPath&&t.fieldPath.length>=2){allCoords.push(...t.fieldPath);}
+        else if(t._geocoded){allCoords.push(t._geocoded);}
+      }
+      if(allCoords.length){
+        map.fitBounds(L.latLngBounds(allCoords),{padding:[60,60],maxZoom:17});
+      }else{
+        // Tenta geocodificar pelo nome da localidade dos tickets
+        const locs=pts.map(t=>t.location).filter(Boolean);
+        const loc=locs[0]||'';
+        const cc=cityCoords(loc);
+        if(cc)map.setView(cc,14);
+      }
+    }
+  }
+  redrawAll();
+}
+function fitAll(){if(!map)return;const filtered=mapFiltered();const allCoords=[];for(const t of filtered){if(t.fieldPath&&t.fieldPath.length>=2)allCoords.push(...t.fieldPath);else if(t._geocoded)allCoords.push(t._geocoded);}if(allCoords.length)map.fitBounds(L.latLngBounds(allCoords),{padding:[40,40]});else map.setView([28.4,-81.4],10);}
 
 function renderList(){const f=mapFiltered();document.getElementById('tcount').textContent=`${f.length} ticket${f.length!==1?'s':''}`;document.getElementById('tlist').innerHTML=f.length?f.map(t=>`<div class="tcard s-${(t.status||'').toLowerCase()}" data-id="${t.id}" onclick="focusT(${t.id})"><div class="tcard-top"><span class="tcard-num">${t.ticket}</span><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div><div class="tcard-client">${t.client}${t.prime?' · '+t.prime:''}</div><div class="tcard-meta"><span>${t.location}, ${t.state}</span><span>${t.footage} ft</span>${t.tipo?`<span>${t.tipo}</span>`:''}</div>${t.pending?`<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:2px">⏳ ${t.pending}</div>`:''}</div>`).join(''):'<div style="text-align:center;padding:28px 16px;color:var(--muted);font-size:13px">Nenhum ticket</div>';}
 
@@ -1107,8 +1134,8 @@ function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
 
 function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
-  const dashStateFilter=`<select class="fi" id="dash-state-filter" onchange="renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>${states.map(s=>`<option value="${s}"${dsf===s?' selected':''}>${s}</option>`).join('')}</select>`;
-  const dsf=document.getElementById('dash-state-filter')?.value||'';
+  const dsf=dashStateVal;
+  const dashStateFilter=`<select class="fi" id="dash-state-filter" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>${states.map(s=>`<option value="${s}"${dsf===s?' selected':''}>${s}</option>`).join('')}</select>`;
   const fTickets=dsf?tickets.filter(t=>t.state===dsf):tickets;
   const total=fTickets.length,open=fTickets.filter(t=>t.status==='Open').length,clear=fTickets.filter(t=>t.status==='Clear').length,damage=fTickets.filter(t=>t.status==='Damage').length,closed=fTickets.filter(t=>t.status==='Closed').length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
@@ -1164,7 +1191,7 @@ function renderProjects(){
   g.innerHTML=(active.length?active.map(renderCard).join(''):'')+(completed.length?`<div style="grid-column:1/-1;margin-top:24px;padding-top:20px;border-top:2px solid var(--border)"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">✅ Projetos Concluídos (${completed.length})</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">${completed.map(renderCard).join('')}</div></div>`:'');
 }
 
-function openProjectMap(pid){nav('map');document.getElementById('proj-filter').value=pid;onProjFilter();}
+function openProjectMap(pid){nav('map');setTimeout(()=>{document.getElementById('proj-filter').value=pid;onProjFilter();},200);}
 
 function openNewProject(){editingProjectId=null;document.getElementById('proj-modal-title').textContent='Novo projeto';['pm-loc','pm-num','pm-client','pm-state','pm-coords'].forEach(id=>document.getElementById(id).value='');document.getElementById('pm-status').value='Active';document.getElementById('pm-feet').value='';openModal('ov-proj');}
 function editProject(pid){editingProjectId=pid;const p=projects.find(x=>x.id===pid);if(!p)return;document.getElementById('proj-modal-title').textContent='Editar projeto';const parts=p.name.split(' — ');if(parts.length>=2){document.getElementById('pm-loc').value=parts[0].trim();document.getElementById('pm-num').value=parts.slice(1).join(' — ').trim();}else{document.getElementById('pm-loc').value='';document.getElementById('pm-num').value=p.name;}document.getElementById('pm-client').value=p.client;document.getElementById('pm-state').value=p.state;document.getElementById('pm-status').value=p.status;document.getElementById('pm-feet').value=p.totalFeet||'';document.getElementById('pm-coords').value=p.centerCoords?p.centerCoords.join(', '):'';openModal('ov-proj');}

@@ -759,7 +759,7 @@ function getTicketUtils(ticketNum){const key=String(ticketNum||'').trim();return
 function syncUtilFilter(){
   if(!utilCacheLoaded)return;
   const allUtils={};
-  const openTicketNums=new Set(tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket||'').trim()));
+  const openTicketNums=new Set(tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t)).map(t=>String(t.ticket||'').trim()));
   for(const[tnum,resps]of Object.entries(utilCache)){
     if(!openTicketNums.has(tnum))continue;
     for(const u of resps){
@@ -843,7 +843,7 @@ function enterSharedView(pid){
   const locs0=[...new Set(ts0.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||p.state||'';
   document.getElementById('shared-proj-name').textContent=locs0+(locs0?' — ':'')+p.name+(p.client?' · '+p.client:'');
 
-  const ts=tickets.filter(t=>t.projectId===p.id);
+  const ts=tickets.filter(t=>t.projectId===p.id&&!isSuperseded(t));
   const open=ts.filter(t=>t.status==='Open').length;
   const clear=ts.filter(t=>t.status==='Clear').length;
   const damage=ts.filter(t=>t.status==='Damage').length;
@@ -878,6 +878,7 @@ function sharedFiltered(){
   const st=document.getElementById('sh-stat')?.value||'';
   return tickets.filter(t=>{
     if(t.projectId!==sharedProjectId)return false;
+    if(isSuperseded(t))return false;
     if(st&&t.status!==st)return false;
     if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.address||'').toLowerCase().includes(sr))return false;
     return true;
@@ -1004,7 +1005,15 @@ function showPanel(t){const c=scol(t.status);const proj=projects.find(p=>p.id===
 
 function hiT(id){document.querySelectorAll('.tcard').forEach(c=>c.classList.remove('active'));const cd=document.querySelector(`[data-id="${id}"]`);if(cd){cd.classList.add('active');cd.scrollIntoView({behavior:'smooth',block:'nearest'})}const t=tickets.find(x=>x.id===id);if(t)showPanel(t);}
 
-function mapFiltered(){const pf=document.getElementById('proj-filter')?.value||'';const sr=(document.getElementById('srch')?.value||'').toLowerCase();const cl=document.getElementById('fcli')?.value||'';const lc=document.getElementById('floc')?.value||'';return tickets.filter(t=>{const sl=t.status?.toLowerCase();if(sl==='open'&&!mf.open)return false;if(sl==='damage'&&!mf.damage)return false;if(sl==='clear'&&!mf.clear)return false;if(sl==='closed'&&!mf.closed)return false;if(sl==='cancel'&&!mf.cancel)return false;if(pf&&t.projectId!==pf)return false;if(cl&&t.client!==cl)return false;if(lc&&t.location!==lc)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;return true;});}
+function isSuperseded(t){
+  // Ticket foi renovado se outro ticket aponta pra ele no oldTicket2
+  const tnum=String(t.ticket||'').trim();
+  return tickets.some(other=>other.id!==t.id&&String(other.oldTicket2||'').trim()===tnum);
+}
+
+function mapFiltered(){const pf=document.getElementById('proj-filter')?.value||'';const sr=(document.getElementById('srch')?.value||'').toLowerCase();const cl=document.getElementById('fcli')?.value||'';const lc=document.getElementById('floc')?.value||'';return tickets.filter(t=>{
+  if(isSuperseded(t))return false;
+  const sl=t.status?.toLowerCase();if(sl==='open'&&!mf.open)return false;if(sl==='damage'&&!mf.damage)return false;if(sl==='clear'&&!mf.clear)return false;if(sl==='closed'&&!mf.closed)return false;if(sl==='cancel'&&!mf.cancel)return false;if(pf&&t.projectId!==pf)return false;if(cl&&t.client!==cl)return false;if(lc&&t.location!==lc)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;return true;});}
 
 function toggleMF(key){mf[key]=!mf[key];const btn=document.getElementById('ft-'+key);const oc={open:'on-open',damage:'on-damage',clear:'on-clear',closed:'on-closed',cancel:'on-cancel'};btn.className='ftog'+(mf[key]?' '+oc[key]:'');redrawAll();}
 function redrawAll(){renderList();renderMap();}
@@ -1115,7 +1124,7 @@ async function renderUtils(t){
 
 function renderTable(){
   const sr=(document.getElementById('tbl-srch').value||'').toLowerCase();const st=document.getElementById('tbl-stat').value;const pr=document.getElementById('tbl-proj').value;const cl=document.getElementById('tbl-cli').value;const ut=document.getElementById('tbl-util')?.value||'';
-  let f=tickets.filter(t=>{if(st&&t.status!==st)return false;if(pr&&t.projectId!==pr)return false;if(cl&&t.client!==cl)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;
+  let f=tickets.filter(t=>{if(isSuperseded(t))return false;if(st&&t.status!==st)return false;if(pr&&t.projectId!==pr)return false;if(cl&&t.client!==cl)return false;if(sr&&!t.ticket.toLowerCase().includes(sr)&&!(t.client||'').toLowerCase().includes(sr)&&!(t.location||'').toLowerCase().includes(sr))return false;
     if(ut){
       const tkey=String(t.ticket).trim();
       const pends=getTicketPendingUtils(tkey);
@@ -1136,7 +1145,7 @@ function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
   const dashStateFilter=`<select class="fi" id="dash-state-filter" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>${states.map(s=>`<option value="${s}"${dsf===s?' selected':''}>${s}</option>`).join('')}</select>`;
-  const fTickets=dsf?tickets.filter(t=>t.state===dsf):tickets;
+  const fTickets=dsf?tickets.filter(t=>t.state===dsf&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
   const total=fTickets.length,open=fTickets.filter(t=>t.status==='Open').length,clear=fTickets.filter(t=>t.status==='Clear').length,damage=fTickets.filter(t=>t.status==='Damage').length,closed=fTickets.filter(t=>t.status==='Closed').length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
   const openFt=fTickets.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
@@ -1169,7 +1178,7 @@ function renderProjects(){
   const active=filteredProjects.filter(p=>p.status!=='Completed');
   const completed=filteredProjects.filter(p=>p.status==='Completed');
   const renderCard=(p)=>{
-    const ts=tickets.filter(t=>t.projectId===p.id);
+    const ts=tickets.filter(t=>t.projectId===p.id&&!isSuperseded(t));
     const open=ts.filter(t=>t.status==='Open').length,clear=ts.filter(t=>t.status==='Clear').length,damage=ts.filter(t=>t.status==='Damage').length,closed=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
     const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
@@ -1279,7 +1288,7 @@ function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCac
 function renderUtilSummaryHtml(){
   if(!utilCacheLoaded)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811 — Pendentes</div><div style="color:var(--muted);font-size:12px">Carregando dados de utilities...</div></div>';
   const utilCount={};const utilTickets={};
-  const openTickets=tickets.filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
+  const openTickets=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
   for(const t of openTickets){
     const pends=getTicketPendingUtils(t.ticket);
     for(const p of pends){

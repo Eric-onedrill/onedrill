@@ -307,14 +307,14 @@ tbody td{padding:10px 13px;color:var(--text)}
    ══════════════════════════════════════════════ */
 
 @media(max-width:768px){
-  /* Topbar */
+  /* Topbar — better touch targets */
   .topbar{padding:0 10px;height:48px;gap:6px}
   .logo{margin-right:8px;font-size:12px;flex-shrink:0;letter-spacing:.02em}
-  .navtabs{overflow-x:auto;flex:1;-webkit-overflow-scrolling:touch;gap:0;margin:0 4px}
+  .navtabs{overflow-x:auto;flex:1;-webkit-overflow-scrolling:touch;gap:0;margin:0 4px;scrollbar-width:none}
   .navtabs::-webkit-scrollbar{display:none}
-  .ntab{font-size:11px;padding:5px 8px;flex-shrink:0}
+  .ntab{font-size:12px;padding:6px 10px;flex-shrink:0;min-height:34px}
   .hactions{gap:4px;flex-shrink:0}
-  .hactions .btn{font-size:10px;padding:4px 7px}
+  .hactions .btn{font-size:10px;padding:5px 8px;min-height:30px}
   .hactions .sync-indicator{display:none}
   .role-badge{font-size:9px;padding:2px 6px}
 
@@ -326,36 +326,77 @@ tbody td{padding:10px 13px;color:var(--text)}
   .dash-inner,.proj-inner{padding:14px}
   .page-title{font-size:17px}
 
-  /* Map */
+  /* Map — Bottom Sheet pattern */
   #pg-map{flex-direction:column;position:relative}
-  .sidebar{position:absolute;z-index:1001;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);transition:transform .25s ease}
-  .sidebar.mob-open{transform:translateX(0)}
-  .sb-toggle{display:flex;align-items:center;gap:6px;font-size:13px;padding:8px 14px;border-radius:20px;top:auto;bottom:16px;left:50%;transform:translateX(-50%)}
+  .sidebar{
+    position:absolute;z-index:1001;
+    left:0;right:0;bottom:0;
+    width:100%;height:55vh;
+    transform:translateY(100%);
+    transition:transform .3s cubic-bezier(.32,.72,0,1);
+    border-top:1px solid var(--border);
+    border-right:none;
+    border-radius:var(--r-xl) var(--r-xl) 0 0;
+    box-shadow:0 -4px 24px rgba(0,0,0,.15);
+  }
+  .sidebar.mob-open{transform:translateY(0)}
+  /* Drag handle visual cue */
+  .sidebar::after{
+    content:'';display:block;
+    width:36px;height:4px;
+    background:var(--border2);border-radius:2px;
+    margin:8px auto 4px;
+    flex-shrink:0;
+  }
+  .sb-filters{padding:8px 12px 10px;gap:5px}
+  .sb-filters .frow{flex-wrap:wrap}
+  .sb-toggle{
+    display:flex;align-items:center;gap:6px;
+    font-size:14px;font-weight:600;
+    padding:10px 20px;
+    border-radius:24px;
+    top:auto;bottom:16px;left:50%;
+    transform:translateX(-50%);
+    box-shadow:0 4px 16px rgba(0,0,0,.18);
+    background:var(--white);
+    border:1px solid var(--border);
+    z-index:1002;
+  }
   .mapc{width:100%;height:100%}
+  /* Larger touch targets for map buttons */
   .mctrl{top:10px;right:8px}
-  .mbtn{font-size:11px;padding:5px 8px}
-  .map-legend{font-size:10px;padding:7px}
-  .map-panel{bottom:60px;left:8px;right:8px;width:auto}
+  .mbtn{font-size:12px;padding:8px 12px;min-height:36px}
+  /* Hide legend by default on mobile — less clutter */
+  .map-legend{display:none}
+  /* Info panel above the toggle button */
+  .map-panel{bottom:70px;left:8px;right:8px;width:auto}
   #field-draw-panel{min-width:0;width:calc(100% - 24px);left:12px;transform:none}
 
   /* Projects */
   .proj-grid{grid-template-columns:1fr}
   .pcard-stats{grid-template-columns:repeat(3,1fr)}
 
-  /* Tickets table */
-  .tbar{padding:8px 10px;gap:5px}
-  .tbar .fi{font-size:12px}
+  /* Tickets table — card layout on mobile */
+  .tbar{padding:8px 10px;gap:5px;flex-wrap:wrap}
+  .tbar .fi{font-size:12px;min-width:0;flex:1 1 calc(50% - 4px)}
   .tbl-wrap{padding:8px;overflow-x:auto}
   table{font-size:11px;min-width:700px}
   thead th{padding:7px 8px;font-size:10px}
   tbody td{padding:7px 8px}
 
-  /* Modals */
-  .modal{width:95vw;max-width:95vw;padding:18px;max-height:95vh}
+  /* Modals — full screen feel */
+  .modal{width:95vw;max-width:95vw;padding:16px;max-height:95vh}
   .modal.wide{width:95vw}
   .modal.narrow{width:95vw}
   .fgrid{grid-template-columns:1fr}
   .full{grid-column:1/-1}
+  /* Stack detail grid vertically */
+  .det-grid{grid-template-columns:1fr!important}
+  .mtitle{font-size:15px}
+  .modal-head{margin-bottom:14px;flex-wrap:wrap;gap:8px}
+  .modal-head > div:last-child{width:100%;justify-content:flex-start}
+  .fsection{padding:10px}
+  .mp-row{font-size:11px}
 
   /* Warnings */
   .warn-chips{gap:3px}
@@ -378,4 +419,13 @@ tbody td{padding:10px 13px;color:var(--text)}
   .stat-grid{grid-template-columns:1fr 1fr}
   .stat-card{padding:10px}
   .stat-val{font-size:18px}
+  /* Bigger filter toggles for thumb reach */
+  .ftog{font-size:12px;padding:6px 12px;min-height:32px}
+  .filter-toggles{gap:5px}
+  /* Full-height bottom sheet on small phones */
+  .sidebar{height:65vh}
+  .shared-sidebar{height:65vh}
+  /* Stack filter bar fully */
+  .tbar .fi{flex:1 1 100%}
+  .tbar{gap:4px}
 }

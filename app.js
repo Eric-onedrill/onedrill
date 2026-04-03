@@ -29,7 +29,7 @@ async function loadUtilCache(){
     let offset=0;
     const pageSize=1000;
     while(true){
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/ticket_811_responses?select=ticket_num,utility_name,status&order=ticket_num&offset=${offset}&limit=${pageSize}`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/ticket_811_responses?select=ticket_num,utility_name,status,responded_at&order=ticket_num&offset=${offset}&limit=${pageSize}`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
       const data=await r.json();
       if(!data||!data.length)break;
       allData=allData.concat(data);
@@ -509,7 +509,7 @@ function renderDash(){
   const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderUtilSummaryHtml()}${renderClearedStats(fTickets)}
+  ${renderUtilSummaryHtml()}${renderClearedStats(fTickets)}${renderClearTimeMetrics(fTickets)}
   <div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div>${projStats.length?projStats.map(p=>`<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px"><span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">📍 ${p.locs||p.state}</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.name}</span></span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sem projetos</div>'}</div></div>
   <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar um projeto: use 📤 Compartilhar na tela de Projetos.</div></div></div></div>`;
 }
@@ -632,11 +632,12 @@ function exportFiltered(){
     return true;
   });
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
+  const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company])];
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company]),['','','','','','','TOTAL:',totalFt,'','','','','','']];
   const ws=XLSX.utils.aoa_to_sheet(tData);XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   XLSX.writeFile(wb,'OneDrill_Filtrado_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast('Excel filtrado: '+f.length+' tickets','success');
+  toast('Excel filtrado: '+f.length+' tickets · '+totalFt.toLocaleString()+' ft','success');
 }
 function exportExcel(){
   const wb=XLSX.utils.book_new();
@@ -722,6 +723,129 @@ function renderUtilSummaryHtml(){
   return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;font-size:12px;font-family:var(--mono)"><span style="color:var(--red);font-weight:600">${totalPending} pendências</span><span style="color:var(--muted)">${ticketsWithPending.size} tickets afetados</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px;cursor:pointer" onclick="filterByUtil('${name.replace(/'/g,"\\'")}')"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text)">${name}</span><span style="font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono);background:var(--red-bg);padding:2px 8px;border-radius:10px">${count}</span></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div></div>`;}).join('')}</div></div></div>`;
 }
 
+function renderClearTimeMetrics(fTickets){
+  if(!utilCacheLoaded)return'';
+  var now=Date.now();
+
+  // ── TEMPO POR UTILITY ──
+  var utilTimes={};
+  for(var i=0;i<fTickets.length;i++){
+    var t=fTickets[i];
+    if(!t.history||!t.history.length)continue;
+    var createdTs=t.history[0].ts;
+    if(!createdTs)continue;
+    var utils=getTicketUtils(String(t.ticket).trim());
+    for(var j=0;j<utils.length;j++){
+      var u=utils[j];
+      if(u.status!=='Clear'||!u.responded_at)continue;
+      var respTs=new Date(u.responded_at).getTime();
+      if(isNaN(respTs)||respTs<createdTs)continue;
+      var days=(respTs-createdTs)/86400000;
+      if(days>90)continue;
+      var name=u.utility_name;
+      if(!utilTimes[name])utilTimes[name]={total:0,count:0};
+      utilTimes[name].total+=days;
+      utilTimes[name].count++;
+    }
+  }
+  var utilAvg=[];
+  for(var name in utilTimes){
+    if(utilTimes[name].count>=2){
+      utilAvg.push({name:name,avg:Math.round(utilTimes[name].total/utilTimes[name].count*10)/10,count:utilTimes[name].count});
+    }
+  }
+  utilAvg.sort(function(a,b){return b.avg-a.avg;});
+
+  // ── TEMPO POR PROJETO ──
+  var projTimes={};
+  for(var i=0;i<fTickets.length;i++){
+    var t=fTickets[i];
+    if(!t.history||!t.history.length)continue;
+    var createdTs=t.history[0].ts;
+    if(!createdTs)continue;
+    var clearEvt=null;
+    for(var j=t.history.length-1;j>=0;j--){
+      var a=(t.history[j].action||'').toLowerCase();
+      if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||(a.indexOf('status manual')>=0&&a.indexOf('clear')>=0)){
+        clearEvt=t.history[j];break;
+      }
+    }
+    if(!clearEvt||!clearEvt.ts)continue;
+    var days=(clearEvt.ts-createdTs)/86400000;
+    if(days<0||days>120)continue;
+    var pid=t.projectId||'_none';
+    if(!projTimes[pid])projTimes[pid]={total:0,count:0};
+    projTimes[pid].total+=days;
+    projTimes[pid].count++;
+  }
+  var projAvg=[];
+  for(var pid in projTimes){
+    if(projTimes[pid].count>=2){
+      var p=projects.find(function(x){return x.id===pid;});
+      var pname=p?p.name:'Sem projeto';
+      var ts=fTickets.filter(function(t){return t.projectId===pid;});
+      var locs=[...new Set(ts.map(function(t){return(t.location||'').replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim();}).filter(Boolean))].join(', ');
+      projAvg.push({name:locs||pname,avg:Math.round(projTimes[pid].total/projTimes[pid].count*10)/10,count:projTimes[pid].count});
+    }
+  }
+  projAvg.sort(function(a,b){return b.avg-a.avg;});
+
+  if(!utilAvg.length&&!projAvg.length)return'';
+
+  var maxUtil=utilAvg.length?utilAvg[0].avg:1;
+  var maxProj=projAvg.length?projAvg[0].avg:1;
+
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
+  h+='<div class="dash-card-title">Tempo médio para Clear (dias)</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">';
+
+  // Coluna: Por utility
+  h+='<div>';
+  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:12px">Por utility</div>';
+  if(utilAvg.length){
+    for(var i=0;i<Math.min(utilAvg.length,12);i++){
+      var u=utilAvg[i];
+      var pct=Math.max(u.avg/maxUtil*100,8);
+      var color=u.avg<=2?'var(--green)':u.avg<=5?'var(--amber)':'var(--red)';
+      h+='<div style="margin-bottom:8px">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">';
+      h+='<span style="font-size:12px;color:var(--text2)">'+u.name+'</span>';
+      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+color+'">'+u.avg+' dias</span>';
+      h+='</div>';
+      h+='<div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden">';
+      h+='<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px"></div>';
+      h+='</div>';
+      h+='<div style="font-size:9px;color:var(--muted);margin-top:1px">'+u.count+' respostas</div>';
+      h+='</div>';
+    }
+  }else{h+='<div style="color:var(--muted);font-size:12px">Dados insuficientes</div>';}
+  h+='</div>';
+
+  // Coluna: Por projeto
+  h+='<div>';
+  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:12px">Por projeto</div>';
+  if(projAvg.length){
+    for(var i=0;i<Math.min(projAvg.length,12);i++){
+      var p=projAvg[i];
+      var pct=Math.max(p.avg/maxProj*100,8);
+      var color=p.avg<=3?'var(--green)':p.avg<=7?'var(--amber)':'var(--red)';
+      h+='<div style="margin-bottom:8px">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">';
+      h+='<span style="font-size:12px;color:var(--text2)">'+p.name+'</span>';
+      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+color+'">'+p.avg+' dias</span>';
+      h+='</div>';
+      h+='<div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden">';
+      h+='<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px"></div>';
+      h+='</div>';
+      h+='<div style="font-size:9px;color:var(--muted);margin-top:1px">'+p.count+' tickets clareados</div>';
+      h+='</div>';
+    }
+  }else{h+='<div style="color:var(--muted);font-size:12px">Dados insuficientes</div>';}
+  h+='</div>';
+
+  h+='</div></div></div>';
+  return h;
+}
 function filterByUtil(utilName){
   nav('tickets');
   setTimeout(()=>{

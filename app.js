@@ -21,6 +21,7 @@ let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let _tt;
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
+let clearProjVal='';
 
 async function loadUtilCache(){
   try{
@@ -497,6 +498,7 @@ function renderDash(){
   const dsf=dashStateVal;
   const dashStateFilter=`<select class="fi" id="dash-state-filter" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>${states.map(s=>`<option value="${s}"${dsf===s?' selected':''}>${s}</option>`).join('')}</select>`;
   const fTickets=dsf?tickets.filter(t=>t.state===dsf&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
+  const allFTickets=dsf?tickets.filter(t=>t.state===dsf):tickets;
   const total=fTickets.length,open=fTickets.filter(t=>t.status==='Open').length,clear=fTickets.filter(t=>t.status==='Clear').length,damage=fTickets.filter(t=>t.status==='Damage').length,closed=fTickets.filter(t=>t.status==='Closed').length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
   const openFt=fTickets.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
@@ -509,7 +511,7 @@ function renderDash(){
   const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderUtilSummaryHtml()}${renderClearedStats(fTickets)}${renderClearTimeMetrics(fTickets)}
+  ${renderUtilSummaryHtml()}${renderClearedStats(allFTickets)}${renderClearTimeMetrics(allFTickets)}
   <div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div>${projStats.length?projStats.map(p=>`<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px"><span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">📍 ${p.locs||p.state}</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.name}</span></span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sem projetos</div>'}</div></div>
   <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar um projeto: use 📤 Compartilhar na tela de Projetos.</div></div></div></div>`;
 }
@@ -665,24 +667,46 @@ function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCac
 
 function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
+
+  // ── Dropdown de projetos (usa tickets que tem clear events) ──
+  var projsWithClear=new Set();
   function getClearEvts(t){
     if(!t.history||!t.history.length)return[];
     return t.history.filter(function(h){var a=(h.action||'').toLowerCase();return a.indexOf('clear')>=0&&(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||a.indexOf('status manual')>=0);});
   }
+  for(var i=0;i<fTickets.length;i++){
+    var evts=getClearEvts(fTickets[i]);
+    if(evts.length&&fTickets[i].projectId)projsWithClear.add(fTickets[i].projectId);
+  }
+  var projOpts='<option value="">Todos projetos</option>';
+  projects.forEach(function(p){
+    if(!projsWithClear.has(p.id))return;
+    var ts=fTickets.filter(function(t){return t.projectId===p.id;});
+    var locs=[...new Set(ts.map(function(t){return(t.location||'').replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim();}).filter(Boolean))].join(', ');
+    var label=locs?locs+' — '+p.name:p.name;
+    projOpts+='<option value="'+p.id+'"'+(clearProjVal===p.id?' selected':'')+'>'+label+'</option>';
+  });
+
+  // ── Filtrar tickets pelo projeto selecionado ──
+  var ft=clearProjVal?fTickets.filter(function(t){return t.projectId===clearProjVal;}):fTickets;
+
   var c24=[],c7=[],c30=[],byU7={};
-  for(var i=0;i<fTickets.length;i++){var t=fTickets[i];var evts=getClearEvts(t);for(var j=0;j<evts.length;j++){if(evts[j].ts>=day1)c24.push(t);if(evts[j].ts>=day7)c7.push(t);if(evts[j].ts>=day30)c30.push(t);}}
+  for(var i=0;i<ft.length;i++){var t=ft[i];var evts=getClearEvts(t);for(var j=0;j<evts.length;j++){if(evts[j].ts>=day1)c24.push(t);if(evts[j].ts>=day7)c7.push(t);if(evts[j].ts>=day30)c30.push(t);}}
   if(utilCacheLoaded){for(var i=0;i<c7.length;i++){var us=getTicketUtils(String(c7[i].ticket).trim());for(var j=0;j<us.length;j++){if(us[j].status==='Clear'){if(!byU7[us[j].utility_name])byU7[us[j].utility_name]=0;byU7[us[j].utility_name]++;}}}}
   var ft24=0,ft7=0,ft30=0;
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
   var daily=[];
-  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;for(var k=0;k<fTickets.length;k++){var evts=getClearEvts(fTickets[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(fTickets[k].footage||0);}}}daily.push({l:lb,c:cnt,f:dft});}
+  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;for(var k=0;k<ft.length;k++){var evts=getClearEvts(ft[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft[k].footage||0);}}}daily.push({l:lb,c:cnt,f:dft});}
   var mx=1;for(var i=0;i<daily.length;i++)if(daily[i].c>mx)mx=daily[i].c;
   var su7=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
-  if(!c30.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Tickets Clareados</div><div style="color:var(--muted);font-size:13px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';
+  if(!c30.length&&!clearProjVal)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Tickets Clareados</div><div style="color:var(--muted);font-size:13px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">\u2705 Tickets Clareados</div></div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><div class="dash-card-title" style="margin-bottom:0">\u2705 Tickets Clareados</div>';
+  h+='<select class="fi" id="clear-proj-filter" onchange="clearProjVal=this.value;renderDash()" style="width:auto;min-width:180px;font-size:12px;padding:5px 8px">'+projOpts+'</select>';
+  h+='</div>';
+  if(!c30.length&&clearProjVal){h+='<div style="color:var(--muted);font-size:13px;padding:20px 0">Nenhum ticket clareado nos últimos 30 dias neste projeto.</div></div></div>';return h;}
   h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">';
   h+='<div style="padding:14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c24.length+'</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-top:2px">Ultimas 24h</div><div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">'+ft24.toLocaleString()+' ft</div></div>';
   h+='<div style="padding:14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-top:2px">Ultimos 7 dias</div><div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">'+ft7.toLocaleString()+' ft</div></div>';
@@ -725,15 +749,15 @@ function renderUtilSummaryHtml(){
 
 function renderClearTimeMetrics(fTickets){
   if(!utilCacheLoaded)return'';
-  var now=Date.now();
 
-  // ── TEMPO POR UTILITY ──
-  var utilTimes={};
+  // ── Calcular tempos por projeto → utility ──
+  var projData={};
   for(var i=0;i<fTickets.length;i++){
     var t=fTickets[i];
     if(!t.history||!t.history.length)continue;
     var createdTs=t.history[0].ts;
     if(!createdTs)continue;
+    var pid=t.projectId||'_none';
     var utils=getTicketUtils(String(t.ticket).trim());
     for(var j=0;j<utils.length;j++){
       var u=utils[j];
@@ -742,110 +766,108 @@ function renderClearTimeMetrics(fTickets){
       if(isNaN(respTs)||respTs<createdTs)continue;
       var days=(respTs-createdTs)/86400000;
       if(days>90)continue;
+      if(!projData[pid])projData[pid]={utils:{},totalDays:0,totalCount:0};
       var name=u.utility_name;
-      if(!utilTimes[name])utilTimes[name]={total:0,count:0};
-      utilTimes[name].total+=days;
-      utilTimes[name].count++;
+      if(!projData[pid].utils[name])projData[pid].utils[name]={total:0,count:0};
+      projData[pid].utils[name].total+=days;
+      projData[pid].utils[name].count++;
+      projData[pid].totalDays+=days;
+      projData[pid].totalCount++;
     }
   }
-  var utilAvg=[];
-  for(var name in utilTimes){
-    if(utilTimes[name].count>=2){
-      utilAvg.push({name:name,avg:Math.round(utilTimes[name].total/utilTimes[name].count*10)/10,count:utilTimes[name].count});
-    }
-  }
-  utilAvg.sort(function(a,b){return b.avg-a.avg;});
 
-  // ── TEMPO POR PROJETO ──
-  var projTimes={};
-  for(var i=0;i<fTickets.length;i++){
-    var t=fTickets[i];
-    if(!t.history||!t.history.length)continue;
-    var createdTs=t.history[0].ts;
-    if(!createdTs)continue;
-    var clearEvt=null;
-    for(var j=t.history.length-1;j>=0;j--){
-      var a=(t.history[j].action||'').toLowerCase();
-      if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||(a.indexOf('status manual')>=0&&a.indexOf('clear')>=0)){
-        clearEvt=t.history[j];break;
+  // Montar array de projetos com dados
+  var projArr=[];
+  for(var pid in projData){
+    var pd=projData[pid];
+    if(pd.totalCount<2)continue;
+    var p=projects.find(function(x){return x.id===pid;});
+    var pname=p?p.name:'Sem projeto';
+    var ts=fTickets.filter(function(t){return t.projectId===pid;});
+    var locs=[...new Set(ts.map(function(t){return(t.location||'').replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim();}).filter(Boolean))].join(', ');
+    var utilArr=[];
+    for(var uname in pd.utils){
+      if(pd.utils[uname].count>=1){
+        utilArr.push({name:uname,avg:Math.round(pd.utils[uname].total/pd.utils[uname].count*10)/10,count:pd.utils[uname].count});
       }
     }
-    if(!clearEvt||!clearEvt.ts)continue;
-    var days=(clearEvt.ts-createdTs)/86400000;
-    if(days<0||days>120)continue;
-    var pid=t.projectId||'_none';
-    if(!projTimes[pid])projTimes[pid]={total:0,count:0};
-    projTimes[pid].total+=days;
-    projTimes[pid].count++;
+    utilArr.sort(function(a,b){return b.avg-a.avg;});
+    var projAvg=Math.round(pd.totalDays/pd.totalCount*10)/10;
+    projArr.push({pid:pid,name:locs||pname,projName:pname,avg:projAvg,count:pd.totalCount,utils:utilArr});
   }
-  var projAvg=[];
-  for(var pid in projTimes){
-    if(projTimes[pid].count>=2){
-      var p=projects.find(function(x){return x.id===pid;});
-      var pname=p?p.name:'Sem projeto';
-      var ts=fTickets.filter(function(t){return t.projectId===pid;});
-      var locs=[...new Set(ts.map(function(t){return(t.location||'').replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim();}).filter(Boolean))].join(', ');
-      projAvg.push({name:locs||pname,avg:Math.round(projTimes[pid].total/projTimes[pid].count*10)/10,count:projTimes[pid].count});
+  projArr.sort(function(a,b){return b.avg-a.avg;});
+
+  if(!projArr.length)return'';
+
+  // ── Geral: media global por utility (todos projetos) ──
+  var globalUtil={};
+  for(var i=0;i<projArr.length;i++){
+    for(var j=0;j<projArr[i].utils.length;j++){
+      var u=projArr[i].utils[j];
+      if(!globalUtil[u.name])globalUtil[u.name]={total:0,count:0};
+      globalUtil[u.name].total+=u.avg*u.count;
+      globalUtil[u.name].count+=u.count;
     }
   }
-  projAvg.sort(function(a,b){return b.avg-a.avg;});
+  var globalArr=[];
+  for(var name in globalUtil){
+    if(globalUtil[name].count>=2){
+      globalArr.push({name:name,avg:Math.round(globalUtil[name].total/globalUtil[name].count*10)/10,count:globalUtil[name].count});
+    }
+  }
+  globalArr.sort(function(a,b){return b.avg-a.avg;});
 
-  if(!utilAvg.length&&!projAvg.length)return'';
-
-  var maxUtil=utilAvg.length?utilAvg[0].avg:1;
-  var maxProj=projAvg.length?projAvg[0].avg:1;
+  function colorFor(days,thLow,thMid){return days<=thLow?'var(--green)':days<=thMid?'var(--amber)':'var(--red)';}
+  function barHtml(label,avg,count,maxVal,thLow,thMid,countLabel){
+    var pct=Math.max(avg/maxVal*100,6);
+    var c=colorFor(avg,thLow,thMid);
+    return'<div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-size:12px;color:var(--text2)">'+label+'</span><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+c+'">'+avg+' dias</span></div><div style="height:5px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+c+';border-radius:3px"></div></div><div style="font-size:9px;color:var(--muted);margin-top:1px">'+count+' '+countLabel+'</div></div>';
+  }
 
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
   h+='<div class="dash-card-title">Tempo médio para Clear (dias)</div>';
-  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">';
 
-  // Coluna: Por utility
-  h+='<div>';
-  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:12px">Por utility</div>';
-  if(utilAvg.length){
-    for(var i=0;i<Math.min(utilAvg.length,12);i++){
-      var u=utilAvg[i];
-      var pct=Math.max(u.avg/maxUtil*100,8);
-      var color=u.avg<=2?'var(--green)':u.avg<=5?'var(--amber)':'var(--red)';
-      h+='<div style="margin-bottom:8px">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">';
-      h+='<span style="font-size:12px;color:var(--text2)">'+u.name+'</span>';
-      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+color+'">'+u.avg+' dias</span>';
-      h+='</div>';
-      h+='<div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden">';
-      h+='<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px"></div>';
-      h+='</div>';
-      h+='<div style="font-size:9px;color:var(--muted);margin-top:1px">'+u.count+' respostas</div>';
-      h+='</div>';
+  // ── Resumo geral por utility ──
+  if(globalArr.length){
+    var gMax=globalArr[0].avg||1;
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Média geral por utility</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 20px;margin-bottom:24px;padding-bottom:20px;border-bottom:2px solid var(--border)">';
+    for(var i=0;i<Math.min(globalArr.length,10);i++){
+      h+=barHtml(globalArr[i].name,globalArr[i].avg,globalArr[i].count,gMax,2,5,'respostas');
     }
-  }else{h+='<div style="color:var(--muted);font-size:12px">Dados insuficientes</div>';}
-  h+='</div>';
+    h+='</div>';
+  }
 
-  // Coluna: Por projeto
-  h+='<div>';
-  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:12px">Por projeto</div>';
-  if(projAvg.length){
-    for(var i=0;i<Math.min(projAvg.length,12);i++){
-      var p=projAvg[i];
-      var pct=Math.max(p.avg/maxProj*100,8);
-      var color=p.avg<=3?'var(--green)':p.avg<=7?'var(--amber)':'var(--red)';
-      h+='<div style="margin-bottom:8px">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">';
-      h+='<span style="font-size:12px;color:var(--text2)">'+p.name+'</span>';
-      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+color+'">'+p.avg+' dias</span>';
-      h+='</div>';
-      h+='<div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden">';
-      h+='<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px"></div>';
-      h+='</div>';
-      h+='<div style="font-size:9px;color:var(--muted);margin-top:1px">'+p.count+' tickets clareados</div>';
-      h+='</div>';
+  // ── Detalhamento por projeto ──
+  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:14px">Detalhamento por projeto</div>';
+  for(var i=0;i<projArr.length;i++){
+    var pr=projArr[i];
+    var projColor=colorFor(pr.avg,3,7);
+    var uMax=pr.utils.length?pr.utils[0].avg:1;
+
+    h+='<div style="margin-bottom:20px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg)">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:4px">';
+    h+='<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">';
+    h+='<span style="font-size:14px;font-weight:700;color:var(--text)">'+pr.name+'</span>';
+    h+='<span style="font-size:11px;color:var(--muted);font-family:var(--mono)">'+pr.projName+'</span>';
+    h+='</div>';
+    h+='<div style="display:flex;align-items:center;gap:10px">';
+    h+='<span style="font-size:13px;font-weight:700;font-family:var(--mono);color:'+projColor+'">média '+pr.avg+' dias</span>';
+    h+='<span style="font-size:10px;color:var(--muted)">'+pr.count+' respostas</span>';
+    h+='</div></div>';
+
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 18px">';
+    for(var j=0;j<Math.min(pr.utils.length,12);j++){
+      h+=barHtml(pr.utils[j].name,pr.utils[j].avg,pr.utils[j].count,uMax,2,5,'respostas');
     }
-  }else{h+='<div style="color:var(--muted);font-size:12px">Dados insuficientes</div>';}
-  h+='</div>';
+    if(pr.utils.length>12){h+='<div style="font-size:10px;color:var(--muted)">+'+(pr.utils.length-12)+' mais</div>';}
+    h+='</div></div>';
+  }
 
-  h+='</div></div></div>';
+  h+='</div></div>';
   return h;
 }
+
 function filterByUtil(utilName){
   nav('tickets');
   setTimeout(()=>{

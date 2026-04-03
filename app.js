@@ -23,6 +23,7 @@ let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
 let clearProjVal='';
 let clearTimeProjVal='';
+let progProjVal='';
 
 async function loadUtilCache(){
   try{
@@ -512,8 +513,7 @@ function renderDash(){
   const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderUtilSummaryHtml()}${renderClearedStats(allFTickets)}${renderClearTimeMetrics(allFTickets)}
-  <div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div>${projStats.length?projStats.map(p=>`<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px"><span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">📍 ${p.locs||p.state}</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.name}</span></span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sem projetos</div>'}</div></div>
+  ${renderClearedStats(allFTickets)}${renderProjectProgress(projStats)}${renderClearTimeMetrics(allFTickets)}${renderUtilSummaryHtml()}
   <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar um projeto: use 📤 Compartilhar na tela de Projetos.</div></div></div></div>`;
 }
 
@@ -666,6 +666,70 @@ function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filte
 function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
 
 
+function renderProjectProgress(projStats){
+  if(!projStats.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div><div style="color:var(--muted);font-size:13px">Sem projetos</div></div></div>';
+
+  // Totais gerais
+  var tTotal=0,tClear=0,tOpen=0,tDamage=0,tConcluido=0,tTickets=0;
+  for(var i=0;i<projStats.length;i++){
+    var p=projStats[i];
+    tTotal+=p.totalFt;tClear+=p.clearFtP;tOpen+=p.openFtP;tDamage+=p.damageFt;tConcluido+=p.concluidoFt;tTickets+=p.count;
+  }
+  var pctClear=tTotal>0?Math.round(tClear/tTotal*100):0;
+  var pctOpen=tTotal>0?Math.round(tOpen/tTotal*100):0;
+  var pctDamage=tTotal>0?Math.round(tDamage/tTotal*100):0;
+  var pctConcluido=tTotal>0?Math.round(tConcluido/tTotal*100):0;
+
+  // Dropdown de projetos
+  var opts='<option value="">Todos os projetos ('+tTickets+' tickets · '+tTotal.toLocaleString()+' ft)</option>';
+  for(var i=0;i<projStats.length;i++){
+    var p=projStats[i];
+    var label=(p.locs||p.state)+' ('+p.name+')';
+    opts+='<option value="'+p.id+'"'+(progProjVal===p.id?' selected':'')+'>'+label+' — '+p.count+' tickets</option>';
+  }
+
+  // Quais projetos mostrar
+  var show=progProjVal?projStats.filter(function(p){return p.id===progProjVal;}):projStats;
+
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
+  h+='<div class="dash-card-title" style="margin-bottom:0">Progresso por projeto — Footage</div>';
+  h+='<select class="fi" onchange="progProjVal=this.value;renderDash()" style="width:auto;min-width:250px;font-size:12px;padding:5px 8px">'+opts+'</select>';
+  h+='</div>';
+
+  // Totais (so mostra quando "todos")
+  if(!progProjVal){
+    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px;padding-bottom:16px;border-bottom:2px solid var(--border)">';
+    h+='<div style="padding:12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--text)">'+tTotal.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div>';
+    h+='<div style="padding:12px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--green)">'+tClear.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+pctClear+'%</div></div>';
+    h+='<div style="padding:12px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--red)">'+tOpen.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto '+pctOpen+'%</div></div>';
+    h+='<div style="padding:12px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+tDamage.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+pctDamage+'%</div></div>';
+    h+='<div style="padding:12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--text)">'+tConcluido.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+pctConcluido+'%</div></div>';
+    h+='</div>';
+  }
+
+  for(var i=0;i<show.length;i++){
+    var p=show[i];
+    h+='<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px">';
+    h+='<span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">📍 '+(p.locs||p.state)+'</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">'+p.name+'</span></span>';
+    h+='<span style="font-size:11px;color:var(--muted);font-family:var(--mono)">'+p.ticketFt.toLocaleString()+' ft'+(p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':'')+'</span></div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px">';
+    h+='<div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+p.totalFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft'+(p.hasTotalFromSheet?'*':'')+'</div></div>';
+    h+='<div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">'+p.clearFtP.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+p.pctClear+'%</div></div>';
+    h+='<div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">'+p.openFtP.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto '+p.pctOpen+'%</div></div>';
+    h+='<div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+p.damageFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+p.pctDamage+'%</div></div>';
+    h+='<div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+p.concluidoFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+p.pctConcluido+'%</div></div>';
+    h+='</div>';
+    h+='<div class="prog-bar"><div style="width:'+p.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(p.pctOpen,100-p.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)+'%;background:var(--text)"></div></div>';
+    h+='<div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear '+p.pctClear+'%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto '+p.pctOpen+'%</span>'+(p.damageFt>0?'<span><span class="prog-dot" style="background:#f59e0b"></span>Damage '+p.pctDamage+'%</span>':'')+'<span><span class="prog-dot" style="background:var(--text)"></span>Concluído '+p.pctConcluido+'%</span><span style="margin-left:auto">'+p.count+' tickets</span></div>';
+    h+='</div>';
+  }
+
+  h+='</div></div>';
+  return h;
+}
+
 function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
 
@@ -745,7 +809,49 @@ function renderUtilSummaryHtml(){
   const ticketsWithPending=new Set();
   for(const t of openTickets){if(getTicketPendingUtils(t.ticket).length>0)ticketsWithPending.add(t.ticket);}
   if(!sorted.length)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811</div><div style="color:var(--green);font-size:13px;font-weight:600">✅ Nenhuma utility pendente nos tickets ativos!</div></div>';
-  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;font-size:12px;font-family:var(--mono)"><span style="color:var(--red);font-weight:600">${totalPending} pendências</span><span style="color:var(--muted)">${ticketsWithPending.size} tickets afetados</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px;cursor:pointer" onclick="filterByUtil('${name.replace(/'/g,"\\'")}')"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text)">${name}</span><span style="font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono);background:var(--red-bg);padding:2px 8px;border-radius:10px">${count}</span></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div></div>`;}).join('')}</div></div></div>`;
+  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;align-items:center"><span style="font-size:12px;font-family:var(--mono);color:var(--red);font-weight:600">${totalPending} pendências</span><span style="font-size:12px;font-family:var(--mono);color:var(--muted)">${ticketsWithPending.size} tickets</span><button class="btn btn-sm" onclick="exportAllPending()" style="font-size:11px">↓ Excel pendentes</button></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];const safeName=name.replace(/'/g,"\\'");return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text);cursor:pointer" onclick="filterByUtil('${safeName}')">${name}</span><div style="display:flex;gap:4px;align-items:center"><button style="font-size:10px;padding:2px 6px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);cursor:pointer;font-family:var(--mono)" onclick="event.stopPropagation();exportUtilPending('${safeName}')" title="Exportar Excel">${count} ↓</button></div></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div></div>`;}).join('')}</div></div></div>`;
+}
+
+function exportUtilPending(utilName){
+  const openTks=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
+  const matching=openTks.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
+  if(!matching.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
+  const wb=XLSX.utils.book_new();
+  const rows=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço']];
+  for(const t of matching){
+    const proj=projects.find(p=>p.id===t.projectId);
+    rows.push([t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address]);
+  }
+  rows.push(['','','','','','','TOTAL:',matching.reduce((s,t)=>s+(t.footage||0),0),'','']);
+  const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
+  XLSX.writeFile(wb,'Pendentes_'+utilName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(matching.length+' tickets pendentes — '+utilName,'success');
+}
+
+function exportAllPending(){
+  const openTks=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
+  const rows=[['Utility','Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço']];
+  const utilMap={};
+  for(const t of openTks){
+    const pends=getTicketPendingUtils(t.ticket);
+    for(const p of pends){
+      if(!utilMap[p.utility_name])utilMap[p.utility_name]=[];
+      utilMap[p.utility_name].push(t);
+    }
+  }
+  const sorted=Object.entries(utilMap).sort((a,b)=>b[1].length-a[1].length);
+  for(const[name,tks]of sorted){
+    for(const t of tks){
+      const proj=projects.find(p=>p.id===t.projectId);
+      rows.push([name,t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address]);
+    }
+  }
+  const totalFt=rows.slice(1).reduce((s,r)=>s+(r[8]||0),0);
+  rows.push(['','','','','','','','TOTAL:',totalFt,'','']);
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Todas Pendentes');
+  XLSX.writeFile(wb,'Pendentes_Todas_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(sorted.length+' utilities · '+(rows.length-2)+' pendências','success');
 }
 
 function renderClearTimeMetrics(fTickets){
@@ -837,7 +943,7 @@ function renderClearTimeMetrics(fTickets){
   for(var i=0;i<projArr.length;i++){
     var pr=projArr[i];
     var c=colorFor(pr.avg,3,7);
-    projOpts+='<option value="'+pr.pid+'"'+(clearTimeProjVal===pr.pid?' selected':'')+' style="color:'+c+'">'+pr.name+' — '+pr.avg+' dias</option>';
+    projOpts+='<option value="'+pr.pid+'"'+(clearTimeProjVal===pr.pid?' selected':'')+' style="color:'+c+'">'+pr.name+' ('+pr.projName+') — '+pr.avg+' dias</option>';
   }
 
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
@@ -947,3 +1053,4 @@ window.addEventListener('load',async()=>{
   }catch(e){console.log('[Auth] No session:',e);}
   document.getElementById('login-screen').style.display='flex';
 });
+

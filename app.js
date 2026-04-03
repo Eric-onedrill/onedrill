@@ -510,11 +510,10 @@ function renderDash(){
   const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=10&&t.status!=='Closed'&&t.status!=='Cancel';});
   const fProjects=dsf?projects.filter(p=>p.state===dsf):projects;
   const projStats=fProjects.filter(p=>p.status!=='Completed').map(p=>{const ts=fTickets.filter(t=>t.projectId===p.id);const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);const damageFtP=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const totalFt=p.totalFeet||ticketFt||1;const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';return{name:p.name,id:p.id,count:ts.length,clearFtP,openFtP,concluidoFt,damageFt:damageFtP,ticketFt,totalFt,pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0,pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0,pctDamage:totalFt>0?Math.round(damageFtP/totalFt*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||''};}).sort((a,b)=>b.count-a.count);
-  const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
   ${renderClearedStats(allFTickets)}${renderProjectProgress(projStats)}${renderClearTimeMetrics(allFTickets)}${renderUtilSummaryHtml()}
-  <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar um projeto: use 📤 Compartilhar na tela de Projetos.</div></div></div></div>`;
+  `;
 }
 
 function renderProjects(){
@@ -699,16 +698,38 @@ function renderProjectProgress(projStats){
 
   // Totais (so mostra quando "todos")
   if(!progProjVal){
-    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px;padding-bottom:16px;border-bottom:2px solid var(--border)">';
+    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">';
     h+='<div style="padding:12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--text)">'+tTotal.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div>';
     h+='<div style="padding:12px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--green)">'+tClear.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+pctClear+'%</div></div>';
     h+='<div style="padding:12px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--red)">'+tOpen.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto '+pctOpen+'%</div></div>';
     h+='<div style="padding:12px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+tDamage.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+pctDamage+'%</div></div>';
     h+='<div style="padding:12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--text)">'+tConcluido.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+pctConcluido+'%</div></div>';
     h+='</div>';
+
+    // Ranking por projeto
+    if(projStats.length>1){
+      h+='<div style="margin-top:16px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Ranking por projeto</div>';
+      h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">';
+      for(var i=0;i<projStats.length;i++){
+        var rp=projStats[i];
+        h+='<div style="padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);cursor:pointer" onclick="progProjVal=\''+rp.id+'\';renderDash()">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+        h+='<span style="font-size:12px;font-weight:600;color:var(--text)">'+(rp.locs||rp.state)+'</span>';
+        h+='<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">'+rp.name+'</span>';
+        h+='</div>';
+        h+='<div class="prog-bar" style="margin-bottom:4px"><div style="width:'+rp.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(rp.pctOpen,100-rp.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(rp.pctDamage,100-rp.pctClear-rp.pctOpen)+'%;background:#f59e0b"></div></div>';
+        h+='<div style="display:flex;justify-content:space-between;font-size:10px;font-family:var(--mono)">';
+        h+='<span style="color:var(--green)">'+rp.pctClear+'% clear</span>';
+        h+='<span style="color:var(--muted)">'+rp.count+' tkt · '+rp.ticketFt.toLocaleString()+' ft</span>';
+        h+='</div></div>';
+      }
+      h+='</div></div>';
+    }
   }
 
-  for(var i=0;i<show.length;i++){
+  // Detalhamento: so quando um projeto esta selecionado
+  if(progProjVal){
+    for(var i=0;i<show.length;i++){
     var p=show[i];
     h+='<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)">';
     h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px">';
@@ -724,6 +745,7 @@ function renderProjectProgress(projStats){
     h+='<div class="prog-bar"><div style="width:'+p.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(p.pctOpen,100-p.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)+'%;background:var(--text)"></div></div>';
     h+='<div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear '+p.pctClear+'%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto '+p.pctOpen+'%</span>'+(p.damageFt>0?'<span><span class="prog-dot" style="background:#f59e0b"></span>Damage '+p.pctDamage+'%</span>':'')+'<span><span class="prog-dot" style="background:var(--text)"></span>Concluído '+p.pctConcluido+'%</span><span style="margin-left:auto">'+p.count+' tickets</span></div>';
     h+='</div>';
+  }
   }
 
   h+='</div></div>';
@@ -983,22 +1005,6 @@ function renderClearTimeMetrics(fTickets){
     h+='</div>';
   }
 
-  // Ranking de projetos (mini)
-  if(!clearTimeProjVal&&projArr.length>1){
-    h+='<div style="margin-top:20px;padding-top:16px;border-top:2px solid var(--border)">';
-    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Ranking por projeto</div>';
-    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">';
-    for(var i=0;i<projArr.length;i++){
-      var pr=projArr[i];
-      var c=colorFor(pr.avg,3,7);
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);cursor:pointer" onclick="clearTimeProjVal=\''+pr.pid+'\';renderDash()">';
-      h+='<span style="font-size:12px;color:var(--text2)">'+pr.name+'</span>';
-      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+c+'">'+pr.avg+'d</span>';
-      h+='</div>';
-    }
-    h+='</div></div>';
-  }
-
   h+='</div></div>';
   return h;
 }
@@ -1018,6 +1024,20 @@ let _t2;
 function toast(msg,type='success'){const bg={success:'#16803d',danger:'#dc2626',warn:'#b45309',info:'#1a6cf0'};const dot={success:'#86efac',danger:'#fca5a5',warn:'#fde68a',info:'#93c5fd'};document.getElementById('toast').style.background=bg[type]||bg.success;document.getElementById('tdot').style.background=dot[type]||dot.success;document.getElementById('tmsg').textContent=msg;document.getElementById('toast').classList.add('show');clearTimeout(_t2);_t2=setTimeout(()=>document.getElementById('toast').classList.remove('show'),4000);}
 
 function toggleSidebar(){const sb=document.getElementById('map-sidebar');const ov=document.getElementById('sb-overlay');sb.classList.toggle('mob-open');ov.classList.toggle('open');}
+
+function toggleSobrePanel(){
+  const p=document.getElementById('sobre-panel');
+  const o=document.getElementById('sobre-overlay');
+  const open=p.style.display==='none';
+  p.style.display=open?'block':'none';
+  o.style.display=open?'block':'none';
+  if(open)renderSobreRecent();
+}
+function renderSobreRecent(){
+  const el=document.getElementById('sobre-recent');if(!el)return;
+  const recent=[...tickets.filter(t=>!isSuperseded(t))].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,12);
+  el.innerHTML=recent.length?recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail(${t.id});toggleSobrePanel()"><div><div style="font-size:12px;font-weight:500;font-family:var(--mono);color:var(--text)">${t.ticket}</div><div style="color:var(--muted);font-size:10px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}" style="font-size:10px">${t.status}</span></div>`;}).join(''):'<div style="color:var(--muted);font-size:12px">Sem atividade recente</div>';
+}
 
 function shareProject(pid){const p=projects.find(x=>x.id===pid);if(!p)return;const url=window.location.origin+window.location.pathname+'?p='+encodeURIComponent(p.id);if(navigator.clipboard){navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Quem abrir verá só este projeto.','success')).catch(()=>{prompt('Copie o link:',url);});}else{prompt('Copie o link:',url);}}
 

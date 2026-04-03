@@ -37,9 +37,10 @@
     <div class="login-divider"><span>Admin</span></div>
     <div class="login-admin-section">
       <div class="login-admin-label">Acesso administrativo</div>
-      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
+      <input class="login-inp" type="email" id="admin-email" placeholder="Email" onkeydown="if(event.key==='Enter')document.getElementById('admin-pw').focus()">
+      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" onkeydown="if(event.key==='Enter')tryLogin()" style="margin-top:6px">
       <button class="login-admin-btn" onclick="tryLogin()">Entrar como Admin</button>
-      <div class="login-err" id="login-err">Senha incorreta</div>
+      <div class="login-err" id="login-err"></div>
     </div>
   </div>
   <div class="login-footer">OneDrill Ticket Management System</div>
@@ -94,6 +95,7 @@
     <button class="btn" onclick="exportExcel()">↓ Excel</button>
     <button class="btn" id="btn-import" onclick="openImport()" style="display:none">↑ Importar</button>
     <button class="btn btn-primary" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
+    <button class="btn" id="btn-logout" onclick="doLogout()" style="display:none;color:var(--muted)">Sair</button>
   </div>
 </div>
 

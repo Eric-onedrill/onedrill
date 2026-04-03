@@ -22,6 +22,7 @@ let _tt;
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
 let clearProjVal='';
+let clearTimeProjVal='';
 
 async function loadUtilCache(){
   try{
@@ -752,6 +753,7 @@ function renderClearTimeMetrics(fTickets){
 
   // ── Calcular tempos por projeto → utility ──
   var projData={};
+  var globalUtil={};
   for(var i=0;i<fTickets.length;i++){
     var t=fTickets[i];
     if(!t.history||!t.history.length)continue;
@@ -766,17 +768,20 @@ function renderClearTimeMetrics(fTickets){
       if(isNaN(respTs)||respTs<createdTs)continue;
       var days=(respTs-createdTs)/86400000;
       if(days>90)continue;
-      if(!projData[pid])projData[pid]={utils:{},totalDays:0,totalCount:0};
       var name=u.utility_name;
+      if(!projData[pid])projData[pid]={utils:{},totalDays:0,totalCount:0};
       if(!projData[pid].utils[name])projData[pid].utils[name]={total:0,count:0};
       projData[pid].utils[name].total+=days;
       projData[pid].utils[name].count++;
       projData[pid].totalDays+=days;
       projData[pid].totalCount++;
+      if(!globalUtil[name])globalUtil[name]={total:0,count:0};
+      globalUtil[name].total+=days;
+      globalUtil[name].count++;
     }
   }
 
-  // Montar array de projetos com dados
+  // Montar array de projetos
   var projArr=[];
   for(var pid in projData){
     var pd=projData[pid];
@@ -799,68 +804,92 @@ function renderClearTimeMetrics(fTickets){
 
   if(!projArr.length)return'';
 
-  // ── Geral: media global por utility (todos projetos) ──
-  var globalUtil={};
-  for(var i=0;i<projArr.length;i++){
-    for(var j=0;j<projArr[i].utils.length;j++){
-      var u=projArr[i].utils[j];
-      if(!globalUtil[u.name])globalUtil[u.name]={total:0,count:0};
-      globalUtil[u.name].total+=u.avg*u.count;
-      globalUtil[u.name].count+=u.count;
-    }
+  // Utilities a mostrar: filtrado por projeto ou global
+  var showUtils=[];
+  var showLabel='';
+  var showAvg=0;
+  var showCount=0;
+  if(clearTimeProjVal){
+    var sel=projArr.find(function(p){return p.pid===clearTimeProjVal;});
+    if(sel){showUtils=sel.utils;showLabel=sel.name;showAvg=sel.avg;showCount=sel.count;}
   }
-  var globalArr=[];
-  for(var name in globalUtil){
-    if(globalUtil[name].count>=2){
-      globalArr.push({name:name,avg:Math.round(globalUtil[name].total/globalUtil[name].count*10)/10,count:globalUtil[name].count});
+  if(!showUtils.length&&!clearTimeProjVal){
+    // Global
+    var gArr=[];
+    for(var name in globalUtil){
+      if(globalUtil[name].count>=2){
+        gArr.push({name:name,avg:Math.round(globalUtil[name].total/globalUtil[name].count*10)/10,count:globalUtil[name].count});
+      }
     }
+    gArr.sort(function(a,b){return b.avg-a.avg;});
+    showUtils=gArr;
+    var gTotal=0,gCount=0;
+    for(var k in globalUtil){gTotal+=globalUtil[k].total;gCount+=globalUtil[k].count;}
+    showAvg=gCount?Math.round(gTotal/gCount*10)/10:0;
+    showCount=gCount;
+    showLabel='Todos os projetos';
   }
-  globalArr.sort(function(a,b){return b.avg-a.avg;});
 
   function colorFor(days,thLow,thMid){return days<=thLow?'var(--green)':days<=thMid?'var(--amber)':'var(--red)';}
-  function barHtml(label,avg,count,maxVal,thLow,thMid,countLabel){
-    var pct=Math.max(avg/maxVal*100,6);
-    var c=colorFor(avg,thLow,thMid);
-    return'<div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-size:12px;color:var(--text2)">'+label+'</span><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+c+'">'+avg+' dias</span></div><div style="height:5px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+c+';border-radius:3px"></div></div><div style="font-size:9px;color:var(--muted);margin-top:1px">'+count+' '+countLabel+'</div></div>';
+
+  // Dropdown de projetos
+  var projOpts='<option value="">Todos os projetos</option>';
+  for(var i=0;i<projArr.length;i++){
+    var pr=projArr[i];
+    var c=colorFor(pr.avg,3,7);
+    projOpts+='<option value="'+pr.pid+'"'+(clearTimeProjVal===pr.pid?' selected':'')+' style="color:'+c+'">'+pr.name+' — '+pr.avg+' dias</option>';
   }
 
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div class="dash-card-title">Tempo médio para Clear (dias)</div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
+  h+='<div class="dash-card-title" style="margin-bottom:0">Tempo médio para Clear (dias)</div>';
+  h+='<select class="fi" onchange="clearTimeProjVal=this.value;renderDash()" style="width:auto;min-width:220px;font-size:12px;padding:5px 8px">'+projOpts+'</select>';
+  h+='</div>';
 
-  // ── Resumo geral por utility ──
-  if(globalArr.length){
-    var gMax=globalArr[0].avg||1;
-    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Média geral por utility</div>';
-    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 20px;margin-bottom:24px;padding-bottom:20px;border-bottom:2px solid var(--border)">';
-    for(var i=0;i<Math.min(globalArr.length,10);i++){
-      h+=barHtml(globalArr[i].name,globalArr[i].avg,globalArr[i].count,gMax,2,5,'respostas');
+  // Resumo do selecionado
+  var mainColor=colorFor(showAvg,3,7);
+  h+='<div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)">';
+  h+='<div style="font-size:28px;font-weight:700;font-family:var(--mono);color:'+mainColor+'">'+showAvg+'</div>';
+  h+='<div><div style="font-size:13px;font-weight:600;color:var(--text)">'+showLabel+'</div>';
+  h+='<div style="font-size:11px;color:var(--muted)">dias em média · '+showCount+' respostas</div></div>';
+  h+='</div>';
+
+  if(!showUtils.length){
+    h+='<div style="color:var(--muted);font-size:13px;padding:12px 0">Sem dados suficientes para este projeto.</div>';
+  }else{
+    var uMax=showUtils[0].avg||1;
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px 20px">';
+    for(var i=0;i<showUtils.length;i++){
+      var u=showUtils[i];
+      var pct=Math.max(u.avg/uMax*100,6);
+      var c=colorFor(u.avg,2,5);
+      h+='<div style="margin-bottom:4px">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">';
+      h+='<span style="font-size:12px;color:var(--text2)">'+u.name+'</span>';
+      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+c+'">'+u.avg+' dias</span>';
+      h+='</div>';
+      h+='<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden">';
+      h+='<div style="width:'+pct+'%;height:100%;background:'+c+';border-radius:3px"></div>';
+      h+='</div>';
+      h+='<div style="font-size:9px;color:var(--muted);margin-top:1px">'+u.count+' respostas</div>';
+      h+='</div>';
     }
     h+='</div>';
   }
 
-  // ── Detalhamento por projeto ──
-  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:14px">Detalhamento por projeto</div>';
-  for(var i=0;i<projArr.length;i++){
-    var pr=projArr[i];
-    var projColor=colorFor(pr.avg,3,7);
-    var uMax=pr.utils.length?pr.utils[0].avg:1;
-
-    h+='<div style="margin-bottom:20px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg)">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:4px">';
-    h+='<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">';
-    h+='<span style="font-size:14px;font-weight:700;color:var(--text)">'+pr.name+'</span>';
-    h+='<span style="font-size:11px;color:var(--muted);font-family:var(--mono)">'+pr.projName+'</span>';
-    h+='</div>';
-    h+='<div style="display:flex;align-items:center;gap:10px">';
-    h+='<span style="font-size:13px;font-weight:700;font-family:var(--mono);color:'+projColor+'">média '+pr.avg+' dias</span>';
-    h+='<span style="font-size:10px;color:var(--muted)">'+pr.count+' respostas</span>';
-    h+='</div></div>';
-
-    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 18px">';
-    for(var j=0;j<Math.min(pr.utils.length,12);j++){
-      h+=barHtml(pr.utils[j].name,pr.utils[j].avg,pr.utils[j].count,uMax,2,5,'respostas');
+  // Ranking de projetos (mini)
+  if(!clearTimeProjVal&&projArr.length>1){
+    h+='<div style="margin-top:20px;padding-top:16px;border-top:2px solid var(--border)">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Ranking por projeto</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">';
+    for(var i=0;i<projArr.length;i++){
+      var pr=projArr[i];
+      var c=colorFor(pr.avg,3,7);
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);cursor:pointer" onclick="clearTimeProjVal=\''+pr.pid+'\';renderDash()">';
+      h+='<span style="font-size:12px;color:var(--text2)">'+pr.name+'</span>';
+      h+='<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+c+'">'+pr.avg+'d</span>';
+      h+='</div>';
     }
-    if(pr.utils.length>12){h+='<div style="font-size:10px;color:var(--muted)">+'+(pr.utils.length-12)+' mais</div>';}
     h+='</div></div>';
   }
 
@@ -918,4 +947,3 @@ window.addEventListener('load',async()=>{
   }catch(e){console.log('[Auth] No session:',e);}
   document.getElementById('login-screen').style.display='flex';
 });
-

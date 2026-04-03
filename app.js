@@ -1,15 +1,13 @@
 /* ══════════════════════════════════════════════
    OneDrill — App Logic
    ══════════════════════════════════════════════
-   
-   ⚠️  ATENÇÃO: As credenciais abaixo estão expostas no código-fonte.
-   Para produção, migre para Supabase Auth + Row Level Security (RLS).
-   Veja: https://supabase.com/docs/guides/auth
+   Segurança: Supabase Auth + Row Level Security
+   A anon key abaixo é SEGURA — RLS restringe
+   operacoes de escrita a usuarios autenticados.
    ══════════════════════════════════════════════ */
 
 const SUPABASE_URL='https://ofbqtaulvzeltfpqcjhh.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE';
-const ADMIN_PASSWORD='Conquest@Onedrill';
 
 let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoords={};
 let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
@@ -112,25 +110,60 @@ function projectToDb(p){return{id:p.id,name:p.name,client:p.client||'',state:p.s
 
 function setSyncStatus(ok,msg){const d=document.getElementById('sync-dot');const l=document.getElementById('sync-label');if(d)d.style.background=ok?'var(--green)':'var(--red)';if(l)l.textContent=msg;}
 
+async function requireAuth(){
+  const{data:{session}}=await sb.auth.getSession();
+  if(!session){toast('Faça login como Admin para editar.','danger');return false;}
+  return true;
+}
 async function saveTicketToDb(t){
+  if(!await requireAuth())return false;
   setSyncStatus(true,'Salvando...');
   const data=ticketToDb(t);let res;
   if(typeof t.id==='number'&&t.id>0){res=await sb.from('tickets').update(data).eq('id',t.id);}
   else{res=await sb.from('tickets').insert(data).select().single();if(res.data)t.id=res.data.id;}
-  if(res.error){setSyncStatus(false,'Erro ao salvar');toast('Erro: '+res.error.message,'danger');return false;}
+  if(res.error){setSyncStatus(false,'Erro ao salvar');toast(res.error.code==='42501'?'Sem permissão — faça login como Admin':'Erro: '+res.error.message,'danger');return false;}
   setSyncStatus(true,'Salvo ✓');return true;
 }
-async function saveProjectToDb(p){const data=projectToDb(p);const res=await sb.from('projects').upsert(data,{onConflict:'id'});if(res.error){toast('Erro ao salvar projeto: '+res.error.message,'danger');return false;}return true;}
-async function deleteProjectFromDb(id){await sb.from('tickets').update({project_id:null}).eq('project_id',id);const res=await sb.from('projects').delete().eq('id',id);return!res.error;}
+async function saveProjectToDb(p){if(!await requireAuth())return false;const data=projectToDb(p);const res=await sb.from('projects').upsert(data,{onConflict:'id'});if(res.error){toast(res.error.code==='42501'?'Sem permissão — faça login como Admin':'Erro: '+res.error.message,'danger');return false;}return true;}
+async function deleteProjectFromDb(id){if(!await requireAuth())return false;await sb.from('tickets').update({project_id:null}).eq('project_id',id);const res=await sb.from('projects').delete().eq('id',id);return!res.error;}
 
-function tryLogin(){const pw=document.getElementById('admin-pw').value;if(pw===ADMIN_PASSWORD){isAdmin=true;role='admin';document.getElementById('login-screen').style.display='none';enterApp();}else{document.getElementById('login-err').style.display='block';}}
+async function tryLogin(){
+  const email=document.getElementById('admin-email').value.trim();
+  const pw=document.getElementById('admin-pw').value;
+  const errEl=document.getElementById('login-err');
+  if(!email||!pw){errEl.textContent='Preencha email e senha';errEl.style.display='block';return;}
+  errEl.style.display='none';
+  document.querySelector('.login-admin-btn').disabled=true;
+  document.querySelector('.login-admin-btn').textContent='Entrando...';
+  try{
+    const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
+    if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
+    const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
+    if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
+    else{isAdmin=false;role='viewer';}
+    document.getElementById('login-screen').style.display='none';
+    enterApp();
+  }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
+  document.querySelector('.login-admin-btn').disabled=false;
+  document.querySelector('.login-admin-btn').textContent='Entrar como Admin';
+}
 function enterViewer(){isAdmin=false;role='viewer';document.getElementById('login-screen').style.display='none';enterApp();}
+async function doLogout(){
+  await sb.auth.signOut();
+  isAdmin=false;role='viewer';
+  document.getElementById('topbar').style.display='none';
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('pg-dash').classList.add('active');
+  document.getElementById('login-screen').style.display='flex';
+}
 
 function enterApp(){
   document.getElementById('topbar').style.display='flex';
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
+  const logoutBtn=document.getElementById('btn-logout');
+  if(logoutBtn)logoutBtn.style.display=isAdmin?'':'none';
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='');}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
@@ -565,6 +598,7 @@ function readFile(file){
 
 async function doImport(){
   if(!parsed.length)return;
+  if(!await requireAuth())return;
   const mode=document.querySelector('input[name="importmode"]:checked')?.value||'replace';
   const pw=document.getElementById('progwrap'),pf=document.getElementById('progfill'),pt=document.getElementById('progtxt');
   pw.style.display='block';document.getElementById('bimport').disabled=true;setSyncStatus(true,'Importando...');
@@ -725,6 +759,17 @@ window.addEventListener('load',async()=>{
   if(!ok){document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
   // Check if shared project link
   if(checkProjectUrl())return;
+  // Check for existing auth session (auto-login)
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    if(session){
+      const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
+      isAdmin=roleData&&roleData.role==='admin';
+      role=isAdmin?'admin':'viewer';
+      enterApp();
+      return;
+    }
+  }catch(e){console.log('[Auth] No session:',e);}
   document.getElementById('login-screen').style.display='flex';
 });
 

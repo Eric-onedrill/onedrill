@@ -154,17 +154,18 @@ function enterViewer(){isAdmin=false;role='viewer';document.getElementById('logi
 async function doLogout(){
   await sb.auth.signOut();
   isAdmin=false;role='viewer';
-  document.getElementById('topbar').style.display='none';
+  document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('pg-dash').classList.add('active');
   document.getElementById('login-screen').style.display='flex';
 }
 
 function enterApp(){
-  document.getElementById('topbar').style.display='flex';
+  document.getElementById('app-shell').style.display='flex';
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
+  const rbm=document.getElementById('role-badge-mob');if(rbm){rbm.textContent=isAdmin?'ADMIN':'VIEWER';rbm.style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';rbm.style.color=isAdmin?'var(--green)':'var(--accent)';}
   const logoutBtn=document.getElementById('btn-logout');
   if(logoutBtn)logoutBtn.style.display=isAdmin?'':'none';
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='');}
@@ -181,7 +182,7 @@ function enterSharedView(pid){
   if(!p){toast('Projeto não encontrado','danger');enterViewer();return;}
   sharedProjectId=p.id;
   document.getElementById('login-screen').style.display='none';
-  document.getElementById('topbar').style.display='none';
+  document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
   document.getElementById('pg-shared').classList.add('active');
   const ts0=tickets.filter(t=>t.projectId===p.id);
@@ -1017,13 +1018,20 @@ function filterByUtil(utilName){
   },100);
 }
 
-function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;
 function toast(msg,type='success'){const bg={success:'#16803d',danger:'#dc2626',warn:'#b45309',info:'#1a6cf0'};const dot={success:'#86efac',danger:'#fca5a5',warn:'#fde68a',info:'#93c5fd'};document.getElementById('toast').style.background=bg[type]||bg.success;document.getElementById('tdot').style.background=dot[type]||dot.success;document.getElementById('tmsg').textContent=msg;document.getElementById('toast').classList.add('show');clearTimeout(_t2);_t2=setTimeout(()=>document.getElementById('toast').classList.remove('show'),4000);}
 
 function toggleSidebar(){const sb=document.getElementById('map-sidebar');const ov=document.getElementById('sb-overlay');sb.classList.toggle('mob-open');ov.classList.toggle('open');}
+
+function toggleMobNav(){
+  const nav=document.getElementById('sidebar-nav');
+  const ov=document.getElementById('mob-nav-overlay');
+  const open=nav.classList.toggle('mob-open');
+  ov.classList.toggle('open',open);
+}
 
 function toggleSobrePanel(){
   const p=document.getElementById('sobre-panel');

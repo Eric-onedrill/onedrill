@@ -171,8 +171,8 @@ function enterApp(){
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='');}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
-  loadUtilCache().then(()=>{renderDash();renderTable();});
-  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
+  loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
+  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();buildNotifications();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -513,7 +513,7 @@ function renderDash(){
   const projStats=fProjects.filter(p=>p.status!=='Completed').map(p=>{const ts=fTickets.filter(t=>t.projectId===p.id);const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);const damageFtP=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const totalFt=p.totalFeet||ticketFt||1;const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';return{name:p.name,id:p.id,count:ts.length,clearFtP,openFtP,concluidoFt,damageFt:damageFtP,ticketFt,totalFt,pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0,pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0,pctDamage:totalFt>0?Math.round(damageFtP/totalFt*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||''};}).sort((a,b)=>b.count-a.count);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderClearedStats(allFTickets)}${renderProjectProgress(projStats)}${renderClearTimeMetrics(allFTickets)}${renderUtilSummaryHtml()}
+  ${renderClearedStats(allFTickets)}${renderProjectProgress(projStats)}${renderWeeklyEvolution(allFTickets)}${renderExpirationCalendar(fTickets)}${renderClearTimeMetrics(allFTickets)}${renderKPIs(projStats)}${renderUtilSummaryHtml()}
   `;
 }
 
@@ -1008,6 +1008,310 @@ function renderClearTimeMetrics(fTickets){
 
   h+='</div></div>';
   return h;
+}
+
+// ── EVOLUÇÃO SEMANAL ──────────────────────────────────────────────────────────
+function renderWeeklyEvolution(fTickets){
+  var now=Date.now(),WEEK=7*864e5;
+  function getWeekStart(ts){var d=new Date(ts);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay()+1);return d.getTime();}
+  var currentWeekStart=getWeekStart(now);
+  var weeks=[];
+  for(var w=5;w>=0;w--){weeks.push({start:currentWeekStart-w*WEEK,opened:0,cleared:0,closed:0});}
+
+  for(var i=0;i<fTickets.length;i++){
+    var t=fTickets[i];if(!t.history||!t.history.length)continue;
+    for(var j=0;j<t.history.length;j++){
+      var h=t.history[j],a=(h.action||'').toLowerCase(),ts=h.ts;if(!ts)continue;
+      var ws=getWeekStart(ts);
+      for(var w=0;w<weeks.length;w++){
+        if(ws===weeks[w].start){
+          if(j===0||(a.indexOf('importado')>=0||a.indexOf('criado')>=0||a.indexOf('importado via')>=0))weeks[w].opened++;
+          if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||(a.indexOf('status manual')>=0&&a.indexOf('clear')>=0))weeks[w].cleared++;
+          if(a.indexOf('\u2192 closed')>=0||a.indexOf('completed')>=0||(a.indexOf('status manual')>=0&&a.indexOf('closed')>=0))weeks[w].closed++;
+          break;
+        }
+      }
+    }
+  }
+
+  function fmtWeek(ts){var d=new Date(ts);return(d.getDate()<10?'0':'')+d.getDate()+'/'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);}
+  function pctChange(cur,prev){if(!prev)return'';var pct=Math.round((cur-prev)/prev*100);if(pct===0)return'';return' <span style="color:'+(pct>0?'var(--green)':'var(--red)')+';font-size:10px">'+(pct>0?'▲':'▼')+Math.abs(pct)+'%</span>';}
+  function pctChangeClear(cur,prev){if(!prev)return'';var pct=Math.round((cur-prev)/prev*100);if(pct===0)return'';return' <span style="color:'+(pct>0?'var(--green)':'var(--red)')+';font-size:10px">'+(pct>0?'▲':'▼')+Math.abs(pct)+'%</span>';}
+
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
+  h+='<div class="dash-card-title">Evolução semanal</div>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+  h+='<th style="text-align:left;padding:10px 14px;background:#fafaf8;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;width:150px"></th>';
+  for(var w=0;w<weeks.length;w++){
+    var isCurrent=w===weeks.length-1;
+    h+='<th style="text-align:center;padding:10px 8px;background:#fafaf8;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;color:'+(isCurrent?'var(--text)':'var(--muted)')+';font-family:var(--mono)">'+fmtWeek(weeks[w].start)+(isCurrent?' <span style="font-size:8px;background:var(--accent-bg);color:var(--accent);padding:1px 5px;border-radius:8px">atual</span>':'')+'</th>';
+  }
+  h+='</tr></thead><tbody>';
+
+  // Row: Tickets Abertos
+  h+='<tr style="border-bottom:1px solid var(--border)">';
+  h+='<td style="padding:12px 14px;font-weight:700;color:var(--red)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--red);margin-right:6px;vertical-align:middle"></span>Tickets abertos</td>';
+  for(var w=0;w<weeks.length;w++){
+    var bg=w===weeks.length-1?'background:rgba(201,42,42,.03);font-weight:700':'';
+    h+='<td style="text-align:center;padding:12px 8px;font-family:var(--mono);font-weight:600;'+bg+'">'+weeks[w].opened+(w>0?pctChange(weeks[w].opened,weeks[w-1].opened):'')+'</td>';
+  }
+  h+='</tr>';
+
+  // Row: Tickets Clear
+  h+='<tr style="border-bottom:1px solid var(--border)">';
+  h+='<td style="padding:12px 14px;font-weight:700;color:var(--green)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--green);margin-right:6px;vertical-align:middle"></span>Tickets clear</td>';
+  for(var w=0;w<weeks.length;w++){
+    var bg=w===weeks.length-1?'background:rgba(13,122,58,.03);font-weight:700':'';
+    h+='<td style="text-align:center;padding:12px 8px;font-family:var(--mono);font-weight:600;'+bg+'">'+weeks[w].cleared+(w>0?pctChangeClear(weeks[w].cleared,weeks[w-1].cleared):'')+'</td>';
+  }
+  h+='</tr>';
+
+  // Row: Concluídos
+  h+='<tr>';
+  h+='<td style="padding:12px 14px;font-weight:700;color:var(--text2)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--text);opacity:.6;margin-right:6px;vertical-align:middle"></span>Concluídos</td>';
+  for(var w=0;w<weeks.length;w++){
+    var bg=w===weeks.length-1?'background:rgba(0,0,0,.02);font-weight:700':'';
+    h+='<td style="text-align:center;padding:12px 8px;font-family:var(--mono);font-weight:600;'+bg+'">'+weeks[w].closed+(w>0?pctChangeClear(weeks[w].closed,weeks[w-1].closed):'')+'</td>';
+  }
+  h+='</tr>';
+
+  h+='</tbody></table></div></div></div>';
+  return h;
+}
+
+// ── CALENDÁRIO DE VENCIMENTOS ─────────────────────────────────────────────────
+function renderExpirationCalendar(fTickets){
+  var now=new Date();
+  var year=now.getFullYear(),month=now.getMonth();
+  var firstDay=new Date(year,month,1).getDay();
+  var daysInMonth=new Date(year,month+1,0).getDate();
+  var today=now.getDate();
+
+  // Map expiration dates
+  var expirations={};
+  var active=fTickets.filter(function(t){return t.status!=='Closed'&&t.status!=='Cancel';});
+  for(var i=0;i<active.length;i++){
+    var t=active[i],exp=t.expire;if(!exp||exp==='—')continue;
+    try{
+      var d=new Date(exp);if(isNaN(d.getTime()))continue;
+      if(d.getMonth()===month&&d.getFullYear()===year){
+        var day=d.getDate();
+        if(!expirations[day])expirations[day]=[];
+        expirations[day].push(t);
+      }
+    }catch(e){}
+  }
+
+  var monthNames=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="dash-card-title" style="margin-bottom:0">Calendário de vencimentos — '+monthNames[month]+' '+year+'</div>';
+  var expCount=Object.keys(expirations).reduce(function(s,k){return s+expirations[k].length;},0);
+  h+='<span style="font-size:12px;font-family:var(--mono);color:var(--red);font-weight:600">'+expCount+' ticket'+(expCount!==1?'s':'')+' vencendo este mês</span></div>';
+
+  h+='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">';
+  var dayLabels=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  for(var d=0;d<7;d++)h+='<div style="font-size:10px;font-weight:700;color:var(--muted);padding:6px;text-transform:uppercase">'+dayLabels[d]+'</div>';
+
+  // Empty cells before first day
+  for(var d=0;d<firstDay;d++)h+='<div style="padding:8px"></div>';
+
+  for(var d=1;d<=daysInMonth;d++){
+    var isToday=d===today;
+    var hasExp=expirations[d];
+    var isPast=d<today;
+    var cellStyle='padding:8px 4px;border-radius:var(--r);font-size:12px;font-family:var(--mono);font-weight:500;position:relative;';
+    if(isToday)cellStyle+='background:var(--accent-bg);color:var(--accent);font-weight:700;border:1px solid var(--accent);';
+    else if(hasExp&&isPast)cellStyle+='background:var(--red-bg);color:var(--red);font-weight:700;border:1px solid var(--red-border);cursor:pointer;';
+    else if(hasExp)cellStyle+='background:var(--amber-bg);color:var(--amber);font-weight:700;border:1px solid var(--amber-border);cursor:pointer;';
+    else if(isPast)cellStyle+='color:var(--border2);';
+    else cellStyle+='color:var(--text2);';
+
+    var onclick=hasExp?'onclick="showExpTickets('+d+')"':'';
+    h+='<div style="'+cellStyle+'" '+onclick+'>'+d;
+    if(hasExp)h+='<div style="font-size:9px;margin-top:1px">'+hasExp.length+'</div>';
+    h+='</div>';
+  }
+  h+='</div>';
+
+  // Próximos vencimentos (lista)
+  var upcoming=[];
+  for(var day in expirations){
+    if(parseInt(day)>=today){
+      for(var i=0;i<expirations[day].length;i++){
+        upcoming.push({day:parseInt(day),ticket:expirations[day][i]});
+      }
+    }
+  }
+  upcoming.sort(function(a,b){return a.day-b.day;});
+
+  if(upcoming.length){
+    h+='<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">';
+    h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Próximos vencimentos</div>';
+    h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    for(var i=0;i<Math.min(upcoming.length,20);i++){
+      var u=upcoming[i],diff=u.day-today;
+      var urgColor=diff<=2?'var(--red)':diff<=5?'var(--amber)':'var(--muted)';
+      var urgBg=diff<=2?'var(--red-bg)':diff<=5?'var(--amber-bg)':'var(--bg)';
+      h+='<span style="font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:12px;background:'+urgBg+';color:'+urgColor+';cursor:pointer;font-weight:600;border:1px solid '+(diff<=2?'var(--red-border)':diff<=5?'var(--amber-border)':'var(--border)')+'" onclick="openTicketDetail('+u.ticket.id+')">'+u.ticket.ticket+' · '+u.day+'/'+((month+1)<10?'0':'')+(month+1)+' ('+diff+'d)</span>';
+    }
+    if(upcoming.length>20)h+='<span style="font-size:10px;color:var(--muted)">+'+(upcoming.length-20)+' mais</span>';
+    h+='</div></div>';
+  }
+
+  h+='</div></div>';
+  return h;
+}
+
+function showExpTickets(day){
+  var now=new Date(),month=now.getMonth(),year=now.getFullYear();
+  var dateStr=(month+1<10?'0':'')+(month+1)+'/'+(day<10?'0':'')+day+'/'+year;
+  nav('tickets');
+  setTimeout(function(){
+    var el=document.getElementById('tbl-srch');
+    if(el){el.value=dateStr.substring(0,5);renderTable();}
+  },150);
+}
+
+// ── KPIs / METAS POR PROJETO ──────────────────────────────────────────────────
+function renderKPIs(projStats){
+  if(!projStats.length)return'';
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
+  h+='<div class="dash-card-title">Performance por projeto</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
+
+  for(var i=0;i<projStats.length;i++){
+    var p=projStats[i];
+    var clearRate=p.pctClear;
+    var openRate=p.pctOpen;
+    var totalRate=p.pctClear+p.pctConcluido;
+
+    // KPI: Clear rate color
+    var clearColor=clearRate>=60?'var(--green)':clearRate>=30?'var(--amber)':'var(--red)';
+    var clearLabel=clearRate>=60?'Bom':clearRate>=30?'Atenção':'Crítico';
+    // KPI: Open rate (lower is better)
+    var openColor=openRate<=30?'var(--green)':openRate<=60?'var(--amber)':'var(--red)';
+
+    h+='<div style="padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg)">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+    h+='<span style="font-size:13px;font-weight:700;color:var(--text)">'+(p.locs||p.state)+'</span>';
+    h+='<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">'+p.name+'</span>';
+    h+='</div>';
+
+    // Clear rate gauge
+    h+='<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">';
+    h+='<div style="width:48px;height:48px;border-radius:50%;border:4px solid '+clearColor+';display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--white)"><span style="font-size:14px;font-weight:800;font-family:var(--mono);color:'+clearColor+'">'+clearRate+'</span></div>';
+    h+='<div><div style="font-size:12px;font-weight:600;color:var(--text)">% Clear</div><div style="font-size:10px;color:'+clearColor+';font-weight:700">'+clearLabel+'</div></div>';
+    h+='<div style="margin-left:auto;text-align:right"><div style="font-size:10px;color:var(--muted)">'+p.count+' tickets</div><div style="font-size:10px;color:var(--muted)">'+p.ticketFt.toLocaleString()+' ft</div></div>';
+    h+='</div>';
+
+    // Mini bars
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+    h+='<div><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Em aberto</span><span style="color:'+openColor+';font-weight:700;font-family:var(--mono)">'+openRate+'%</span></div><div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:'+openRate+'%;height:100%;background:'+openColor+';border-radius:3px"></div></div></div>';
+    h+='<div><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Progresso total</span><span style="color:var(--green);font-weight:700;font-family:var(--mono)">'+totalRate+'%</span></div><div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:'+totalRate+'%;height:100%;background:var(--green);border-radius:3px"></div></div></div>';
+    h+='</div>';
+
+    if(p.damageFt>0){
+      h+='<div style="margin-top:8px;padding:6px 10px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r);font-size:10px;color:var(--amber);font-weight:600">⚠ '+p.pctDamage+'% damage ('+p.damageFt.toLocaleString()+' ft)</div>';
+    }
+    h+='</div>';
+  }
+  h+='</div></div></div>';
+  return h;
+}
+
+// ── NOTIFICAÇÕES ──────────────────────────────────────────────────────────────
+let _notifications=[];
+function buildNotifications(){
+  _notifications=[];
+  var now=Date.now(),day1=864e5;
+  var recent=tickets.filter(function(t){return t.history&&t.history.length;});
+  for(var i=0;i<recent.length;i++){
+    var t=recent[i];
+    for(var j=t.history.length-1;j>=0;j--){
+      var h=t.history[j];
+      if(!h.ts||h.ts<now-3*day1)continue;
+      var a=(h.action||'').toLowerCase();
+      var type='info',msg='';
+      if(a.indexOf('importado')>=0){type='new';msg='Ticket '+t.ticket+' importado';}
+      else if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0){type='clear';msg='Ticket '+t.ticket+' ficou Clear';}
+      else if(a.indexOf('damage')>=0){type='warn';msg='Ticket '+t.ticket+' marcado Damage';}
+      else continue;
+      _notifications.push({ts:h.ts,type:type,msg:msg,ticketId:t.id});
+    }
+  }
+  // Expiring soon
+  var today=new Date();today.setHours(0,0,0,0);
+  for(var i=0;i<tickets.length;i++){
+    var t=tickets[i];if(t.status==='Closed'||t.status==='Cancel'||!t.expire||t.expire==='—')continue;
+    try{
+      var d=new Date(t.expire);var diff=(d-today)/day1;
+      if(diff>=0&&diff<=2){_notifications.push({ts:now,type:'urgent',msg:'Ticket '+t.ticket+' vence '+(diff===0?'HOJE':'em '+Math.ceil(diff)+' dia'+(diff>1?'s':'')),ticketId:t.id});}
+    }catch(e){}
+  }
+  _notifications.sort(function(a,b){return b.ts-a.ts;});
+  _notifications=_notifications.slice(0,30);
+  updateNotifBadge();
+}
+function updateNotifBadge(){
+  var el=document.getElementById('notif-count');
+  if(el){
+    var urgent=_notifications.filter(function(n){return n.type==='urgent'||n.type==='warn';}).length;
+    el.textContent=urgent||'';
+    el.style.display=urgent?'flex':'none';
+  }
+}
+function toggleNotifPanel(){
+  var p=document.getElementById('notif-panel');if(!p)return;
+  var open=p.style.display==='none';
+  p.style.display=open?'block':'none';
+  if(open)renderNotifPanel();
+}
+function renderNotifPanel(){
+  var el=document.getElementById('notif-list');if(!el)return;
+  if(!_notifications.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:12px">Sem notificações recentes</div>';return;}
+  var icons={urgent:'🔴',warn:'⚠️',clear:'✅',new:'🆕',info:'ℹ️'};
+  var now=Date.now();
+  el.innerHTML=_notifications.map(function(n){
+    var ago=Math.round((now-n.ts)/60000);
+    var agoStr=ago<60?ago+'min':ago<1440?Math.round(ago/60)+'h':Math.round(ago/1440)+'d';
+    return'<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px" onclick="openTicketDetail('+n.ticketId+');toggleNotifPanel()"><span>'+icons[n.type]+'</span><div style="flex:1"><div style="color:var(--text)">'+n.msg+'</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono)">'+agoStr+' atrás</div></div></div>';
+  }).join('');
+}
+
+// ── BUSCA GLOBAL ──────────────────────────────────────────────────────────────
+function globalSearch(query){
+  var q=(query||'').toLowerCase().trim();
+  var el=document.getElementById('search-results');if(!el)return;
+  if(q.length<2){el.style.display='none';return;}
+  var results=[];
+  // Search tickets
+  for(var i=0;i<tickets.length&&results.length<8;i++){
+    var t=tickets[i];
+    if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.location||'').toLowerCase().includes(q)){
+      results.push({type:'ticket',label:t.ticket,sub:t.client+' · '+t.location+', '+t.state,status:t.status,id:t.id});
+    }
+  }
+  // Search projects
+  for(var i=0;i<projects.length&&results.length<12;i++){
+    var p=projects[i];
+    if(p.name.toLowerCase().includes(q)||(p.client||'').toLowerCase().includes(q)){
+      results.push({type:'project',label:p.name,sub:p.client+' · '+p.state,id:p.id});
+    }
+  }
+  if(!results.length){el.style.display='none';return;}
+  var icons={ticket:'📋',project:'📁'};
+  var statusColors={Open:'var(--red)',Clear:'var(--green)',Damage:'var(--amber)'};
+  el.innerHTML=results.map(function(r){
+    var onclick=r.type==='ticket'?'searchClick(&quot;ticket&quot;,&quot;'+r.id+'&quot;)':'searchClick(&quot;project&quot;,&quot;'+r.id+'&quot;)';
+    return '<div style="display:flex;gap:8px;padding:8px 10px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)" onclick="'+onclick+'" onmouseover="this.style.background=\'rgba(255,255,255,.05)\'" onmouseout="this.style.background=\'transparent\'"><span>'+icons[r.type]+'</span><div style="flex:1;min-width:0"><div style="font-size:12px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.label+'</div><div style="font-size:10px;color:rgba(255,255,255,.4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.sub+'</div></div>'+(r.status?'<span style="font-size:9px;font-weight:700;color:'+(statusColors[r.status]||'var(--muted)')+'">'+r.status+'</span>':'')+'</div>';
+  }).join('');
+  el.style.display='block';
+}
+function searchClick(type,id){
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('global-search').value='';
+  if(type==='ticket')openTicketDetail(parseInt(id));
+  else{progProjVal=id;nav('dash');}
 }
 
 function filterByUtil(utilName){

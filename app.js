@@ -162,16 +162,8 @@ async function doLogout(){
 
 function enterApp(){
   try{
-  document.getElementById('app-shell').style.display='flex';
-  console.log('[enterApp] shell visible, projects:',projects.length,'tickets:',tickets.length);
-  // DEBUG: force test content
-  setTimeout(()=>{
-    const dc=document.getElementById('dash-content');
-    console.log('[DEBUG] dash-content element:',dc,'parent:',dc?.parentElement?.id,'parentDisplay:',dc?.parentElement?.style?.display,window.getComputedStyle(dc?.parentElement).display);
-    const pg=document.getElementById('proj-grid');
-    console.log('[DEBUG] proj-grid element:',pg,'innerHTML length:',pg?.innerHTML?.length);
-    if(dc&&dc.innerHTML.length<10){dc.innerHTML='<div style="padding:40px;font-size:18px;color:red"><b>DEBUG:</b> enterApp rodou mas dash vazio! projects='+projects.length+' tickets='+tickets.length+'</div>';}
-  },2000);
+  document.getElementById('app-shell').style.display='grid';
+  console.log('[enterApp] projects:',projects.length,'tickets:',tickets.length);
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
@@ -1507,10 +1499,9 @@ function filterByUtil(utilName){
 }
 
 function nav(page){if(isSharedView)return;
-  document.querySelectorAll('.page').forEach(p=>{p.classList.remove('active');p.style.display='none';});
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));
-  const pg=document.getElementById('pg-'+page);
-  if(pg){pg.classList.add('active');pg.style.display=(page==='map'||page==='tickets')?'flex':'block';}
+  const pg=document.getElementById('pg-'+page);if(pg)pg.classList.add('active');
   const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');
   if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}
   if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();

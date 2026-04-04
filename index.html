@@ -114,10 +114,6 @@
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
         Tickets
       </button>
-      <button class="snav-item" data-page="contacts" onclick="nav('contacts')">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
-        Contatos
-      </button>
     </nav>
     <div class="snav-actions">
       <button class="btn btn-sm snav-action-btn" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
@@ -139,6 +135,7 @@
         <button onclick="toggleNotifPanel()" style="background:none;border:none;font-size:16px;cursor:pointer;color:var(--muted)">×</button>
       </div>
       <div id="notif-list"></div>
+    </div>
     </div>
   </aside>
 
@@ -275,73 +272,6 @@
       <tbody id="tbl-body"></tbody>
     </table>
   </div></div>
-</div>
-
-<!-- Contacts Page -->
-<div class="page" id="pg-contacts">
-  <div style="display:flex;flex-direction:column;height:100%;background:var(--bg)">
-    <div style="display:flex;gap:8px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--white);flex-wrap:wrap">
-      <input class="fi" style="max-width:220px" id="ct-srch" placeholder="Buscar utility, contato..." oninput="renderContacts()">
-      <select class="fi" style="max-width:180px" id="ct-proj" onchange="renderContacts()"><option value="">Todos projetos</option></select>
-      <select class="fi" style="max-width:130px" id="ct-state" onchange="renderContacts()"><option value="">Todos estados</option><option>FL</option><option>IN</option></select>
-      <span style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-left:4px" id="ct-count"></span>
-      <div style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="exportContacts()">↓ Excel contatos</button>
-        <button class="btn btn-sm btn-primary" id="btn-new-contact" onclick="openNewContact()" style="display:none">+ Contato</button>
-      </div>
-    </div>
-    <div style="flex:1;overflow-y:auto;padding:18px">
-      <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden" id="ct-table-wrap">
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead><tr>
-            <th onclick="sortContacts('utility_name')">Utility</th>
-            <th>Código</th>
-            <th>Tipo</th>
-            <th onclick="sortContacts('contact_name')">Contato</th>
-            <th>Telefone</th>
-            <th>Alternativo</th>
-            <th>Emergência</th>
-            <th>Estado</th>
-            <th>Ações</th>
-          </tr></thead>
-          <tbody id="ct-body"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL: New/Edit Contact -->
-<div class="overlay" id="ov-contact">
-  <div class="modal">
-    <div class="modal-head"><div class="mtitle" id="contact-modal-title">Novo contato</div><button class="modal-close" onclick="closeModal('ov-contact')">×</button></div>
-    <div class="fgrid">
-      <div class="fg full"><label class="fl">Utility</label><input class="finp" id="cm-utility" placeholder="DUKE ENERGY - ST PETERSBURG"></div>
-      <div class="fg"><label class="fl">Código serviço</label><input class="finp" id="cm-code" placeholder="SPC51A"></div>
-      <div class="fg"><label class="fl">Tipo</label><input class="finp" id="cm-type" placeholder="ELECTRIC"></div>
-      <div class="fg"><label class="fl">Estado</label><select class="fsel" id="cm-state"><option>FL</option><option>IN</option></select></div>
-      <div class="fg"><label class="fl">Localidade</label><input class="finp" id="cm-location" placeholder="Orlando, Tangelo Park"></div>
-      <div class="fg full" style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);margin-top:4px"><div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Contato principal</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="fg"><label class="fl">Nome</label><input class="finp" id="cm-cname" placeholder="John Smith"></div>
-          <div class="fg"><label class="fl">Telefone</label><input class="finp" id="cm-cphone" placeholder="(321) 947-3131"></div>
-        </div>
-      </div>
-      <div class="fg full" style="padding:12px;background:var(--accent-bg);border:1px solid #c3d7ff;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Contato alternativo</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="fg"><label class="fl">Nome</label><input class="finp" id="cm-aname" placeholder=""></div>
-          <div class="fg"><label class="fl">Telefone</label><input class="finp" id="cm-aphone" placeholder=""></div>
-        </div>
-      </div>
-      <div class="fg full" style="padding:12px;background:var(--red-bg);border:1px solid var(--red-border);border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Emergência</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="fg"><label class="fl">Nome / Org</label><input class="finp" id="cm-ename" placeholder=""></div>
-          <div class="fg"><label class="fl">Telefone</label><input class="finp" id="cm-ephone" placeholder=""></div>
-        </div>
-      </div>
-    </div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-contact')">Cancelar</button><button class="btn btn-primary" onclick="saveContact()">Salvar</button></div>
-  </div>
 </div>
 
   </div><!-- /main-area -->

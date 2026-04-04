@@ -1506,7 +1506,15 @@ function filterByUtil(utilName){
   },100);
 }
 
-function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();}
+function nav(page){if(isSharedView)return;
+  document.querySelectorAll('.page').forEach(p=>{p.classList.remove('active');p.style.display='none';});
+  document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));
+  const pg=document.getElementById('pg-'+page);
+  if(pg){pg.classList.add('active');pg.style.display=(page==='map'||page==='tickets')?'flex':'block';}
+  const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');
+  if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}
+  if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();
+}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;

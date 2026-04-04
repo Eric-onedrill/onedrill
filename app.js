@@ -171,7 +171,7 @@ function enterApp(){
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='');}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
-  loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
+  loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();loadContactsCache();});
   setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();buildNotifications();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
@@ -835,10 +835,23 @@ function renderUtilSummaryHtml(){
   return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;align-items:center"><span style="font-size:12px;font-family:var(--mono);color:var(--red);font-weight:600">${totalPending} pendências</span><span style="font-size:12px;font-family:var(--mono);color:var(--muted)">${ticketsWithPending.size} tickets</span><button class="btn btn-sm" onclick="exportAllPending()" style="font-size:11px">↓ Excel pendentes</button></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];const safeName=name.replace(/'/g,"\\'");return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text);cursor:pointer" onclick="filterByUtil('${safeName}')">${name}</span><div style="display:flex;gap:4px;align-items:center"><button style="font-size:10px;padding:2px 6px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);cursor:pointer;font-family:var(--mono)" onclick="event.stopPropagation();exportUtilPending('${safeName}')" title="Exportar Excel">${count} ↓</button></div></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div></div>`;}).join('')}</div></div></div>`;
 }
 
+let contactsCache={};
+async function loadContactsCache(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+    const data=await r.json();
+    contactsCache={};
+    if(data&&data.length){for(const c of data){contactsCache[c.utility_name]=c;}}
+    console.log('[Contacts] '+Object.keys(contactsCache).length+' utilities com contatos');
+  }catch(e){console.log('[Contacts] Tabela nao encontrada ou vazia:',e.message);}
+}
+function getContact(utilName){return contactsCache[utilName]||null;}
+
 function exportUtilPending(utilName){
   const openTks=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
   const matching=openTks.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
   if(!matching.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
+  const contact=getContact(utilName);
   const wb=XLSX.utils.book_new();
   const rows=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço']];
   for(const t of matching){
@@ -846,14 +859,21 @@ function exportUtilPending(utilName){
     rows.push([t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address]);
   }
   rows.push(['','','','','','','TOTAL:',matching.reduce((s,t)=>s+(t.footage||0),0),'','']);
+  if(contact){
+    rows.push([]);
+    rows.push(['CONTATOS — '+utilName]);
+    if(contact.contact_name||contact.contact_phone)rows.push(['Contato:',contact.contact_name,contact.contact_phone]);
+    if(contact.alternate_name||contact.alternate_phone)rows.push(['Alternativo:',contact.alternate_name,contact.alternate_phone]);
+    if(contact.emergency_name||contact.emergency_phone)rows.push(['Emergência:',contact.emergency_name,contact.emergency_phone]);
+  }
   const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
   XLSX.writeFile(wb,'Pendentes_'+utilName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast(matching.length+' tickets pendentes — '+utilName,'success');
+  toast(matching.length+' tickets pendentes — '+utilName+(contact?' (com contatos)':''),'success');
 }
 
 function exportAllPending(){
   const openTks=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
-  const rows=[['Utility','Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço']];
+  const rows=[['Utility','Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço','Contato','Telefone','Tel. Alternativo','Tel. Emergência']];
   const utilMap={};
   for(const t of openTks){
     const pends=getTicketPendingUtils(t.ticket);
@@ -864,13 +884,14 @@ function exportAllPending(){
   }
   const sorted=Object.entries(utilMap).sort((a,b)=>b[1].length-a[1].length);
   for(const[name,tks]of sorted){
+    const contact=getContact(name);
     for(const t of tks){
       const proj=projects.find(p=>p.id===t.projectId);
-      rows.push([name,t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address]);
+      rows.push([name,t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address,contact?contact.contact_name:'',contact?contact.contact_phone:'',contact?contact.alternate_phone:'',contact?contact.emergency_phone:'']);
     }
   }
   const totalFt=rows.slice(1).reduce((s,r)=>s+(r[8]||0),0);
-  rows.push(['','','','','','','','TOTAL:',totalFt,'','']);
+  rows.push(['','','','','','','','TOTAL:',totalFt,'','','','','','']);
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Todas Pendentes');
   XLSX.writeFile(wb,'Pendentes_Todas_'+new Date().toISOString().slice(0,10)+'.xlsx');
@@ -1314,6 +1335,145 @@ function searchClick(type,id){
   else{progProjVal=id;nav('dash');}
 }
 
+// ── CONTACTS PAGE ────────────────────────────────────────────────────────────
+let allContacts=[],contactSortCol='utility_name',contactSortAsc=true,editingContactId=null;
+
+async function loadAllContacts(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+    allContacts=await r.json();
+    if(!Array.isArray(allContacts))allContacts=[];
+  }catch(e){allContacts=[];console.log('[Contacts] Load error:',e);}
+}
+
+function renderContacts(){
+  loadAllContacts().then(()=>{renderContactsTable();});
+}
+
+function renderContactsTable(){
+  const sr=(document.getElementById('ct-srch')?.value||'').toLowerCase();
+  const pf=document.getElementById('ct-proj')?.value||'';
+  const sf=document.getElementById('ct-state')?.value||'';
+  
+  // Sync project dropdown
+  const projSel=document.getElementById('ct-proj');
+  if(projSel&&projSel.options.length<=1){
+    projSel.innerHTML='<option value="">Todos projetos</option>'+projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  }
+  
+  // Show add button for admins
+  const addBtn=document.getElementById('btn-new-contact');
+  if(addBtn)addBtn.style.display=isAdmin?'':'none';
+  
+  let f=allContacts.filter(c=>{
+    if(sf&&c.state!==sf)return false;
+    if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.contact_name||'').toLowerCase().includes(sr)&&!(c.contact_phone||'').includes(sr)&&!(c.location||'').toLowerCase().includes(sr))return false;
+    return true;
+  });
+  
+  f.sort((a,b)=>{
+    const av=(a[contactSortCol]||'').toLowerCase(),bv=(b[contactSortCol]||'').toLowerCase();
+    return contactSortAsc?av.localeCompare(bv):bv.localeCompare(av);
+  });
+  
+  document.getElementById('ct-count').textContent=f.length+' contato'+(f.length!==1?'s':'');
+  document.getElementById('ct-body').innerHTML=f.length?f.map(c=>{
+    const hasPhone=c.contact_phone||c.alternate_phone||c.emergency_phone;
+    return`<tr>
+      <td style="font-weight:600;font-size:13px">${c.utility_name||'—'}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${c.service_area_code||'—'}</td>
+      <td style="font-size:12px;color:var(--text2)">${c.utility_type||'—'}</td>
+      <td style="font-size:12px">${c.contact_name||'—'}</td>
+      <td style="font-family:var(--mono);font-size:12px;color:var(--accent)">${c.contact_phone?'<a href="tel:'+c.contact_phone+'" style="color:var(--accent);text-decoration:none">'+c.contact_phone+'</a>':'—'}</td>
+      <td style="font-family:var(--mono);font-size:11px">${c.alternate_phone?'<a href="tel:'+c.alternate_phone+'" style="color:var(--text2);text-decoration:none">'+c.alternate_phone+'</a>':'—'}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--red)">${c.emergency_phone?'<a href="tel:'+c.emergency_phone+'" style="color:var(--red);text-decoration:none">'+c.emergency_phone+'</a>':'—'}</td>
+      <td><span class="sbadge" style="background:var(--bg);color:var(--text2)">${c.state||'—'}</span></td>
+      <td onclick="event.stopPropagation()"><div style="display:flex;gap:4px">${isAdmin?'<button class="btn btn-sm" onclick="editContact('+c.id+')">Editar</button><button class="btn btn-sm" style="color:var(--red)" onclick="deleteContact('+c.id+')">×</button>':''}</div></td>
+    </tr>`;
+  }).join(''):'<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted)">Nenhum contato encontrado. Use o botão "+ Contato" ou rode o scraping de contatos.</td></tr>';
+}
+
+function sortContacts(col){contactSortAsc=contactSortCol===col?!contactSortAsc:true;contactSortCol=col;renderContactsTable();}
+
+function openNewContact(){
+  editingContactId=null;
+  document.getElementById('contact-modal-title').textContent='Novo contato';
+  ['cm-utility','cm-code','cm-type','cm-location','cm-cname','cm-cphone','cm-aname','cm-aphone','cm-ename','cm-ephone'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('cm-state').value='FL';
+  openModal('ov-contact');
+}
+
+function editContact(id){
+  const c=allContacts.find(x=>x.id===id);if(!c)return;
+  editingContactId=id;
+  document.getElementById('contact-modal-title').textContent='Editar contato';
+  document.getElementById('cm-utility').value=c.utility_name||'';
+  document.getElementById('cm-code').value=c.service_area_code||'';
+  document.getElementById('cm-type').value=c.utility_type||'';
+  document.getElementById('cm-state').value=c.state||'FL';
+  document.getElementById('cm-location').value=c.location||'';
+  document.getElementById('cm-cname').value=c.contact_name||'';
+  document.getElementById('cm-cphone').value=c.contact_phone||'';
+  document.getElementById('cm-aname').value=c.alternate_name||'';
+  document.getElementById('cm-aphone').value=c.alternate_phone||'';
+  document.getElementById('cm-ename').value=c.emergency_name||'';
+  document.getElementById('cm-ephone').value=c.emergency_phone||'';
+  openModal('ov-contact');
+}
+
+async function saveContact(){
+  if(!await requireAuth())return;
+  const data={
+    utility_name:document.getElementById('cm-utility').value.trim(),
+    service_area_code:document.getElementById('cm-code').value.trim(),
+    utility_type:document.getElementById('cm-type').value.trim(),
+    state:document.getElementById('cm-state').value,
+    location:document.getElementById('cm-location').value.trim(),
+    contact_name:document.getElementById('cm-cname').value.trim(),
+    contact_phone:document.getElementById('cm-cphone').value.trim(),
+    alternate_name:document.getElementById('cm-aname').value.trim(),
+    alternate_phone:document.getElementById('cm-aphone').value.trim(),
+    emergency_name:document.getElementById('cm-ename').value.trim(),
+    emergency_phone:document.getElementById('cm-ephone').value.trim(),
+    updated_at:new Date().toISOString()
+  };
+  if(!data.utility_name){toast('Preencha o nome da utility.','danger');return;}
+  
+  let res;
+  if(editingContactId){
+    res=await sb.from('utility_contacts').update(data).eq('id',editingContactId);
+  }else{
+    res=await sb.from('utility_contacts').insert(data);
+  }
+  if(res.error){toast('Erro: '+res.error.message,'danger');return;}
+  closeModal('ov-contact');
+  toast(editingContactId?'Contato atualizado!':'Contato criado!','success');
+  renderContacts();
+  loadContactsCache();
+}
+
+async function deleteContact(id){
+  if(!confirm('Excluir este contato?'))return;
+  if(!await requireAuth())return;
+  const res=await sb.from('utility_contacts').delete().eq('id',id);
+  if(res.error){toast('Erro: '+res.error.message,'danger');return;}
+  toast('Contato excluído','success');
+  renderContacts();
+  loadContactsCache();
+}
+
+function exportContacts(){
+  if(!allContacts.length){toast('Nenhum contato para exportar','warn');return;}
+  const wb=XLSX.utils.book_new();
+  const rows=[['Utility','Código','Tipo','Estado','Localidade','Contato','Telefone','Alternativo Nome','Alternativo Tel','Emergência Nome','Emergência Tel']];
+  for(const c of allContacts){
+    rows.push([c.utility_name,c.service_area_code,c.utility_type,c.state,c.location,c.contact_name,c.contact_phone,c.alternate_name,c.alternate_phone,c.emergency_name,c.emergency_phone]);
+  }
+  const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Contatos');
+  XLSX.writeFile(wb,'OneDrill_Contatos_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(allContacts.length+' contatos exportados','success');
+}
+
 function filterByUtil(utilName){
   nav('tickets');
   setTimeout(()=>{
@@ -1322,7 +1482,7 @@ function filterByUtil(utilName){
   },100);
 }
 
-function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;

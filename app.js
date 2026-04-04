@@ -935,25 +935,31 @@ function renderContacts(){
   const sf=document.getElementById('contacts-state-filter')?.value||'';
   let f=utilContacts.filter(c=>{if(sf&&(c.state||'')!==sf)return false;if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;return true;});
   if(!f.length){grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';return;}
-  grid.innerHTML=f.map(c=>{
-    const phones=[];
-    if(c.phone_main)phones.push('<div class="cc-phone"><span class="cc-tag cc-tag-main">Principal</span> <a href="tel:'+c.phone_main+'">'+c.phone_main+'</a></div>');
-    if(c.phone_alt)phones.push('<div class="cc-phone"><span class="cc-tag cc-tag-alt">Alternativo</span> <a href="tel:'+c.phone_alt+'">'+c.phone_alt+'</a></div>');
-    if(c.phone_emergency)phones.push('<div class="cc-phone"><span class="cc-tag cc-tag-emerg">Emergência</span> <a href="tel:'+c.phone_emergency+'">'+c.phone_emergency+'</a></div>');
-    return'<div class="contact-card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="cc-name">'+c.utility_name+'</div><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border);font-family:var(--mono)">'+(c.state||'—')+'</span></div><div class="cc-phones">'+phones.join('')+'</div>'+(c.notes?'<div class="cc-meta">'+c.notes+'</div>':'')+(isAdmin?'<div class="cc-actions"><button class="btn btn-sm" onclick="editContact('+c.id+')">Editar</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')">Excluir</button></div>':'')+'</div>';
+  // Agrupa por utility
+  const byUtil={};
+  for(const c of f){const key=c.utility_name||'?';if(!byUtil[key])byUtil[key]=[];byUtil[key].push(c);}
+  grid.innerHTML=Object.entries(byUtil).map(([util,contacts])=>{
+    return'<div class="contact-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="cc-name">'+util+'</div><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border);font-family:var(--mono)">'+(contacts[0].state||'—')+'</span></div>'+contacts.map(c=>{
+      const name=c.contact_name||'';
+      const phones=[];
+      if(c.phone_main)phones.push('<span class="cc-tag cc-tag-main">Principal</span> <a href="tel:'+c.phone_main+'">'+c.phone_main+'</a>');
+      if(c.phone_alt)phones.push('<span class="cc-tag cc-tag-alt">Alt.</span> <a href="tel:'+c.phone_alt+'">'+c.phone_alt+'</a>');
+      if(c.phone_emergency)phones.push('<span class="cc-tag cc-tag-emerg">Emerg.</span> <a href="tel:'+c.phone_emergency+'">'+c.phone_emergency+'</a>');
+      return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--border)">'+(name?'<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:120px">'+name+'</span>':'')+'<div class="cc-phones" style="margin:0;gap:10px">'+phones.join(' ')+'</div>'+(isAdmin?'<div style="display:flex;gap:4px;margin-left:8px"><button class="btn btn-sm" onclick="editContact('+c.id+')" style="font-size:10px;padding:2px 6px">✏</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')" style="font-size:10px;padding:2px 6px">×</button></div>':'')+'</div>';
+    }).join('')+(c.notes?'<div class="cc-meta" style="margin-top:6px">'+contacts[0].notes+'</div>':'')+'</div>';
   }).join('');
 }
 function openContactModal(id){
   editingContactId=id||null;
   document.getElementById('contact-modal-title').textContent=id?'Editar contato':'Novo contato';
-  if(id){const c=utilContacts.find(x=>x.id===id);if(c){document.getElementById('ct-utility').value=c.utility_name||'';document.getElementById('ct-state').value=c.state||'FL';document.getElementById('ct-ticket').value=c.ticket_ref||'';document.getElementById('ct-phone1').value=c.phone_main||'';document.getElementById('ct-phone2').value=c.phone_alt||'';document.getElementById('ct-phone3').value=c.phone_emergency||'';document.getElementById('ct-notes').value=c.notes||'';}}
-  else{['ct-utility','ct-ticket','ct-phone1','ct-phone2','ct-phone3','ct-notes'].forEach(id=>document.getElementById(id).value='');document.getElementById('ct-state').value='FL';}
+  if(id){const c=utilContacts.find(x=>x.id===id);if(c){document.getElementById('ct-utility').value=c.utility_name||'';document.getElementById('ct-name').value=c.contact_name||'';document.getElementById('ct-state').value=c.state||'FL';document.getElementById('ct-ticket').value=c.ticket_ref||'';document.getElementById('ct-phone1').value=c.phone_main||'';document.getElementById('ct-phone2').value=c.phone_alt||'';document.getElementById('ct-phone3').value=c.phone_emergency||'';document.getElementById('ct-notes').value=c.notes||'';}}
+  else{['ct-utility','ct-name','ct-ticket','ct-phone1','ct-phone2','ct-phone3','ct-notes'].forEach(id=>document.getElementById(id).value='');document.getElementById('ct-state').value='FL';}
   openModal('ov-contact');
 }
 function editContact(id){openContactModal(id);}
 async function saveContact(){
   const name=document.getElementById('ct-utility').value.trim();if(!name){toast('Preencha o nome da utility.','danger');return;}
-  const data={utility_name:name,state:document.getElementById('ct-state').value,ticket_ref:document.getElementById('ct-ticket').value.trim(),phone_main:document.getElementById('ct-phone1').value.trim(),phone_alt:document.getElementById('ct-phone2').value.trim(),phone_emergency:document.getElementById('ct-phone3').value.trim(),notes:document.getElementById('ct-notes').value.trim()};
+  const data={utility_name:name,contact_name:document.getElementById('ct-name').value.trim(),state:document.getElementById('ct-state').value,ticket_ref:document.getElementById('ct-ticket').value.trim(),phone_main:document.getElementById('ct-phone1').value.trim(),phone_alt:document.getElementById('ct-phone2').value.trim(),phone_emergency:document.getElementById('ct-phone3').value.trim(),notes:document.getElementById('ct-notes').value.trim()};
   try{let res;if(editingContactId){res=await fetch(SUPABASE_URL+'/rest/v1/utility_contacts?id=eq.'+editingContactId,{method:'PATCH',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}else{res=await fetch(SUPABASE_URL+'/rest/v1/utility_contacts',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}
   if(!res.ok)throw new Error('HTTP '+res.status);await loadContacts();renderContacts();closeModal('ov-contact');toast('Contato salvo!','success');}catch(e){toast('Erro ao salvar: '+e.message,'danger');}
 }
@@ -963,7 +969,7 @@ async function deleteContact(id){
 }
 function exportContacts(){
   if(!utilContacts.length){toast('Nenhum contato.','warn');return;}
-  const wb=XLSX.utils.book_new();const data=[['Utility','Estado','Tel. Principal','Tel. Alternativo','Tel. Emergência','Ticket Ref','Notas'],...utilContacts.map(c=>[c.utility_name,c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',c.ticket_ref||'',c.notes||''])];
+  const wb=XLSX.utils.book_new();const data=[['Utility','Nome Contato','Estado','Tel. Principal','Tel. Alternativo','Tel. Emergência','Ticket Ref','Notas'],...utilContacts.map(c=>[c.utility_name,c.contact_name||'',c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',c.ticket_ref||'',c.notes||''])];
   const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Contatos');XLSX.writeFile(wb,'OneDrill_Contatos_'+new Date().toISOString().slice(0,10)+'.xlsx');toast('Contatos exportados!','success');
 }
 

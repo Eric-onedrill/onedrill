@@ -968,6 +968,9 @@ function exportContacts(){
 }
 
 window.addEventListener('load',async()=>{
+  // Network detection
+  window.addEventListener('offline',()=>{toast('⚠ Sem conexão — alterações não serão salvas','danger');setSyncStatus(false,'Offline');});
+  window.addEventListener('online',()=>{toast('✅ Conexão restaurada','success');setSyncStatus(true,'Online');});
   document.querySelector('#loading-screen div:last-child').textContent='Conectando ao Supabase...';
   const ok=await initSupabase();
   document.getElementById('loading-screen').style.display='none';

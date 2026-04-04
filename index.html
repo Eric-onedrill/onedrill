@@ -93,6 +93,8 @@
     <div class="gsearch-wrap"><input class="gsearch-inp" id="gsearch" placeholder="Buscar ticket, cliente..." oninput="globalSearch(this.value)" onfocus="this.parentElement.classList.add('focus')" onblur="setTimeout(()=>this.parentElement.classList.remove('focus'),200)"><div class="gsearch-dd" id="gsearch-dd"></div></div>
     <button class="notif-btn" id="notif-btn" onclick="toggleNotifPanel()">🔔<span class="notif-badge" id="notif-badge" style="display:none">0</span></button>
     <div class="notif-panel" id="notif-panel"></div>
+    <button class="notif-btn" onclick="toggleInfoPanel()">ℹ️</button>
+    <div class="notif-panel" id="info-panel"></div>
     <div class="sync-indicator"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
     <span class="role-badge" id="role-badge">VIEWER</span>
     <button class="btn" onclick="exportExcel()">↓ Excel</button>

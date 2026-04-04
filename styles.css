@@ -79,7 +79,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .snav-bottom-btns{display:flex;gap:4px;flex-wrap:wrap}
 .snav-foot-btn{background:none;border:1px solid rgba(255,255,255,.06);border-radius:var(--r);padding:5px 10px;font-size:11px;color:rgba(255,255,255,.4);cursor:pointer;font-family:var(--font);font-weight:500;transition:all .15s}
 .snav-foot-btn:hover{color:rgba(255,255,255,.8);background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12)}
-.main-area{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;position:relative}
+.main-area{flex:1;display:flex;flex-direction:column;min-width:0;height:100%;overflow:hidden;position:relative}
 
 /* ── Mobile Nav ── */
 .mob-topbar{display:none;align-items:center;height:50px;padding:0 12px;background:#1a1a14;border-bottom:1px solid rgba(255,255,255,.06);gap:10px;z-index:150;flex-shrink:0}
@@ -115,11 +115,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .b-open{background:var(--red-bg);color:var(--red)}.b-clear{background:var(--green-bg);color:var(--green)}.b-damage{background:var(--amber-bg);color:var(--amber)}.b-closed{background:#eeeeec;color:#888}.b-cancel{background:var(--purple-bg);color:var(--purple)}
 
 /* ── Pages ── */
-.page{display:none;flex:1;min-height:0;overflow:hidden}.page.active{display:flex}
+.page{display:none;flex:1;min-height:0;overflow:hidden}.page.active{display:flex;height:100%}
 
 /* ── Dashboard ── */
 #pg-dash{flex-direction:column;overflow-y:auto;background:var(--bg)}
-.dash-inner{padding:32px;max-width:1320px;width:100%;margin:0 auto}
+.dash-inner{padding:32px;max-width:1320px;width:100%;margin:0 auto;flex-shrink:0}
 .page-title{font-size:22px;font-weight:800;color:var(--text);margin-bottom:24px;letter-spacing:-.4px;display:flex;align-items:center;gap:12px}
 .stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:28px}
 .stat-card{background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;transition:all .2s var(--ease);position:relative;overflow:hidden}

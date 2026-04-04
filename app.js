@@ -23,6 +23,13 @@ let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
 
+// Utilities
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+const debouncedRedraw=debounce(()=>redrawAll(),250);
+const debouncedTable=debounce(()=>renderTable(),250);
+const debouncedContacts=debounce(()=>renderContacts(),250);
+
 async function loadUtilCache(){
   try{
     // Busca paginada — Supabase tem limite de 1000 rows por request
@@ -100,6 +107,7 @@ async function initSupabase(){
     const{p,t}=await Promise.race([fetchData(),timeout]);
     projects=(p||[]).map(dbToProject);
     tickets=(t||[]).map(dbToTicket);
+    rebuildSupersededSet();
     return true;
   }catch(e){console.error('Supabase error:',e);return false;}
 }
@@ -170,7 +178,7 @@ function enterApp(){
   syncAll();renderDash();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
   loadContacts().then(()=>renderContacts());
-  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
+  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -342,7 +350,7 @@ async function renderMap(){
   if(clusterGroup)map.addLayer(clusterGroup);
 }
 
-function buildPopup(t,c){const proj=projects.find(p=>p.id===t.projectId);return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px"><div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${t.ticket}</div>${proj?`<div><span style="color:#9a9888">Projeto: </span>${proj.name}</div>`:''}<div><span style="color:#9a9888">Cliente: </span>${t.client}</div>${t.prime?`<div><span style="color:#9a9888">Prime: </span>${t.prime}</div>`:''}<div><span style="color:#9a9888">Footage: </span>${t.footage} ft</div>${t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${t.tipo}</div>`:''}<div><span style="color:#9a9888">Status: </span><span style="color:${c};font-weight:700">${t.status}</span></div><div><span style="color:#9a9888">Expira: </span>${t.expire||'—'}</div>${t.address?`<div><span style="color:#9a9888">Endereço: </span>${t.address}</div>`:''}<div style="margin-top:7px;padding-top:7px;border-top:1px solid #e2e0da;display:flex;gap:8px"><a href="#" onclick="openTicketDetail(${t.id});return false;" style="color:#1a6cf0;font-size:12px;font-weight:600">Detalhes →</a><a href="#" onclick="openNavigation(${t.id});return false;" style="color:#16a34a;font-size:12px;font-weight:600">🗺 Navegar</a></div></div>`;}
+function buildPopup(t,c){const proj=projects.find(p=>p.id===t.projectId);return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px"><div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${t.ticket}</div>${proj?`<div><span style="color:#9a9888">Projeto: </span>${proj.name}</div>`:''}<div><span style="color:#9a9888">Cliente: </span>${t.client}</div>${t.prime?`<div><span style="color:#9a9888">Prime: </span>${t.prime}</div>`:''}<div><span style="color:#9a9888">Footage: </span>${t.footage} ft</div>${t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${t.tipo}</div>`:''}<div><span style="color:#9a9888">Status: </span><span style="color:${c};font-weight:700">${t.status}</span></div><div><span style="color:#9a9888">Expira: </span>${t.expire||'—'}</div>${t.address?`<div><span style="color:#9a9888">Endereço: </span>${esc(t.address||"")}</div>`:''}<div style="margin-top:7px;padding-top:7px;border-top:1px solid #e2e0da;display:flex;gap:8px"><a href="#" onclick="openTicketDetail(${t.id});return false;" style="color:#1a6cf0;font-size:12px;font-weight:600">Detalhes →</a><a href="#" onclick="openNavigation(${t.id});return false;" style="color:#16a34a;font-size:12px;font-weight:600">🗺 Navegar</a></div></div>`;}
 
 function openNavigation(id){const t=tickets.find(x=>x.id===id);if(!t)return;const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath[0]:t._geocoded;if(coords){window.open(`https://www.google.com/maps/dir/?api=1&destination=${coords[0]},${coords[1]}&travelmode=driving`,'_blank');}else if(t.address){window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.address+', '+t.location+', '+t.state)}`,'_blank');}else{toast('Sem coordenadas para navegar','warn');}}
 
@@ -350,11 +358,9 @@ function showPanel(t){const c=scol(t.status);const proj=projects.find(p=>p.id===
 
 function hiT(id){document.querySelectorAll('.tcard').forEach(c=>c.classList.remove('active'));const cd=document.querySelector(`[data-id="${id}"]`);if(cd){cd.classList.add('active');cd.scrollIntoView({behavior:'smooth',block:'nearest'})}const t=tickets.find(x=>x.id===id);if(t)showPanel(t);}
 
-function isSuperseded(t){
-  // Ticket foi renovado se outro ticket aponta pra ele no oldTicket2
-  const tnum=String(t.ticket||'').trim();
-  return tickets.some(other=>other.id!==t.id&&String(other.oldTicket2||'').trim()===tnum);
-}
+let supersededSet=new Set();
+function rebuildSupersededSet(){supersededSet=new Set(tickets.map(t=>String(t.oldTicket2||'').trim()).filter(Boolean));}
+function isSuperseded(t){return supersededSet.has(String(t.ticket||'').trim());}
 
 function mapFiltered(){const pf=document.getElementById('proj-filter')?.value||'';const sr=(document.getElementById('srch')?.value||'').toLowerCase();const cl=document.getElementById('fcli')?.value||'';const lc=document.getElementById('floc')?.value||'';return tickets.filter(t=>{
   if(isSuperseded(t))return false;
@@ -411,7 +417,7 @@ function openTicketDetail(id){
   document.getElementById('det-title').textContent=t.ticket;
   document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'');
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
-  document.getElementById('det-info').innerHTML=`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${t.status}${t.status_locked?' 🔒':''}</span></div><div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${t.company||'—'}</span></div>${t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${t.prime}</span></div>`:''}<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${t.location}, ${t.state}</span></div><div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val">${t.footage} ft</span></div><div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${t.tipo||'—'}</span></div><div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${t.job||'—'}</span></div><div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${t.address||'—'}</span></div><div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val">${t.expire||'—'}</span></div><div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>${t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${t.notes}</div>`:''}${hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>${t.pending?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Pending</span><span class="mp-val" style="color:var(--amber)">${t.pending}</span></div>`:''}${t.oldTicket2?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Old Ticket #</span><span class="mp-val" style="font-family:var(--mono);color:#b45309">${t.oldTicket2}</span></div>`:''}${t.statusOld?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Status Ant.</span><span class="mp-val" style="color:#92400e">${t.statusOld}</span></div>`:''}${t.expireOld?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Exp. Ant.</span><span class="mp-val" style="color:#92400e">${t.expireOld}</span></div>`:''}</div>`:''}`;
+  document.getElementById('det-info').innerHTML=`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${t.status}${t.status_locked?' 🔒':''}</span></div><div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${t.company||'—'}</span></div>${t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${t.prime}</span></div>`:''}<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${t.location}, ${t.state}</span></div><div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val">${t.footage} ft</span></div><div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${t.tipo||'—'}</span></div><div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${t.job||'—'}</span></div><div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${t.address||'—'}</span></div><div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val">${t.expire||'—'}</span></div><div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>${t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${esc(t.notes)}</div>`:''}${hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>${t.pending?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Pending</span><span class="mp-val" style="color:var(--amber)">${t.pending}</span></div>`:''}${t.oldTicket2?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Old Ticket #</span><span class="mp-val" style="font-family:var(--mono);color:#b45309">${t.oldTicket2}</span></div>`:''}${t.statusOld?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Status Ant.</span><span class="mp-val" style="color:#92400e">${t.statusOld}</span></div>`:''}${t.expireOld?`<div class="mp-row"><span class="mp-key" style="font-size:11px">Exp. Ant.</span><span class="mp-val" style="color:#92400e">${t.expireOld}</span></div>`:''}</div>`:''}`;
   const lockBadge=document.getElementById('det-lock-badge');const unlockBtn=document.getElementById('det-unlock-btn');
   if(t.status_locked){lockBadge.style.display='';unlockBtn.style.display='';}else{lockBadge.style.display='none';unlockBtn.style.display='none';}
   if(!isSharedView&&isAdmin){document.getElementById('det-edit-btn').style.display='';document.getElementById('det-draw-btn').style.display='';document.getElementById('field-status-section').style.display='';}else{document.getElementById('det-edit-btn').style.display='none';document.getElementById('det-draw-btn').style.display='none';document.getElementById('field-status-section').style.display='none';}
@@ -661,7 +667,7 @@ function syncProjectSelects(){
 function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
 function syncMapUtilFilter(){if(!utilCacheLoaded)return;const el=document.getElementById('map-util-filter');if(!el)return;const prev=el.value;const allU={};const openNums=new Set(tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket).trim()));for(const[tn,resps]of Object.entries(utilCache)){if(!openNums.has(tn))continue;for(const u of resps){if(u.status==='Pending'){if(!allU[u.utility_name])allU[u.utility_name]=0;allU[u.utility_name]++;}}}const sorted=Object.entries(allU).sort((a,b)=>b[1]-a[1]);el.innerHTML='<option value="">Todas utilities</option><option value="__pending__">Com pendentes</option>'+sorted.map(([n,c])=>'<option value="'+n+'">'+n+' ('+c+')</option>').join('');if(prev)el.value=prev;}
 function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
-function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
+function syncAll(){rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}const ap=document.querySelector('.page.active')?.id;if(ap==='pg-map'){renderList();renderMap();}else if(ap==='pg-tickets')renderTable();else if(ap==='pg-proj')renderProjects();else if(ap==='pg-dash')renderDash();else if(ap==='pg-contacts')renderContacts();else{renderDash();}}
 
 
 function renderClearedStats(fTickets){

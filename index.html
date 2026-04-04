@@ -152,7 +152,7 @@
   <div class="mob-nav-overlay" id="mob-nav-overlay" onclick="toggleMobNav()"></div>
 
   <!-- Main Content Area -->
-  <div class="main-area" style="position:absolute;left:220px;top:0;right:0;bottom:0;overflow:hidden">
+  <div class="main-area">
 
 <div id="sobre-panel" style="display:none;position:fixed;top:12px;left:240px;width:380px;max-height:80vh;overflow-y:auto;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:0 8px 30px rgba(0,0,0,.12);z-index:999;padding:16px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -171,9 +171,9 @@
 </div>
 <div id="sobre-overlay" onclick="toggleSobrePanel()" style="display:none;position:fixed;inset:0;z-index:998"></div>
 
-<div class="page active" id="pg-dash" style="position:absolute;inset:0;overflow-y:auto;background:var(--bg)"><div class="dash-inner" id="dash-content"></div></div>
-<div class="page" id="pg-proj" style="position:absolute;inset:0;overflow-y:auto;background:var(--bg)"><div class="proj-inner"><div class="proj-header"><div class="page-title">Projetos</div><div style="display:flex;gap:8px;align-items:center"><select class="fi" id="proj-state-filter" onchange="renderProjects()" style="width:auto;min-width:120px"><option value="">Todos estados</option></select><button class="btn btn-primary" id="btn-new-proj" onclick="openNewProject()" style="display:none">+ Projeto</button></div></div><div class="proj-grid" id="proj-grid"></div></div></div>
-<div class="page" id="pg-map" style="position:absolute;inset:0;display:none;flex-direction:row">
+<div class="page active" id="pg-dash"><div class="dash-inner" id="dash-content"></div></div>
+<div class="page" id="pg-proj"><div class="proj-inner"><div class="proj-header"><div class="page-title">Projetos</div><div style="display:flex;gap:8px;align-items:center"><select class="fi" id="proj-state-filter" onchange="renderProjects()" style="width:auto;min-width:120px"><option value="">Todos estados</option></select><button class="btn btn-primary" id="btn-new-proj" onclick="openNewProject()" style="display:none">+ Projeto</button></div></div><div class="proj-grid" id="proj-grid"></div></div></div>
+<div class="page" id="pg-map">
   <button class="sb-toggle" id="sb-toggle" onclick="toggleSidebar()">📋 Tickets</button>
   <div class="sidebar-overlay" id="sb-overlay" onclick="toggleSidebar()"></div>
   <div class="sidebar" id="map-sidebar">
@@ -248,7 +248,7 @@
   </div>
 </div>
 
-<div class="page" id="pg-tickets" style="position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg)">
+<div class="page" id="pg-tickets">
   <div class="tbar">
     <input class="fi" style="max-width:200px" id="tbl-srch" placeholder="Buscar..." oninput="renderTable()">
     <select class="fi" style="max-width:120px" id="tbl-stat" onchange="renderTable()">
@@ -279,7 +279,7 @@
 </div>
 
 <!-- Contacts Page -->
-<div class="page" id="pg-contacts" style="position:absolute;inset:0;overflow-y:auto;background:var(--bg)">
+<div class="page" id="pg-contacts">
   <div style="display:flex;flex-direction:column;height:100%;background:var(--bg)">
     <div style="display:flex;gap:8px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--white);flex-wrap:wrap">
       <input class="fi" style="max-width:220px" id="ct-srch" placeholder="Buscar utility, contato..." oninput="renderContacts()">

@@ -108,7 +108,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .recent-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;transition:all .15s}.recent-item:hover{color:var(--accent)}.recent-item:last-child{border-bottom:none}
 
 /* ── Map ── */
-#pg-map{display:flex;flex-direction:row}
+#pg-map{flex-direction:row}
 .sidebar{width:290px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--white);overflow:hidden}
 .sb-filters{padding:14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
 .fi{font-family:var(--font);font-size:13px;background:var(--white);border:1px solid var(--border);color:var(--text);padding:8px 11px;border-radius:var(--r);outline:none;width:100%;transition:all .15s;font-weight:500}.fi:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,108,240,.06)}.fi::placeholder{color:var(--muted)}
@@ -143,7 +143,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .legend-title{font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em;font-size:10px}.legend-item{display:flex;align-items:center;gap:7px;margin-bottom:4px}
 
 /* ── Tickets Table ── */
-#pg-tickets{background:var(--bg);display:flex;flex-direction:column}
+#pg-tickets{flex-direction:column;background:var(--bg)}
 .tbar{display:flex;gap:8px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--white);flex-wrap:wrap}
 .tbl-wrap{flex:1;overflow-y:auto;padding:18px}
 .tbl-inner{background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow)}
@@ -200,7 +200,7 @@ tbody td{padding:11px 14px;color:var(--text)}
 .locked-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-border);font-family:var(--mono)}
 
 /* ── Shared View ── */
-#pg-shared{display:flex;flex-direction:column;overflow:hidden}
+#pg-shared{flex-direction:column;overflow:hidden}
 .shared-topbar{display:flex;align-items:center;height:56px;border-bottom:1px solid var(--border);background:var(--white);padding:0 20px;gap:14px;flex-shrink:0}
 .shared-logo{font-weight:800;font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px;white-space:nowrap}.shared-logo .logo-emblem{width:22px;height:22px}
 .shared-proj-name{font-size:15px;font-weight:700;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

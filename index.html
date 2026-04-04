@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OneDrill</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
@@ -37,10 +37,9 @@
     <div class="login-divider"><span>Admin</span></div>
     <div class="login-admin-section">
       <div class="login-admin-label">Acesso administrativo</div>
-      <input class="login-inp" type="email" id="admin-email" placeholder="Email" onkeydown="if(event.key==='Enter')document.getElementById('admin-pw').focus()">
-      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" onkeydown="if(event.key==='Enter')tryLogin()" style="margin-top:6px">
+      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
       <button class="login-admin-btn" onclick="tryLogin()">Entrar como Admin</button>
-      <div class="login-err" id="login-err"></div>
+      <div class="login-err" id="login-err">Senha incorreta</div>
     </div>
   </div>
   <div class="login-footer">OneDrill Ticket Management System</div>
@@ -81,91 +80,22 @@
 </div>
 
 <!-- ===== MAIN APP ===== -->
-<div class="app-shell" id="app-shell" style="display:none">
-
-  <!-- Left Sidebar Navigation -->
-  <aside class="snav" id="sidebar-nav">
-    <div class="snav-brand">
-      <div class="snav-logo"><img src="logo.png" alt=""></div>
-      <span class="snav-name">ONEDRILL</span>
-    </div>
-    <!-- Search -->
-    <div style="padding:12px 12px 0">
-      <div style="position:relative">
-        <input id="global-search" type="text" placeholder="Buscar ticket, cliente..." oninput="globalSearch(this.value)" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.06);color:#fff;padding:9px 12px 9px 32px;border-radius:8px;font-size:12px;font-family:var(--font);outline:none;transition:all .2s" onfocus="this.style.borderColor='rgba(201,160,51,.3)';this.style.background='rgba(255,255,255,.1)'" onblur="setTimeout(function(){document.getElementById('search-results').style.display='none'},200);this.style.borderColor='rgba(255,255,255,.06)';this.style.background='rgba(255,255,255,.06)'">
-        <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.3" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <div id="search-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--chrome2);border:1px solid var(--chrome3);border-radius:8px;margin-top:4px;max-height:300px;overflow-y:auto;z-index:10;box-shadow:0 8px 24px rgba(0,0,0,.3)"></div>
-      </div>
-    </div>
-    <nav class="snav-menu">
-      <button class="snav-item active" data-page="dash" onclick="nav('dash')">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-        Dashboard
-      </button>
-      <button class="snav-item" data-page="proj" onclick="nav('proj')">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-        Projetos
-      </button>
-      <button class="snav-item" data-page="map" onclick="nav('map')">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
-        Mapa
-      </button>
-      <button class="snav-item" data-page="tickets" onclick="nav('tickets')">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
-        Tickets
-      </button>
-    </nav>
-    <div class="snav-actions">
-      <button class="btn btn-sm snav-action-btn" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
-      <button class="btn btn-sm snav-action-btn" id="btn-import" onclick="openImport()" style="display:none">↑ Importar</button>
-      <button class="btn btn-sm snav-action-btn" onclick="exportExcel()">↓ Excel</button>
-    </div>
-    <div class="snav-footer">
-      <div class="snav-sync"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
-      <span class="role-badge" id="role-badge">VIEWER</span>
-      <div class="snav-bottom-btns">
-        <button class="snav-foot-btn" onclick="toggleNotifPanel()" style="position:relative">🔔 <span id="notif-count" style="display:none;position:absolute;top:-6px;right:-8px;background:var(--red);color:#fff;font-size:9px;font-weight:700;width:16px;height:16px;border-radius:50%;align-items:center;justify-content:center;font-family:var(--mono)"></span></button>
-        <button class="snav-foot-btn" onclick="toggleSobrePanel()">ℹ Sobre</button>
-        <button class="snav-foot-btn" id="btn-logout" onclick="doLogout()" style="display:none">Sair</button>
-      </div>
-    </div>
-    <div id="notif-panel" style="display:none;position:fixed;bottom:60px;left:10px;width:320px;max-height:400px;overflow-y:auto;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:0 8px 30px rgba(0,0,0,.15);z-index:1200;padding:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:700;color:var(--text)">Notificações</div>
-        <button onclick="toggleNotifPanel()" style="background:none;border:none;font-size:16px;cursor:pointer;color:var(--muted)">×</button>
-      </div>
-      <div id="notif-list"></div>
-    </div>
-    </div>
-  </aside>
-
-  <!-- Mobile top bar (hidden on desktop) -->
-  <div class="mob-topbar" id="mob-topbar">
-    <button class="mob-menu-btn" onclick="toggleMobNav()">☰</button>
-    <div class="snav-brand" style="gap:6px"><div class="snav-logo" style="width:22px;height:22px"><img src="logo.png" alt=""></div><span class="snav-name" style="font-size:13px">ONEDRILL</span></div>
-    <span class="role-badge" id="role-badge-mob" style="margin-left:auto">VIEWER</span>
+<div class="topbar" id="topbar" style="display:none">
+  <div class="logo"><div class="logo-emblem"><img src="logo.png" alt=""></div>ONEDRILL</div>
+  <div class="navtabs">
+    <button class="ntab active" onclick="nav('dash')">Dashboard</button>
+    <button class="ntab" onclick="nav('proj')">Projetos</button>
+    <button class="ntab" onclick="nav('map')">Mapa</button>
+    <button class="ntab" onclick="nav('tickets')">Tickets</button>
   </div>
-  <div class="mob-nav-overlay" id="mob-nav-overlay" onclick="toggleMobNav()"></div>
-
-  <!-- Main Content Area -->
-  <div class="main-area">
-
-<div id="sobre-panel" style="display:none;position:fixed;top:12px;left:240px;width:380px;max-height:80vh;overflow-y:auto;background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:0 8px 30px rgba(0,0,0,.12);z-index:999;padding:16px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-    <div style="font-size:14px;font-weight:700;color:var(--text)">Sobre o sistema</div>
-    <button onclick="toggleSobrePanel()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">×</button>
+  <div class="hactions">
+    <div class="sync-indicator"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
+    <span class="role-badge" id="role-badge">VIEWER</span>
+    <button class="btn" onclick="exportExcel()">↓ Excel</button>
+    <button class="btn" id="btn-import" onclick="openImport()" style="display:none">↑ Importar</button>
+    <button class="btn btn-primary" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
   </div>
-  <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)">
-    <div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div>
-    <div>🟢 <strong>Sincronização:</strong> Automática (1h)</div>
-    <div>🗺 <strong>Mapa:</strong> Google Hybrid + Leaflet</div>
-    <div>🔒 <strong>Segurança:</strong> Supabase Auth + RLS</div>
-    <div style="margin-top:8px;font-size:11px;color:var(--muted)">Para compartilhar projeto: use 📤 na tela Projetos.</div>
-  </div>
-  <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Atividade recente</div>
-  <div id="sobre-recent"></div>
 </div>
-<div id="sobre-overlay" onclick="toggleSobrePanel()" style="display:none;position:fixed;inset:0;z-index:998"></div>
 
 <div class="page active" id="pg-dash"><div class="dash-inner" id="dash-content"></div></div>
 <div class="page" id="pg-proj"><div class="proj-inner"><div class="proj-header"><div class="page-title">Projetos</div><div style="display:flex;gap:8px;align-items:center"><select class="fi" id="proj-state-filter" onchange="renderProjects()" style="width:auto;min-width:120px"><option value="">Todos estados</option></select><button class="btn btn-primary" id="btn-new-proj" onclick="openNewProject()" style="display:none">+ Projeto</button></div></div><div class="proj-grid" id="proj-grid"></div></div></div>
@@ -273,9 +203,6 @@
     </table>
   </div></div>
 </div>
-
-  </div><!-- /main-area -->
-</div><!-- /app-shell -->
 
 <!-- MODAL: Ticket Detail -->
 <div class="overlay" id="ov-detail">

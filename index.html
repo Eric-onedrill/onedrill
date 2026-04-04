@@ -138,7 +138,7 @@
   <div class="sidebar" id="map-sidebar">
     <div class="sb-filters">
       <select class="fi" id="proj-filter" onchange="onProjFilter()"><option value="">Todos os projetos</option></select>
-      <input class="fi" id="srch" placeholder="Buscar ticket, cliente..." oninput="redrawAll()">
+      <input class="fi" id="srch" placeholder="Buscar ticket, cliente..." oninput="debouncedRedraw()">
       <div class="frow">
         <select class="fi" id="fcli" onchange="redrawAll()"><option value="">Todos clientes</option></select>
         <select class="fi" id="floc" onchange="redrawAll()"><option value="">Todos locais</option></select>
@@ -209,7 +209,7 @@
 
 <div class="page" id="pg-tickets">
   <div class="tbar">
-    <input class="fi" style="max-width:200px" id="tbl-srch" placeholder="Buscar..." oninput="renderTable()">
+    <input class="fi" style="max-width:200px" id="tbl-srch" placeholder="Buscar..." oninput="debouncedTable()">
     <select class="fi" style="max-width:120px" id="tbl-stat" onchange="renderTable()">
       <option value="">Todos status</option>
       <option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option>
@@ -243,7 +243,7 @@
     <div class="contacts-header">
       <div class="page-title">Contatos de Utilities</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input class="fi" id="contacts-search" placeholder="Buscar utility..." oninput="renderContacts()" style="width:180px">
+        <input class="fi" id="contacts-search" placeholder="Buscar utility..." oninput="debouncedContacts()" style="width:180px">
         <select class="fi" id="contacts-state-filter" onchange="renderContacts()" style="width:auto"><option value="">Todos</option><option>FL</option><option>IN</option></select>
         <button class="btn btn-sm" onclick="exportContacts()">↓ Excel</button>
         <button class="btn btn-primary btn-sm" id="btn-add-contact" onclick="openContactModal()" style="display:none">+ Contato</button>

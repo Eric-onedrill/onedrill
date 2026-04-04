@@ -92,11 +92,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .notif-section{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:6px 10px 4px;margin-top:6px}
 
 /* ── Old topbar (kept for backward compat) ── */
-.topbar{display:none}
 .logo{font-family:var(--font);font-weight:800;font-size:15px;letter-spacing:.04em;font-style:italic;color:#5a3d12;margin-right:28px;white-space:nowrap;display:flex;align-items:center;gap:7px}
 .logo-emblem{width:24px;height:24px;flex-shrink:0}
 .logo-emblem img{width:100%;height:100%}
-.navtabs{display:none}.ntab{display:none}.hactions{display:none}
 
 /* ── Buttons ── */
 .btn{font-family:var(--font);font-size:13px;font-weight:500;padding:7px 13px;border-radius:var(--r);border:1px solid var(--border2);background:var(--white);color:var(--text2);cursor:pointer;transition:all .15s;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
@@ -108,7 +106,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 /* ── Badges ── */
 .role-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent-bg);color:var(--accent);border:1px solid #c3d7ff;font-family:var(--mono)}
-.sync-indicator{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px;font-family:var(--mono)}
 .sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
@@ -133,9 +130,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .warn-title{font-size:13px;font-weight:600;color:var(--red);margin-bottom:6px}
 .warn-chips{display:flex;flex-wrap:wrap;gap:5px}
 .warn-chip{font-size:11px;font-family:var(--mono);padding:3px 9px;border-radius:20px;background:rgba(220,38,38,.1);color:var(--red);cursor:pointer;border:1px solid var(--red-border)}
-.recent-item{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer}
-.recent-item:hover{color:var(--accent)}
-.recent-item:last-child{border-bottom:none}
 .sbadge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:var(--mono)}
 .b-open{background:var(--red-bg);color:var(--red)}
 .b-clear{background:var(--green-bg);color:var(--green)}
@@ -235,9 +229,6 @@ tbody td{padding:10px 13px;color:var(--text)}
 .pcard-detail.open{display:block}
 .pcard-expand{background:none;border:1px solid var(--border);border-radius:var(--r);padding:5px 10px;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:4px}
 .pcard-expand:hover{background:var(--bg);color:var(--text)}
-.ticket-row-proj{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer}
-.ticket-row-proj:hover{color:var(--accent)}
-.ticket-row-proj:last-child{border-bottom:none}
 .status-pill{font-size:10px;font-weight:600;padding:2px 9px;border-radius:20px;font-family:var(--mono)}
 .pill-active{background:var(--green-bg);color:var(--green)}
 .pill-done{background:#f5f5f3;color:#888}
@@ -302,8 +293,6 @@ tbody td{padding:10px 13px;color:var(--text)}
 .mini-map-wrap{border-radius:var(--r);overflow:hidden;border:1px solid var(--border);height:190px;margin-top:8px}
 .mini-map-wrap #mini-map{width:100%;height:100%}
 .mini-map-empty{display:flex;align-items:center;justify-content:center;height:80px;color:var(--muted);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);margin-top:8px;text-align:center}
-.util-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
-.util-row:last-child{border-bottom:none}
 .util-name{color:var(--text2);flex:1}
 .util-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:var(--mono);flex-shrink:0}
 .ub-clear{background:var(--green-bg);color:var(--green)}

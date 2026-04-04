@@ -37,7 +37,8 @@
     <div class="login-divider"><span>Admin</span></div>
     <div class="login-admin-section">
       <div class="login-admin-label">Acesso administrativo</div>
-      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha admin" onkeydown="if(event.key==='Enter')tryLogin()">
+      <input class="login-inp" type="email" id="admin-email" placeholder="Email" onkeydown="if(event.key==='Enter')document.getElementById('admin-pw').focus()">
+      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" onkeydown="if(event.key==='Enter')tryLogin()">
       <button class="login-admin-btn" onclick="tryLogin()">Entrar como Admin</button>
       <div class="login-err" id="login-err">Senha incorreta</div>
     </div>

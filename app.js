@@ -1,3 +1,4 @@
+
 /* ══════════════════════════════════════════════
    OneDrill — App Logic
    ══════════════════════════════════════════════
@@ -161,21 +162,18 @@ async function doLogout(){
 }
 
 function enterApp(){
-  try{
-  document.getElementById('app-shell').style.display='grid';
-  console.log('[enterApp] projects:',projects.length,'tickets:',tickets.length);
+  document.getElementById('app-shell').style.display='flex';
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
   const rbm=document.getElementById('role-badge-mob');if(rbm){rbm.textContent=isAdmin?'ADMIN':'VIEWER';rbm.style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';rbm.style.color=isAdmin?'var(--green)':'var(--accent)';}
   const logoutBtn=document.getElementById('btn-logout');
   if(logoutBtn)logoutBtn.style.display=isAdmin?'':'none';
-  if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-new-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='';});}
-  else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-new-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});const fs=document.getElementById('field-status-section');if(fs)fs.style.display='none';}
-  syncAll();try{renderDash();}catch(e){console.error('renderDash init:',e);}
-  loadUtilCache().then(()=>{try{renderDash();}catch(e){console.error('renderDash:',e);}try{renderTable();}catch(e){console.error('renderTable:',e);}try{buildNotifications();}catch(e){console.error('buildNotif:',e);}try{loadContactsCache();}catch(e){console.error('loadContacts:',e);}});
-  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();buildNotifications();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
-  }catch(e){console.error('enterApp CRASH:',e);alert('Erro no app: '+e.message);document.getElementById('dash-content').innerHTML='<div style="padding:40px;color:red;font-size:16px"><b>ERRO:</b> '+e.message+'<pre>'+e.stack+'</pre></div>';}
+  if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='');}
+  else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
+  syncAll();renderDash();
+  loadUtilCache().then(()=>{renderDash();renderTable();});
+  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -500,7 +498,6 @@ function sortBy(col){sortAsc=sortCol===col?!sortAsc:true;sortCol=col;renderTable
 function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
 
 function renderDash(){
- try{
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
   const dashStateFilter=`<select class="fi" id="dash-state-filter" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>${states.map(s=>`<option value="${s}"${dsf===s?' selected':''}>${s}</option>`).join('')}</select>`;
@@ -517,9 +514,8 @@ function renderDash(){
   const projStats=fProjects.filter(p=>p.status!=='Completed').map(p=>{const ts=fTickets.filter(t=>t.projectId===p.id);const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);const damageFtP=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const totalFt=p.totalFeet||ticketFt||1;const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';return{name:p.name,id:p.id,count:ts.length,clearFtP,openFtP,concluidoFt,damageFt:damageFtP,ticketFt,totalFt,pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0,pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0,pctDamage:totalFt>0?Math.round(damageFtP/totalFt*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||''};}).sort((a,b)=>b.count-a.count);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${(()=>{try{return renderClearedStats(allFTickets)}catch(e){console.error('ClearedStats:',e);return''}})()}${(()=>{try{return renderProjectProgress(projStats)}catch(e){console.error('ProjectProgress:',e);return''}})()}${(()=>{try{return renderWeeklyEvolution(allFTickets)}catch(e){console.error('WeeklyEvolution:',e);return''}})()}${(()=>{try{return renderExpirationCalendar(fTickets)}catch(e){console.error('Calendar:',e);return''}})()}${(()=>{try{return renderClearTimeMetrics(allFTickets)}catch(e){console.error('ClearTime:',e);return''}})()}${(()=>{try{return renderKPIs(projStats)}catch(e){console.error('KPIs:',e);return''}})()}${(()=>{try{return renderUtilSummaryHtml()}catch(e){console.error('UtilSummary:',e);return''}})()}
+  ${renderClearedStats(allFTickets)}${renderProjectProgress(projStats)}${renderClearTimeMetrics(allFTickets)}${renderUtilSummaryHtml()}
   `;
- }catch(e){console.error('renderDash CRASH:',e);const el=document.getElementById('dash-content');if(el)el.innerHTML='<div style="padding:40px;color:var(--red);font-size:14px"><strong>Erro no dashboard:</strong><br>'+e.message+'<br><br><pre style="font-size:11px;color:var(--muted)">'+e.stack+'</pre></div>';}
 }
 
 function renderProjects(){
@@ -668,18 +664,7 @@ function syncProjectSelects(){
 function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
 function syncMapUtilFilter(){if(!utilCacheLoaded)return;const el=document.getElementById('map-util-filter');if(!el)return;const prev=el.value;const allU={};const openNums=new Set(tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket).trim()));for(const[tn,resps]of Object.entries(utilCache)){if(!openNums.has(tn))continue;for(const u of resps){if(u.status==='Pending'){if(!allU[u.utility_name])allU[u.utility_name]=0;allU[u.utility_name]++;}}}const sorted=Object.entries(allU).sort((a,b)=>b[1]-a[1]);el.innerHTML='<option value="">Todas utilities</option><option value="__pending__">Com pendentes</option>'+sorted.map(([n,c])=>'<option value="'+n+'">'+n+' ('+c+')</option>').join('');if(prev)el.value=prev;}
 function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
-function syncAll(){
-  try{
-    syncProjectSelects();syncClients();syncLocations();
-    if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}
-    renderList();if(map)renderMap();
-    renderProjects();renderTable();renderDash();
-  }catch(e){
-    console.error('syncAll CRASH:',e);
-    const el=document.getElementById('dash-content');
-    if(el)el.innerHTML='<div style="padding:40px;color:var(--red)"><strong>Erro:</strong> '+e.message+'<pre style="font-size:10px;margin-top:8px;color:var(--muted)">'+e.stack+'</pre></div>';
-  }
-}
+function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}renderList();if(map)renderMap();renderProjects();renderTable();renderDash();}
 
 
 function renderProjectProgress(projStats){
@@ -851,23 +836,10 @@ function renderUtilSummaryHtml(){
   return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;align-items:center"><span style="font-size:12px;font-family:var(--mono);color:var(--red);font-weight:600">${totalPending} pendências</span><span style="font-size:12px;font-family:var(--mono);color:var(--muted)">${ticketsWithPending.size} tickets</span><button class="btn btn-sm" onclick="exportAllPending()" style="font-size:11px">↓ Excel pendentes</button></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];const safeName=name.replace(/'/g,"\\'");return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text);cursor:pointer" onclick="filterByUtil('${safeName}')">${name}</span><div style="display:flex;gap:4px;align-items:center"><button style="font-size:10px;padding:2px 6px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);cursor:pointer;font-family:var(--mono)" onclick="event.stopPropagation();exportUtilPending('${safeName}')" title="Exportar Excel">${count} ↓</button></div></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div></div>`;}).join('')}</div></div></div>`;
 }
 
-let contactsCache={};
-async function loadContactsCache(){
-  try{
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
-    const data=await r.json();
-    contactsCache={};
-    if(data&&data.length){for(const c of data){contactsCache[c.utility_name]=c;}}
-    console.log('[Contacts] '+Object.keys(contactsCache).length+' utilities com contatos');
-  }catch(e){console.log('[Contacts] Tabela nao encontrada ou vazia:',e.message);}
-}
-function getContact(utilName){return contactsCache[utilName]||null;}
-
 function exportUtilPending(utilName){
   const openTks=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
   const matching=openTks.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
   if(!matching.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
-  const contact=getContact(utilName);
   const wb=XLSX.utils.book_new();
   const rows=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço']];
   for(const t of matching){
@@ -875,21 +847,14 @@ function exportUtilPending(utilName){
     rows.push([t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address]);
   }
   rows.push(['','','','','','','TOTAL:',matching.reduce((s,t)=>s+(t.footage||0),0),'','']);
-  if(contact){
-    rows.push([]);
-    rows.push(['CONTATOS — '+utilName]);
-    if(contact.contact_name||contact.contact_phone)rows.push(['Contato:',contact.contact_name,contact.contact_phone]);
-    if(contact.alternate_name||contact.alternate_phone)rows.push(['Alternativo:',contact.alternate_name,contact.alternate_phone]);
-    if(contact.emergency_name||contact.emergency_phone)rows.push(['Emergência:',contact.emergency_name,contact.emergency_phone]);
-  }
   const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
   XLSX.writeFile(wb,'Pendentes_'+utilName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast(matching.length+' tickets pendentes — '+utilName+(contact?' (com contatos)':''),'success');
+  toast(matching.length+' tickets pendentes — '+utilName,'success');
 }
 
 function exportAllPending(){
   const openTks=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
-  const rows=[['Utility','Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço','Contato','Telefone','Tel. Alternativo','Tel. Emergência']];
+  const rows=[['Utility','Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Endereço']];
   const utilMap={};
   for(const t of openTks){
     const pends=getTicketPendingUtils(t.ticket);
@@ -900,14 +865,13 @@ function exportAllPending(){
   }
   const sorted=Object.entries(utilMap).sort((a,b)=>b[1].length-a[1].length);
   for(const[name,tks]of sorted){
-    const contact=getContact(name);
     for(const t of tks){
       const proj=projects.find(p=>p.id===t.projectId);
-      rows.push([name,t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address,contact?contact.contact_name:'',contact?contact.contact_phone:'',contact?contact.alternate_phone:'',contact?contact.emergency_phone:'']);
+      rows.push([name,t.ticket,proj?proj.name:'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.address]);
     }
   }
   const totalFt=rows.slice(1).reduce((s,r)=>s+(r[8]||0),0);
-  rows.push(['','','','','','','','TOTAL:',totalFt,'','','','','','']);
+  rows.push(['','','','','','','','TOTAL:',totalFt,'','']);
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Todas Pendentes');
   XLSX.writeFile(wb,'Pendentes_Todas_'+new Date().toISOString().slice(0,10)+'.xlsx');
@@ -1047,449 +1011,6 @@ function renderClearTimeMetrics(fTickets){
   return h;
 }
 
-// ── EVOLUÇÃO SEMANAL ──────────────────────────────────────────────────────────
-function renderWeeklyEvolution(fTickets){
-  var now=Date.now(),WEEK=7*864e5;
-  function getWeekStart(ts){var d=new Date(ts);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay()+1);return d.getTime();}
-  var currentWeekStart=getWeekStart(now);
-  var weeks=[];
-  for(var w=5;w>=0;w--){weeks.push({start:currentWeekStart-w*WEEK,opened:0,cleared:0,closed:0});}
-
-  for(var i=0;i<fTickets.length;i++){
-    var t=fTickets[i];if(!t.history||!t.history.length)continue;
-    for(var j=0;j<t.history.length;j++){
-      var h=t.history[j],a=(h.action||'').toLowerCase(),ts=h.ts;if(!ts)continue;
-      var ws=getWeekStart(ts);
-      for(var w=0;w<weeks.length;w++){
-        if(ws===weeks[w].start){
-          if(j===0||(a.indexOf('importado')>=0||a.indexOf('criado')>=0||a.indexOf('importado via')>=0))weeks[w].opened++;
-          if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||(a.indexOf('status manual')>=0&&a.indexOf('clear')>=0))weeks[w].cleared++;
-          if(a.indexOf('\u2192 closed')>=0||a.indexOf('completed')>=0||(a.indexOf('status manual')>=0&&a.indexOf('closed')>=0))weeks[w].closed++;
-          break;
-        }
-      }
-    }
-  }
-
-  function fmtWeek(ts){var d=new Date(ts);return(d.getDate()<10?'0':'')+d.getDate()+'/'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);}
-  function pctChange(cur,prev){if(!prev)return'';var pct=Math.round((cur-prev)/prev*100);if(pct===0)return'';return' <span style="color:'+(pct>0?'var(--green)':'var(--red)')+';font-size:10px">'+(pct>0?'▲':'▼')+Math.abs(pct)+'%</span>';}
-  function pctChangeClear(cur,prev){if(!prev)return'';var pct=Math.round((cur-prev)/prev*100);if(pct===0)return'';return' <span style="color:'+(pct>0?'var(--green)':'var(--red)')+';font-size:10px">'+(pct>0?'▲':'▼')+Math.abs(pct)+'%</span>';}
-
-  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div class="dash-card-title">Evolução semanal</div>';
-  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
-  h+='<th style="text-align:left;padding:10px 14px;background:#fafaf8;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;width:150px"></th>';
-  for(var w=0;w<weeks.length;w++){
-    var isCurrent=w===weeks.length-1;
-    h+='<th style="text-align:center;padding:10px 8px;background:#fafaf8;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;color:'+(isCurrent?'var(--text)':'var(--muted)')+';font-family:var(--mono)">'+fmtWeek(weeks[w].start)+(isCurrent?' <span style="font-size:8px;background:var(--accent-bg);color:var(--accent);padding:1px 5px;border-radius:8px">atual</span>':'')+'</th>';
-  }
-  h+='</tr></thead><tbody>';
-
-  // Row: Tickets Abertos
-  h+='<tr style="border-bottom:1px solid var(--border)">';
-  h+='<td style="padding:12px 14px;font-weight:700;color:var(--red)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--red);margin-right:6px;vertical-align:middle"></span>Tickets abertos</td>';
-  for(var w=0;w<weeks.length;w++){
-    var bg=w===weeks.length-1?'background:rgba(201,42,42,.03);font-weight:700':'';
-    h+='<td style="text-align:center;padding:12px 8px;font-family:var(--mono);font-weight:600;'+bg+'">'+weeks[w].opened+(w>0?pctChange(weeks[w].opened,weeks[w-1].opened):'')+'</td>';
-  }
-  h+='</tr>';
-
-  // Row: Tickets Clear
-  h+='<tr style="border-bottom:1px solid var(--border)">';
-  h+='<td style="padding:12px 14px;font-weight:700;color:var(--green)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--green);margin-right:6px;vertical-align:middle"></span>Tickets clear</td>';
-  for(var w=0;w<weeks.length;w++){
-    var bg=w===weeks.length-1?'background:rgba(13,122,58,.03);font-weight:700':'';
-    h+='<td style="text-align:center;padding:12px 8px;font-family:var(--mono);font-weight:600;'+bg+'">'+weeks[w].cleared+(w>0?pctChangeClear(weeks[w].cleared,weeks[w-1].cleared):'')+'</td>';
-  }
-  h+='</tr>';
-
-  // Row: Concluídos
-  h+='<tr>';
-  h+='<td style="padding:12px 14px;font-weight:700;color:var(--text2)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--text);opacity:.6;margin-right:6px;vertical-align:middle"></span>Concluídos</td>';
-  for(var w=0;w<weeks.length;w++){
-    var bg=w===weeks.length-1?'background:rgba(0,0,0,.02);font-weight:700':'';
-    h+='<td style="text-align:center;padding:12px 8px;font-family:var(--mono);font-weight:600;'+bg+'">'+weeks[w].closed+(w>0?pctChangeClear(weeks[w].closed,weeks[w-1].closed):'')+'</td>';
-  }
-  h+='</tr>';
-
-  h+='</tbody></table></div></div></div>';
-  return h;
-}
-
-// ── CALENDÁRIO DE VENCIMENTOS ─────────────────────────────────────────────────
-function renderExpirationCalendar(fTickets){
-  var now=new Date();
-  var year=now.getFullYear(),month=now.getMonth();
-  var firstDay=new Date(year,month,1).getDay();
-  var daysInMonth=new Date(year,month+1,0).getDate();
-  var today=now.getDate();
-
-  // Map expiration dates
-  var expirations={};
-  var active=fTickets.filter(function(t){return t.status!=='Closed'&&t.status!=='Cancel';});
-  for(var i=0;i<active.length;i++){
-    var t=active[i],exp=t.expire;if(!exp||exp==='—')continue;
-    try{
-      var d=new Date(exp);if(isNaN(d.getTime()))continue;
-      if(d.getMonth()===month&&d.getFullYear()===year){
-        var day=d.getDate();
-        if(!expirations[day])expirations[day]=[];
-        expirations[day].push(t);
-      }
-    }catch(e){}
-  }
-
-  var monthNames=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="dash-card-title" style="margin-bottom:0">Calendário de vencimentos — '+monthNames[month]+' '+year+'</div>';
-  var expCount=Object.keys(expirations).reduce(function(s,k){return s+expirations[k].length;},0);
-  h+='<span style="font-size:12px;font-family:var(--mono);color:var(--red);font-weight:600">'+expCount+' ticket'+(expCount!==1?'s':'')+' vencendo este mês</span></div>';
-
-  h+='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">';
-  var dayLabels=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
-  for(var d=0;d<7;d++)h+='<div style="font-size:10px;font-weight:700;color:var(--muted);padding:6px;text-transform:uppercase">'+dayLabels[d]+'</div>';
-
-  // Empty cells before first day
-  for(var d=0;d<firstDay;d++)h+='<div style="padding:8px"></div>';
-
-  for(var d=1;d<=daysInMonth;d++){
-    var isToday=d===today;
-    var hasExp=expirations[d];
-    var isPast=d<today;
-    var cellStyle='padding:8px 4px;border-radius:var(--r);font-size:12px;font-family:var(--mono);font-weight:500;position:relative;';
-    if(isToday)cellStyle+='background:var(--accent-bg);color:var(--accent);font-weight:700;border:1px solid var(--accent);';
-    else if(hasExp&&isPast)cellStyle+='background:var(--red-bg);color:var(--red);font-weight:700;border:1px solid var(--red-border);cursor:pointer;';
-    else if(hasExp)cellStyle+='background:var(--amber-bg);color:var(--amber);font-weight:700;border:1px solid var(--amber-border);cursor:pointer;';
-    else if(isPast)cellStyle+='color:var(--border2);';
-    else cellStyle+='color:var(--text2);';
-
-    var onclick=hasExp?'onclick="showExpTickets('+d+')"':'';
-    h+='<div style="'+cellStyle+'" '+onclick+'>'+d;
-    if(hasExp)h+='<div style="font-size:9px;margin-top:1px">'+hasExp.length+'</div>';
-    h+='</div>';
-  }
-  h+='</div>';
-
-  // Próximos vencimentos (lista)
-  var upcoming=[];
-  for(var day in expirations){
-    if(parseInt(day)>=today){
-      for(var i=0;i<expirations[day].length;i++){
-        upcoming.push({day:parseInt(day),ticket:expirations[day][i]});
-      }
-    }
-  }
-  upcoming.sort(function(a,b){return a.day-b.day;});
-
-  if(upcoming.length){
-    h+='<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Próximos vencimentos</div>';
-    h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';
-    for(var i=0;i<Math.min(upcoming.length,20);i++){
-      var u=upcoming[i],diff=u.day-today;
-      var urgColor=diff<=2?'var(--red)':diff<=5?'var(--amber)':'var(--muted)';
-      var urgBg=diff<=2?'var(--red-bg)':diff<=5?'var(--amber-bg)':'var(--bg)';
-      h+='<span style="font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:12px;background:'+urgBg+';color:'+urgColor+';cursor:pointer;font-weight:600;border:1px solid '+(diff<=2?'var(--red-border)':diff<=5?'var(--amber-border)':'var(--border)')+'" onclick="openTicketDetail('+u.ticket.id+')">'+u.ticket.ticket+' · '+u.day+'/'+((month+1)<10?'0':'')+(month+1)+' ('+diff+'d)</span>';
-    }
-    if(upcoming.length>20)h+='<span style="font-size:10px;color:var(--muted)">+'+(upcoming.length-20)+' mais</span>';
-    h+='</div></div>';
-  }
-
-  h+='</div></div>';
-  return h;
-}
-
-function showExpTickets(day){
-  var now=new Date(),month=now.getMonth(),year=now.getFullYear();
-  var dateStr=(month+1<10?'0':'')+(month+1)+'/'+(day<10?'0':'')+day+'/'+year;
-  nav('tickets');
-  setTimeout(function(){
-    var el=document.getElementById('tbl-srch');
-    if(el){el.value=dateStr.substring(0,5);renderTable();}
-  },150);
-}
-
-// ── KPIs / METAS POR PROJETO ──────────────────────────────────────────────────
-function renderKPIs(projStats){
-  if(!projStats.length)return'';
-  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div class="dash-card-title">Performance por projeto</div>';
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
-
-  for(var i=0;i<projStats.length;i++){
-    var p=projStats[i];
-    var clearRate=p.pctClear;
-    var openRate=p.pctOpen;
-    var totalRate=p.pctClear+p.pctConcluido;
-
-    // KPI: Clear rate color
-    var clearColor=clearRate>=60?'var(--green)':clearRate>=30?'var(--amber)':'var(--red)';
-    var clearLabel=clearRate>=60?'Bom':clearRate>=30?'Atenção':'Crítico';
-    // KPI: Open rate (lower is better)
-    var openColor=openRate<=30?'var(--green)':openRate<=60?'var(--amber)':'var(--red)';
-
-    h+='<div style="padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg)">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-    h+='<span style="font-size:13px;font-weight:700;color:var(--text)">'+(p.locs||p.state)+'</span>';
-    h+='<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">'+p.name+'</span>';
-    h+='</div>';
-
-    // Clear rate gauge
-    h+='<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">';
-    h+='<div style="width:48px;height:48px;border-radius:50%;border:4px solid '+clearColor+';display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--white)"><span style="font-size:14px;font-weight:800;font-family:var(--mono);color:'+clearColor+'">'+clearRate+'</span></div>';
-    h+='<div><div style="font-size:12px;font-weight:600;color:var(--text)">% Clear</div><div style="font-size:10px;color:'+clearColor+';font-weight:700">'+clearLabel+'</div></div>';
-    h+='<div style="margin-left:auto;text-align:right"><div style="font-size:10px;color:var(--muted)">'+p.count+' tickets</div><div style="font-size:10px;color:var(--muted)">'+p.ticketFt.toLocaleString()+' ft</div></div>';
-    h+='</div>';
-
-    // Mini bars
-    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-    h+='<div><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Em aberto</span><span style="color:'+openColor+';font-weight:700;font-family:var(--mono)">'+openRate+'%</span></div><div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:'+openRate+'%;height:100%;background:'+openColor+';border-radius:3px"></div></div></div>';
-    h+='<div><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Progresso total</span><span style="color:var(--green);font-weight:700;font-family:var(--mono)">'+totalRate+'%</span></div><div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:'+totalRate+'%;height:100%;background:var(--green);border-radius:3px"></div></div></div>';
-    h+='</div>';
-
-    if(p.damageFt>0){
-      h+='<div style="margin-top:8px;padding:6px 10px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r);font-size:10px;color:var(--amber);font-weight:600">⚠ '+p.pctDamage+'% damage ('+p.damageFt.toLocaleString()+' ft)</div>';
-    }
-    h+='</div>';
-  }
-  h+='</div></div></div>';
-  return h;
-}
-
-// ── NOTIFICAÇÕES ──────────────────────────────────────────────────────────────
-let _notifications=[];
-function buildNotifications(){
-  _notifications=[];
-  var now=Date.now(),day1=864e5;
-  var recent=tickets.filter(function(t){return t.history&&t.history.length;});
-  for(var i=0;i<recent.length;i++){
-    var t=recent[i];
-    for(var j=t.history.length-1;j>=0;j--){
-      var h=t.history[j];
-      if(!h.ts||h.ts<now-3*day1)continue;
-      var a=(h.action||'').toLowerCase();
-      var type='info',msg='';
-      if(a.indexOf('importado')>=0){type='new';msg='Ticket '+t.ticket+' importado';}
-      else if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0){type='clear';msg='Ticket '+t.ticket+' ficou Clear';}
-      else if(a.indexOf('damage')>=0){type='warn';msg='Ticket '+t.ticket+' marcado Damage';}
-      else continue;
-      _notifications.push({ts:h.ts,type:type,msg:msg,ticketId:t.id});
-    }
-  }
-  // Expiring soon
-  var today=new Date();today.setHours(0,0,0,0);
-  for(var i=0;i<tickets.length;i++){
-    var t=tickets[i];if(t.status==='Closed'||t.status==='Cancel'||!t.expire||t.expire==='—')continue;
-    try{
-      var d=new Date(t.expire);var diff=(d-today)/day1;
-      if(diff>=0&&diff<=2){_notifications.push({ts:now,type:'urgent',msg:'Ticket '+t.ticket+' vence '+(diff===0?'HOJE':'em '+Math.ceil(diff)+' dia'+(diff>1?'s':'')),ticketId:t.id});}
-    }catch(e){}
-  }
-  _notifications.sort(function(a,b){return b.ts-a.ts;});
-  _notifications=_notifications.slice(0,30);
-  updateNotifBadge();
-}
-function updateNotifBadge(){
-  var el=document.getElementById('notif-count');
-  if(el){
-    var urgent=_notifications.filter(function(n){return n.type==='urgent'||n.type==='warn';}).length;
-    el.textContent=urgent||'';
-    el.style.display=urgent?'flex':'none';
-  }
-}
-function toggleNotifPanel(){
-  var p=document.getElementById('notif-panel');if(!p)return;
-  var open=p.style.display==='none';
-  p.style.display=open?'block':'none';
-  if(open)renderNotifPanel();
-}
-function renderNotifPanel(){
-  var el=document.getElementById('notif-list');if(!el)return;
-  if(!_notifications.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:12px">Sem notificações recentes</div>';return;}
-  var icons={urgent:'🔴',warn:'⚠️',clear:'✅',new:'🆕',info:'ℹ️'};
-  var now=Date.now();
-  el.innerHTML=_notifications.map(function(n){
-    var ago=Math.round((now-n.ts)/60000);
-    var agoStr=ago<60?ago+'min':ago<1440?Math.round(ago/60)+'h':Math.round(ago/1440)+'d';
-    return'<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px" onclick="openTicketDetail('+n.ticketId+');toggleNotifPanel()"><span>'+icons[n.type]+'</span><div style="flex:1"><div style="color:var(--text)">'+n.msg+'</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono)">'+agoStr+' atrás</div></div></div>';
-  }).join('');
-}
-
-// ── BUSCA GLOBAL ──────────────────────────────────────────────────────────────
-function globalSearch(query){
-  var q=(query||'').toLowerCase().trim();
-  var el=document.getElementById('search-results');if(!el)return;
-  if(q.length<2){el.style.display='none';return;}
-  var results=[];
-  // Search tickets
-  for(var i=0;i<tickets.length&&results.length<8;i++){
-    var t=tickets[i];
-    if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.location||'').toLowerCase().includes(q)){
-      results.push({type:'ticket',label:t.ticket,sub:t.client+' · '+t.location+', '+t.state,status:t.status,id:t.id});
-    }
-  }
-  // Search projects
-  for(var i=0;i<projects.length&&results.length<12;i++){
-    var p=projects[i];
-    if(p.name.toLowerCase().includes(q)||(p.client||'').toLowerCase().includes(q)){
-      results.push({type:'project',label:p.name,sub:p.client+' · '+p.state,id:p.id});
-    }
-  }
-  if(!results.length){el.style.display='none';return;}
-  var icons={ticket:'📋',project:'📁'};
-  var statusColors={Open:'var(--red)',Clear:'var(--green)',Damage:'var(--amber)'};
-  el.innerHTML=results.map(function(r){
-    var onclick=r.type==='ticket'?'searchClick(&quot;ticket&quot;,&quot;'+r.id+'&quot;)':'searchClick(&quot;project&quot;,&quot;'+r.id+'&quot;)';
-    return '<div style="display:flex;gap:8px;padding:8px 10px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)" onclick="'+onclick+'" onmouseover="this.style.background=\'rgba(255,255,255,.05)\'" onmouseout="this.style.background=\'transparent\'"><span>'+icons[r.type]+'</span><div style="flex:1;min-width:0"><div style="font-size:12px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.label+'</div><div style="font-size:10px;color:rgba(255,255,255,.4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.sub+'</div></div>'+(r.status?'<span style="font-size:9px;font-weight:700;color:'+(statusColors[r.status]||'var(--muted)')+'">'+r.status+'</span>':'')+'</div>';
-  }).join('');
-  el.style.display='block';
-}
-function searchClick(type,id){
-  document.getElementById('search-results').style.display='none';
-  document.getElementById('global-search').value='';
-  if(type==='ticket')openTicketDetail(parseInt(id));
-  else{progProjVal=id;nav('dash');}
-}
-
-// ── CONTACTS PAGE ────────────────────────────────────────────────────────────
-let allContacts=[],contactSortCol='utility_name',contactSortAsc=true,editingContactId=null;
-
-async function loadAllContacts(){
-  try{
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
-    allContacts=await r.json();
-    if(!Array.isArray(allContacts))allContacts=[];
-  }catch(e){allContacts=[];console.log('[Contacts] Load error:',e);}
-}
-
-function renderContacts(){
-  loadAllContacts().then(()=>{renderContactsTable();});
-}
-
-function renderContactsTable(){
-  const sr=(document.getElementById('ct-srch')?.value||'').toLowerCase();
-  const pf=document.getElementById('ct-proj')?.value||'';
-  const sf=document.getElementById('ct-state')?.value||'';
-  
-  // Sync project dropdown
-  const projSel=document.getElementById('ct-proj');
-  if(projSel&&projSel.options.length<=1){
-    projSel.innerHTML='<option value="">Todos projetos</option>'+projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-  }
-  
-  // Show add button for admins
-  const addBtn=document.getElementById('btn-new-contact');
-  if(addBtn)addBtn.style.display=isAdmin?'':'none';
-  
-  let f=allContacts.filter(c=>{
-    if(sf&&c.state!==sf)return false;
-    if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.contact_name||'').toLowerCase().includes(sr)&&!(c.contact_phone||'').includes(sr)&&!(c.location||'').toLowerCase().includes(sr))return false;
-    return true;
-  });
-  
-  f.sort((a,b)=>{
-    const av=(a[contactSortCol]||'').toLowerCase(),bv=(b[contactSortCol]||'').toLowerCase();
-    return contactSortAsc?av.localeCompare(bv):bv.localeCompare(av);
-  });
-  
-  document.getElementById('ct-count').textContent=f.length+' contato'+(f.length!==1?'s':'');
-  document.getElementById('ct-body').innerHTML=f.length?f.map(c=>{
-    const hasPhone=c.contact_phone||c.alternate_phone||c.emergency_phone;
-    return`<tr>
-      <td style="font-weight:600;font-size:13px">${c.utility_name||'—'}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${c.service_area_code||'—'}</td>
-      <td style="font-size:12px;color:var(--text2)">${c.utility_type||'—'}</td>
-      <td style="font-size:12px">${c.contact_name||'—'}</td>
-      <td style="font-family:var(--mono);font-size:12px;color:var(--accent)">${c.contact_phone?'<a href="tel:'+c.contact_phone+'" style="color:var(--accent);text-decoration:none">'+c.contact_phone+'</a>':'—'}</td>
-      <td style="font-family:var(--mono);font-size:11px">${c.alternate_phone?'<a href="tel:'+c.alternate_phone+'" style="color:var(--text2);text-decoration:none">'+c.alternate_phone+'</a>':'—'}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--red)">${c.emergency_phone?'<a href="tel:'+c.emergency_phone+'" style="color:var(--red);text-decoration:none">'+c.emergency_phone+'</a>':'—'}</td>
-      <td><span class="sbadge" style="background:var(--bg);color:var(--text2)">${c.state||'—'}</span></td>
-      <td onclick="event.stopPropagation()"><div style="display:flex;gap:4px">${isAdmin?'<button class="btn btn-sm" onclick="editContact('+c.id+')">Editar</button><button class="btn btn-sm" style="color:var(--red)" onclick="deleteContact('+c.id+')">×</button>':''}</div></td>
-    </tr>`;
-  }).join(''):'<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted)">Nenhum contato encontrado. Use o botão "+ Contato" ou rode o scraping de contatos.</td></tr>';
-}
-
-function sortContacts(col){contactSortAsc=contactSortCol===col?!contactSortAsc:true;contactSortCol=col;renderContactsTable();}
-
-function openNewContact(){
-  editingContactId=null;
-  document.getElementById('contact-modal-title').textContent='Novo contato';
-  ['cm-utility','cm-code','cm-type','cm-location','cm-cname','cm-cphone','cm-aname','cm-aphone','cm-ename','cm-ephone'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('cm-state').value='FL';
-  openModal('ov-contact');
-}
-
-function editContact(id){
-  const c=allContacts.find(x=>x.id===id);if(!c)return;
-  editingContactId=id;
-  document.getElementById('contact-modal-title').textContent='Editar contato';
-  document.getElementById('cm-utility').value=c.utility_name||'';
-  document.getElementById('cm-code').value=c.service_area_code||'';
-  document.getElementById('cm-type').value=c.utility_type||'';
-  document.getElementById('cm-state').value=c.state||'FL';
-  document.getElementById('cm-location').value=c.location||'';
-  document.getElementById('cm-cname').value=c.contact_name||'';
-  document.getElementById('cm-cphone').value=c.contact_phone||'';
-  document.getElementById('cm-aname').value=c.alternate_name||'';
-  document.getElementById('cm-aphone').value=c.alternate_phone||'';
-  document.getElementById('cm-ename').value=c.emergency_name||'';
-  document.getElementById('cm-ephone').value=c.emergency_phone||'';
-  openModal('ov-contact');
-}
-
-async function saveContact(){
-  if(!await requireAuth())return;
-  const data={
-    utility_name:document.getElementById('cm-utility').value.trim(),
-    service_area_code:document.getElementById('cm-code').value.trim(),
-    utility_type:document.getElementById('cm-type').value.trim(),
-    state:document.getElementById('cm-state').value,
-    location:document.getElementById('cm-location').value.trim(),
-    contact_name:document.getElementById('cm-cname').value.trim(),
-    contact_phone:document.getElementById('cm-cphone').value.trim(),
-    alternate_name:document.getElementById('cm-aname').value.trim(),
-    alternate_phone:document.getElementById('cm-aphone').value.trim(),
-    emergency_name:document.getElementById('cm-ename').value.trim(),
-    emergency_phone:document.getElementById('cm-ephone').value.trim(),
-    updated_at:new Date().toISOString()
-  };
-  if(!data.utility_name){toast('Preencha o nome da utility.','danger');return;}
-  
-  let res;
-  if(editingContactId){
-    res=await sb.from('utility_contacts').update(data).eq('id',editingContactId);
-  }else{
-    res=await sb.from('utility_contacts').insert(data);
-  }
-  if(res.error){toast('Erro: '+res.error.message,'danger');return;}
-  closeModal('ov-contact');
-  toast(editingContactId?'Contato atualizado!':'Contato criado!','success');
-  renderContacts();
-  loadContactsCache();
-}
-
-async function deleteContact(id){
-  if(!confirm('Excluir este contato?'))return;
-  if(!await requireAuth())return;
-  const res=await sb.from('utility_contacts').delete().eq('id',id);
-  if(res.error){toast('Erro: '+res.error.message,'danger');return;}
-  toast('Contato excluído','success');
-  renderContacts();
-  loadContactsCache();
-}
-
-function exportContacts(){
-  if(!allContacts.length){toast('Nenhum contato para exportar','warn');return;}
-  const wb=XLSX.utils.book_new();
-  const rows=[['Utility','Código','Tipo','Estado','Localidade','Contato','Telefone','Alternativo Nome','Alternativo Tel','Emergência Nome','Emergência Tel']];
-  for(const c of allContacts){
-    rows.push([c.utility_name,c.service_area_code,c.utility_type,c.state,c.location,c.contact_name,c.contact_phone,c.alternate_name,c.alternate_phone,c.emergency_name,c.emergency_phone]);
-  }
-  const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'Contatos');
-  XLSX.writeFile(wb,'OneDrill_Contatos_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast(allContacts.length+' contatos exportados','success');
-}
-
 function filterByUtil(utilName){
   nav('tickets');
   setTimeout(()=>{
@@ -1498,14 +1019,7 @@ function filterByUtil(utilName){
   },100);
 }
 
-function nav(page){if(isSharedView)return;
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));
-  const pg=document.getElementById('pg-'+page);if(pg)pg.classList.add('active');
-  const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');
-  if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}
-  if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();
-}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;

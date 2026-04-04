@@ -152,14 +152,14 @@ function enterViewer(){isAdmin=false;role='viewer';document.getElementById('logi
 async function doLogout(){
   await sb.auth.signOut();
   isAdmin=false;role='viewer';
-  document.getElementById('topbar').style.display='none';
+  document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('pg-dash').classList.add('active');
   document.getElementById('login-screen').style.display='flex';
 }
 
 function enterApp(){
-  document.getElementById('topbar').style.display='flex';
+  document.getElementById('app-shell').style.display='grid';
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
@@ -180,7 +180,7 @@ function enterSharedView(pid){
   if(!p){toast('Projeto não encontrado','danger');enterViewer();return;}
   sharedProjectId=p.id;
   document.getElementById('login-screen').style.display='none';
-  document.getElementById('topbar').style.display='none';
+  document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
   document.getElementById('pg-shared').classList.add('active');
   const ts0=tickets.filter(t=>t.projectId===p.id);
@@ -514,31 +514,7 @@ function renderDash(){
   ${renderUtilSummaryHtml()}${renderClearedStats(fTickets)}${renderClearTimeMetrics(fTickets)}${renderWeeklyEvolution(fTickets)}
   ${renderProgressoFootage(fTickets,projStats)}`;
 }
-function renderProgressoFootage(fTickets,projStats){
-  try{
-  const pf=window._progProjFilter||'';
-  const projOpts='<option value="">Todos (agrupado)</option>'+projStats.map(p=>`<option value="${p.id}"${pf===p.id?' selected':''}>${p.locs||p.name}</option>`).join('');
-  const projSel=`<select class="fi" onchange="window._progProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">${projOpts}</select>`;
-  let content='';
-  if(!pf){
-    // Aggregated view
-    const totalFt=projStats.reduce((s,p)=>s+p.totalFt,0)||1;
-    const clearFt=projStats.reduce((s,p)=>s+p.clearFtP,0);
-    const openFt=projStats.reduce((s,p)=>s+p.openFtP,0);
-    const damageFt=projStats.reduce((s,p)=>s+p.damageFt,0);
-    const concluidoFt=projStats.reduce((s,p)=>s+p.concluidoFt,0);
-    const pctClear=Math.round(clearFt/totalFt*100),pctOpen=Math.round(openFt/totalFt*100),pctDamage=Math.round(damageFt/totalFt*100),pctConcluido=Math.round(concluidoFt/totalFt*100);
-    const totalTickets=projStats.reduce((s,p)=>s+p.count,0);
-    content=`<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${clearFt.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${openFt.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto ${pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${pctOpen}%</span><span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${pctDamage}%</span><span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${pctConcluido}%</span><span style="margin-left:auto">${totalTickets} tickets · ${projStats.length} projetos</span></div>`;
-  }else{
-    const p=projStats.find(x=>x.id===pf);
-    if(p){
-      content=`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><span style="font-size:13px;font-weight:700;color:var(--text)">📍 ${p.locs||p.state} <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.name}</span></span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`;
-    }else content='<div style="color:var(--muted);font-size:13px">Projeto não encontrado</div>';
-  }
-  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">Progresso por Footage</div>${projSel}</div>${content}</div></div>`;
-  }catch(e){console.error('Progresso error:',e);return'';}
-}
+
 
 function renderProjects(){
   const g=document.getElementById('proj-grid');if(!g)return;
@@ -691,29 +667,26 @@ function syncAll(){syncProjectSelects();syncClients();syncLocations();if(utilCac
 
 function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
-  var projFilterId=window._clearProjFilter||'';
-  var filteredT=projFilterId?fTickets.filter(function(t){return t.projectId===projFilterId;}):fTickets;
+  var cpf=window._clearProjFilter||'';
+  var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
   function getClearEvts(t){
     if(!t.history||!t.history.length)return[];
     return t.history.filter(function(h){var a=(h.action||'').toLowerCase();return a.indexOf('clear')>=0&&(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||a.indexOf('status manual')>=0);});
   }
   var c24=[],c7=[],c30=[],byU7={};
-  for(var i=0;i<filteredT.length;i++){var t=filteredT[i];var evts=getClearEvts(t);for(var j=0;j<evts.length;j++){if(evts[j].ts>=day1)c24.push(t);if(evts[j].ts>=day7)c7.push(t);if(evts[j].ts>=day30)c30.push(t);}}
+  for(var i=0;i<ft2.length;i++){var t=ft2[i];var evts=getClearEvts(t);for(var j=0;j<evts.length;j++){if(evts[j].ts>=day1)c24.push(t);if(evts[j].ts>=day7)c7.push(t);if(evts[j].ts>=day30)c30.push(t);}}
   if(utilCacheLoaded){for(var i=0;i<c7.length;i++){var us=getTicketUtils(String(c7[i].ticket).trim());for(var j=0;j<us.length;j++){if(us[j].status==='Clear'){if(!byU7[us[j].utility_name])byU7[us[j].utility_name]=0;byU7[us[j].utility_name]++;}}}}
   var ft24=0,ft7=0,ft30=0;
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
   var daily=[];
-  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;for(var k=0;k<filteredT.length;k++){var evts=getClearEvts(filteredT[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(filteredT[k].footage||0);}}}daily.push({l:lb,c:cnt,f:dft});}
+  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;for(var k=0;k<ft2.length;k++){var evts=getClearEvts(ft2[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft2[k].footage||0);}}}daily.push({l:lb,c:cnt,f:dft});}
   var mx=1;for(var i=0;i<daily.length;i++)if(daily[i].c>mx)mx=daily[i].c;
   var su7=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
-  // Build project filter
-  var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=='Completed';}).map(function(p){return'<option value="'+p.id+'"'+(projFilterId===p.id?' selected':'')+'>'+p.name+'</option>';}).join('');
-  var projSel='<select class="fi" onchange="window._clearProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
-  if(!c30.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center"><div class="dash-card-title" style="margin-bottom:0">Tickets Clareados</div>'+projSel+'</div><div style="color:var(--muted);font-size:13px;margin-top:10px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';
+  if(!c30.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Tickets Clareados</div><div style="color:var(--muted);font-size:13px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">\u2705 Tickets Clareados</div>'+projSel+'</div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">\u2705 Tickets Clareados</div><select class="fi" onchange="window._clearProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px"><option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=="Completed";}).map(function(p){return'<option value="'+p.id+'"'+(cpf===p.id?" selected":"")+'>'+p.name+'</option>';}).join("")+'</select></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">';
   h+='<div style="padding:14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c24.length+'</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-top:2px">Ultimas 24h</div><div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">'+ft24.toLocaleString()+' ft</div></div>';
   h+='<div style="padding:14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-top:2px">Ultimos 7 dias</div><div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">'+ft7.toLocaleString()+' ft</div></div>';
@@ -751,36 +724,24 @@ function renderUtilSummaryHtml(){
   const ticketsWithPending=new Set();
   for(const t of openTickets){if(getTicketPendingUtils(t.ticket).length>0)ticketsWithPending.add(t.ticket);}
   if(!sorted.length)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811</div><div style="color:var(--green);font-size:13px;font-weight:600">✅ Nenhuma utility pendente nos tickets ativos!</div></div>';
-  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;font-size:12px;font-family:var(--mono)"><span style="color:var(--red);font-weight:600">${totalPending} pendências</span><span style="color:var(--muted)">${ticketsWithPending.size} tickets afetados</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];const ename=name.replace(/'/g,"\\'");return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text);cursor:pointer" onclick="filterByUtil('${ename}')">${name}</span><span style="font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono);background:var(--red-bg);padding:2px 8px;border-radius:10px">${count}</span></div><div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div><div style="display:flex;gap:4px"><button class="btn btn-sm" onclick="event.stopPropagation();filterByUtil('${ename}')" style="font-size:10px">Ver tickets</button><button class="btn btn-sm" onclick="event.stopPropagation();exportUtilTickets('${ename}')" style="font-size:10px">↓ Excel</button></div></div>`;}).join('')}</div></div></div>`;
+  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">Utilities 811 — Pendentes por empresa</div><div style="display:flex;gap:12px;font-size:12px;font-family:var(--mono)"><span style="color:var(--red);font-weight:600">${totalPending} pendências</span><span style="color:var(--muted)">${ticketsWithPending.size} tickets afetados</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${sorted.map(([name,count])=>{const tks=utilTickets[name]||[];return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px;cursor:pointer" onclick="filterByUtil('${name.replace(/'/g,"\\'")}')"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text)">${name}</span><span style="font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono);background:var(--red-bg);padding:2px 8px;border-radius:10px">${count}</span></div><div style="display:flex;flex-wrap:wrap;gap:3px">${tks.slice(0,5).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;background:var(--white);border:1px solid var(--border);color:var(--text2);cursor:pointer" onclick="event.stopPropagation();openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}${tks.length>5?`<span style="font-size:10px;color:var(--muted)">+${tks.length-5} mais</span>`:''}</div><div style="display:flex;gap:4px;margin-top:6px"><button class="btn btn-sm" onclick="event.stopPropagation();filterByUtil('${name.replace(/'/g,"\\\\'")}')" style="font-size:10px">Ver tickets</button><button class="btn btn-sm" onclick="event.stopPropagation();exportUtilTickets('${name.replace(/'/g,"\\\\'")}')" style="font-size:10px">↓ Excel</button></div></div>`;}).join('')}</div></div></div>`;
 }
 
 function renderClearTimeMetrics(fTickets){
   if(!utilCacheLoaded)return'';
-  var now=Date.now();
-  var projFilterId=window._metricProjFilter||'';
-  var filteredT=projFilterId?fTickets.filter(function(t){return t.projectId===projFilterId;}):fTickets;
-  // Tempo por utility
+  var mpf=window._metricProjFilter||'';
+  var ft3=mpf?fTickets.filter(function(t){return t.projectId===mpf;}):fTickets;
   var utilTimes={};
-  for(var i=0;i<filteredT.length;i++){
-    var t=filteredT[i];if(!t.history||!t.history.length)continue;var createdTs=t.history[0].ts;if(!createdTs)continue;
-    var utils=getTicketUtils(String(t.ticket).trim());
-    for(var j=0;j<utils.length;j++){var u=utils[j];if(u.status!=='Clear'||!u.responded_at)continue;var respTs=new Date(u.responded_at).getTime();if(isNaN(respTs)||respTs<createdTs)continue;var days=(respTs-createdTs)/86400000;if(days>90)continue;var name=u.utility_name;if(!utilTimes[name])utilTimes[name]={total:0,count:0};utilTimes[name].total+=days;utilTimes[name].count++;}
-  }
-  var utilAvg=[];
-  for(var name in utilTimes){if(utilTimes[name].count>=2){utilAvg.push({name:name,avg:Math.round(utilTimes[name].total/utilTimes[name].count*10)/10,count:utilTimes[name].count});}}
+  for(var i=0;i<ft3.length;i++){var t=ft3[i];if(!t.history||!t.history.length)continue;var createdTs=t.history[0].ts;if(!createdTs)continue;var utils=getTicketUtils(String(t.ticket).trim());for(var j=0;j<utils.length;j++){var u=utils[j];if(u.status!=='Clear'||!u.responded_at)continue;var respTs=new Date(u.responded_at).getTime();if(isNaN(respTs)||respTs<createdTs)continue;var days=(respTs-createdTs)/86400000;if(days>90)continue;var name=u.utility_name;if(!utilTimes[name])utilTimes[name]={total:0,count:0};utilTimes[name].total+=days;utilTimes[name].count++;}}
+  var utilAvg=[];for(var name in utilTimes){if(utilTimes[name].count>=2){utilAvg.push({name:name,avg:Math.round(utilTimes[name].total/utilTimes[name].count*10)/10,count:utilTimes[name].count});}}
   utilAvg.sort(function(a,b){return b.avg-a.avg;});
   if(!utilAvg.length)return'';
   var maxUtil=utilAvg[0].avg||1;
-  var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=='Completed';}).map(function(p){return'<option value="'+p.id+'"'+(projFilterId===p.id?' selected':'')+'>'+p.name+'</option>';}).join('');
+  var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=='Completed';}).map(function(p){return'<option value="'+p.id+'"'+(mpf===p.id?' selected':'')+'>'+p.name+'</option>';}).join('');
   var projSel='<select class="fi" onchange="window._metricProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
-  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear (dias)</div>'+projSel+'</div>';
-  for(var i=0;i<Math.min(utilAvg.length,8);i++){
-    var u=utilAvg[i];var pct=Math.max(u.avg/maxUtil*100,8);var color=u.avg<=2?'var(--green)':u.avg<=5?'var(--amber)':'var(--red)';
-    h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:12px;color:var(--text2);min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+u.name+'</span><div style="flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px"></div></div><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+color+';min-width:55px;text-align:right">'+u.avg+'d</span><span style="font-size:9px;color:var(--muted);min-width:25px">'+u.count+'</span></div>';
-  }
-  h+='</div></div>';
-  return h;
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear (dias)</div>'+projSel+'</div>';
+  for(var i=0;i<Math.min(utilAvg.length,8);i++){var u=utilAvg[i];var pct=Math.max(u.avg/maxUtil*100,8);var color=u.avg<=2?'var(--green)':u.avg<=5?'var(--amber)':'var(--red)';h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:12px;color:var(--text2);min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+u.name+'</span><div style="flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px"></div></div><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+color+';min-width:50px;text-align:right">'+u.avg+'d</span><span style="font-size:9px;color:var(--muted);min-width:20px">'+u.count+'</span></div>';}
+  h+='</div></div>';return h;
 }
 function filterByUtil(utilName){
   nav('tickets');
@@ -789,18 +750,8 @@ function filterByUtil(utilName){
     if(sel){sel.value=utilName;renderTable();}
   },100);
 }
-function exportUtilTickets(utilName){
-  const openTickets=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
-  const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
-  if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
-  const wb=XLSX.utils.book_new();
-  const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||''])];
-  const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
-  XLSX.writeFile(wb,`OneDrill_${utilName.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
-  toast(`${tks.length} tickets exportados — ${utilName}`,'success');
-}
 
-function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3,contacts:4}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;
@@ -822,7 +773,18 @@ function checkProjectUrl(){
   return false;
 }
 
-/* ══════════ WEEKLY EVOLUTION ══════════ */
+function exportUtilTickets(utilName){
+  const openTickets=tickets.filter(t=>(t.status==='Open'||t.status==='Damage'||t.status==='Clear')&&!isSuperseded(t));
+  const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
+  if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
+  const wb=XLSX.utils.book_new();
+  const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||''])];
+  const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
+  XLSX.writeFile(wb,'OneDrill_'+utilName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(tks.length+' tickets exportados — '+utilName,'success');
+}
+
+/* ══════════ WEEKLY EVOLUTION (4 weeks) ══════════ */
 function renderWeeklyEvolution(fTickets){
   try{
   const now=Date.now(),week=7*864e5;
@@ -832,20 +794,40 @@ function renderWeeklyEvolution(fTickets){
   function isOpen(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
   function isClosed(h){const a=(h.action||'').toLowerCase();return a.includes('→ closed')||a.includes('completed');}
   const weeks=[];
-  for(let w=0;w<4;w++){const end=now-w*week,start=end-week;const lbl=w===0?'Esta semana':w===1?'Anterior':`${w+1} sem. atrás`;weeks.push({lbl,open:countInRange(start,end,isOpen),clear:countInRange(start,end,isClear),closed:countInRange(start,end,isClosed)});}
-  function arrow(curr,prev,greenUp){if(prev===undefined)return'';const diff=curr-prev;if(diff===0)return'<span style="color:var(--muted);font-size:10px;margin-left:3px">—</span>';const up=diff>0;const color=(up===greenUp)?'var(--green)':'var(--red)';return`<span style="color:${color};font-size:10px;font-weight:700;margin-left:3px">${up?'▲':'▼'}${Math.abs(diff)}</span>`;}
+  for(let w=0;w<4;w++){const end=now-w*week,start=end-week;const lbl=w===0?'Esta semana':w===1?'Anterior':(w+1)+' sem. atrás';weeks.push({lbl,open:countInRange(start,end,isOpen),clear:countInRange(start,end,isClear),closed:countInRange(start,end,isClosed)});}
+  function arrow(curr,prev,greenUp){if(prev===undefined)return'';const diff=curr-prev;if(diff===0)return'<span style="color:var(--muted);font-size:10px;margin-left:3px">—</span>';const up=diff>0;const color=(up===greenUp)?'var(--green)':'var(--red)';return'<span style="color:'+color+';font-size:10px;font-weight:700;margin-left:3px">'+(up?'▲':'▼')+Math.abs(diff)+'</span>';}
   let h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📊 Evolução Semanal</div><table class="evo-table"><thead><tr><th>Métrica</th>';
-  for(const w of weeks)h+=`<th>${w.lbl}</th>`;
-  h+='</tr></thead><tbody>';
-  h+='<tr><td style="color:var(--text2)">Tickets abertos</td>';
-  for(let i=0;i<weeks.length;i++)h+=`<td>${weeks[i].open}${i<weeks.length-1?arrow(weeks[i].open,weeks[i+1].open,true):''}</td>`;
+  for(const w of weeks)h+='<th>'+w.lbl+'</th>';
+  h+='</tr></thead><tbody><tr><td style="color:var(--text2)">Tickets abertos</td>';
+  for(let i=0;i<weeks.length;i++)h+='<td>'+weeks[i].open+(i<weeks.length-1?arrow(weeks[i].open,weeks[i+1].open,true):'')+'</td>';
   h+='</tr><tr><td style="color:var(--text2)">Tickets clear</td>';
-  for(let i=0;i<weeks.length;i++)h+=`<td style="color:var(--green);font-weight:700">${weeks[i].clear}${i<weeks.length-1?arrow(weeks[i].clear,weeks[i+1].clear,true):''}</td>`;
+  for(let i=0;i<weeks.length;i++)h+='<td style="color:var(--green);font-weight:700">'+weeks[i].clear+(i<weeks.length-1?arrow(weeks[i].clear,weeks[i+1].clear,true):'')+'</td>';
   h+='</tr><tr><td style="color:var(--text2)">Concluídos</td>';
-  for(let i=0;i<weeks.length;i++)h+=`<td>${weeks[i].closed}${i<weeks.length-1?arrow(weeks[i].closed,weeks[i+1].closed,true):''}</td>`;
+  for(let i=0;i<weeks.length;i++)h+='<td>'+weeks[i].closed+(i<weeks.length-1?arrow(weeks[i].closed,weeks[i+1].closed,true):'')+'</td>';
   h+='</tr></tbody></table></div></div>';
   return h;
   }catch(e){console.error('Weekly evolution error:',e);return'';}
+}
+
+/* ══════════ PROGRESSO FOOTAGE (aggregated + filter) ══════════ */
+function renderProgressoFootage(fTickets,projStats){
+  try{
+  const pf=window._progProjFilter||'';
+  const projOpts='<option value="">Todos (agrupado)</option>'+projStats.map(p=>'<option value="'+p.id+'"'+(pf===p.id?' selected':'')+'>'+(p.locs||p.name)+'</option>').join('');
+  const projSel='<select class="fi" onchange="window._progProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+  function mkGrid(d){return'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.totalFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">'+d.clearFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+d.pctClear+'%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">'+d.openFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto '+d.pctOpen+'%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+d.damageFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+d.pctDamage+'%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.concluidoFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+d.pctConcluido+'%</div></div></div><div class="prog-bar"><div style="width:'+d.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(d.pctOpen,100-d.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(d.pctDamage,100-d.pctClear-d.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(d.pctConcluido,100-d.pctClear-d.pctOpen-d.pctDamage)+'%;background:var(--text)"></div></div>';}
+  let content='';
+  if(!pf){
+    const tf=projStats.reduce((s,p)=>s+p.totalFt,0)||1;const cf=projStats.reduce((s,p)=>s+p.clearFtP,0);const of2=projStats.reduce((s,p)=>s+p.openFtP,0);const df=projStats.reduce((s,p)=>s+p.damageFt,0);const clf=projStats.reduce((s,p)=>s+p.concluidoFt,0);
+    content=mkGrid({totalFt:tf,clearFt:cf,openFt:of2,damageFt:df,concluidoFt:clf,pctClear:Math.round(cf/tf*100),pctOpen:Math.round(of2/tf*100),pctDamage:Math.round(df/tf*100),pctConcluido:Math.round(clf/tf*100)});
+    content+='<div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto</span><span><span class="prog-dot" style="background:#f59e0b"></span>Damage</span><span><span class="prog-dot" style="background:var(--text)"></span>Concluído</span><span style="margin-left:auto">'+projStats.reduce((s,p)=>s+p.count,0)+' tickets · '+projStats.length+' projetos</span></div>';
+  }else{
+    const p=projStats.find(x=>x.id===pf);
+    if(p){content='<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">📍 '+(p.locs||p.state)+' <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">'+p.name+'</span></div>'+mkGrid({totalFt:p.totalFt,clearFt:p.clearFtP,openFt:p.openFtP,damageFt:p.damageFt,concluidoFt:p.concluidoFt,pctClear:p.pctClear,pctOpen:p.pctOpen,pctDamage:p.pctDamage,pctConcluido:p.pctConcluido})+'<div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear '+p.pctClear+'%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto '+p.pctOpen+'%</span><span><span class="prog-dot" style="background:var(--text)"></span>Concluído '+p.pctConcluido+'%</span><span style="margin-left:auto">'+p.count+' tickets</span></div>';}
+    else content='<div style="color:var(--muted)">Projeto não encontrado</div>';
+  }
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">Progresso por Footage</div>'+projSel+'</div>'+content+'</div></div>';
+  }catch(e){console.error('Progresso error:',e);return'';}
 }
 
 /* ══════════ GLOBAL SEARCH ══════════ */
@@ -854,22 +836,10 @@ function globalSearch(q){
   q=(q||'').toLowerCase().trim();
   if(!q||q.length<2){dd.innerHTML='';dd.classList.remove('has-results');return;}
   const results=[];
-  // Search tickets
-  for(const t of tickets){
-    if(results.length>=10)break;
-    if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)){
-      results.push({type:'ticket',id:t.id,title:t.ticket,sub:`${t.client} · ${t.location} · ${t.status}`,status:t.status});
-    }
-  }
-  // Search projects
-  for(const p of projects){
-    if(results.length>=12)break;
-    if(p.name.toLowerCase().includes(q)||(p.client||'').toLowerCase().includes(q)){
-      results.push({type:'project',id:p.id,title:p.name,sub:`${p.client} · ${p.state}`});
-    }
-  }
+  for(const t of tickets){if(results.length>=10)break;if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)){results.push({type:'ticket',id:t.id,title:t.ticket,sub:t.client+' · '+t.location+' · '+t.status,status:t.status});}}
+  for(const p of projects){if(results.length>=12)break;if(p.name.toLowerCase().includes(q)||(p.client||'').toLowerCase().includes(q)){results.push({type:'project',id:p.id,title:p.name,sub:p.client+' · '+p.state});}}
   if(!results.length){dd.innerHTML='<div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">Nenhum resultado</div>';dd.classList.add('has-results');return;}
-  dd.innerHTML=results.map(r=>`<div class="gsr-item" onmousedown="${r.type==='ticket'?`openTicketDetail(${r.id})`:`openProjectMap('${r.id}')`};document.getElementById('gsearch').value='';document.getElementById('gsearch-dd').classList.remove('has-results')"><div class="gsr-num">${r.type==='ticket'?'🎫':'📁'} ${r.title}${r.status?` <span class="sbadge b-${r.status.toLowerCase()}" style="font-size:9px">${r.status}</span>`:''}</div><div class="gsr-sub">${r.sub}</div></div>`).join('');
+  dd.innerHTML=results.map(r=>'<div class="gsr-item" onmousedown="'+(r.type==='ticket'?'openTicketDetail('+r.id+')':'openProjectMap(\''+r.id+'\')')+';document.getElementById(\'gsearch\').value=\'\';document.getElementById(\'gsearch-dd\').classList.remove(\'has-results\')"><div class="gsr-num">'+(r.type==='ticket'?'🎫':'📁')+' '+r.title+(r.status?' <span class="sbadge b-'+r.status.toLowerCase()+'" style="font-size:9px">'+r.status+'</span>':'')+'</div><div class="gsr-sub">'+r.sub+'</div></div>').join('');
   dd.classList.add('has-results');
 }
 
@@ -877,21 +847,14 @@ function globalSearch(q){
 function buildNotifications(){
   try{
   const notifs=[];const now=Date.now(),day3=3*864e5;
-  // Expiring soon (next 5 days)
   const expiring=tickets.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel'||isSuperseded(t))return false;const d=new Date(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;});
-  for(const t of expiring)notifs.push({icon:'⏰',text:`${t.ticket} expira ${t.expire}`,id:t.id,type:'warn'});
-  // Recent clears (last 3 days)
-  for(const t of tickets){if(!t.history)continue;for(const h of t.history){if(h.ts>=now-day3&&(h.action||'').toLowerCase().includes('→ clear')){notifs.push({icon:'✅',text:`${t.ticket} clareado`,id:t.id,type:'good'});break;}}}
-  // Damage tickets
+  for(const t of expiring)notifs.push({icon:'⏰',text:t.ticket+' expira '+t.expire,id:t.id,type:'warn'});
+  for(const t of tickets){if(!t.history)continue;for(const h of t.history){if(h.ts>=now-day3&&(h.action||'').toLowerCase().includes('→ clear')){notifs.push({icon:'✅',text:t.ticket+' clareado',id:t.id,type:'good'});break;}}}
   const damages=tickets.filter(t=>t.status==='Damage'&&!isSuperseded(t));
-  for(const t of damages)notifs.push({icon:'⚠️',text:`${t.ticket} com damage`,id:t.id,type:'danger'});
-  // Recent imports (last 3 days)
-  for(const t of tickets){if(!t.history)continue;const last=t.history[t.history.length-1];if(last&&last.ts>=now-day3&&(last.action||'').toLowerCase().includes('importado')){notifs.push({icon:'📥',text:`${t.ticket} importado`,id:t.id,type:'info'});}}
-  // Update badge
+  for(const t of damages)notifs.push({icon:'⚠️',text:t.ticket+' com damage',id:t.id,type:'danger'});
   const badge=document.getElementById('notif-badge');
   const urgent=notifs.filter(n=>n.type==='warn'||n.type==='danger').length;
   if(badge){badge.textContent=urgent;badge.style.display=urgent>0?'':'none';}
-  // Store for panel
   window._notifs=notifs.slice(0,30);
   }catch(e){console.error('Notifications error:',e);}
 }
@@ -905,13 +868,11 @@ function toggleNotifPanel(){
     const byType={warn:[],danger:[],good:[],info:[]};
     for(const n of notifs)(byType[n.type]||byType.info).push(n);
     let h='';
-    if(byType.warn.length||byType.danger.length){h+='<div class="notif-section">⚠ Atenção</div>';for(const n of [...byType.danger,...byType.warn])h+=`<div class="notif-item" onclick="openTicketDetail(${n.id});toggleNotifPanel()">${n.icon} ${n.text}</div>`;}
-    if(byType.good.length){h+='<div class="notif-section">✅ Resolvidos</div>';for(const n of byType.good.slice(0,10))h+=`<div class="notif-item" onclick="openTicketDetail(${n.id});toggleNotifPanel()">${n.icon} ${n.text}</div>`;}
-    if(byType.info.length){h+='<div class="notif-section">📥 Recentes</div>';for(const n of byType.info.slice(0,8))h+=`<div class="notif-item" onclick="openTicketDetail(${n.id});toggleNotifPanel()">${n.icon} ${n.text}</div>`;}
+    if(byType.warn.length||byType.danger.length){h+='<div class="notif-section">⚠ Atenção</div>';for(const n of [...byType.danger,...byType.warn])h+='<div class="notif-item" onclick="openTicketDetail('+n.id+');toggleNotifPanel()">'+n.icon+' '+n.text+'</div>';}
+    if(byType.good.length){h+='<div class="notif-section">✅ Resolvidos</div>';for(const n of byType.good.slice(0,10))h+='<div class="notif-item" onclick="openTicketDetail('+n.id+');toggleNotifPanel()">'+n.icon+' '+n.text+'</div>';}
     panel.innerHTML=h;
   }
 }
-
 function toggleInfoPanel(){
   const panel=document.getElementById('info-panel');if(!panel)return;
   document.getElementById('notif-panel')?.classList.remove('open');
@@ -920,39 +881,37 @@ function toggleInfoPanel(){
     const fTickets=dashStateVal?tickets.filter(t=>t.state===dashStateVal&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
     const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,10);
     let h='<div class="notif-section">📋 Atividade recente</div>';
-    for(const t of recent){const last=t.history?.[t.history.length-1];h+=`<div class="notif-item" onclick="openTicketDetail(${t.id});toggleInfoPanel()"><span style="font-family:var(--mono);font-weight:600">${t.ticket}</span> <span class="sbadge b-${t.status.toLowerCase()}" style="font-size:9px">${t.status}</span><div style="font-size:10px;color:var(--muted);margin-top:1px">${last?.action||'—'}</div></div>`;}
-    h+='<div class="notif-section" style="margin-top:12px">ℹ️ Sistema</div>';
-    h+='<div style="font-size:12px;color:var(--text2);padding:6px 10px;line-height:1.8">🔵 Dados: Supabase<br>🟢 Sync: Automática<br>🗺 Mapa: Google Hybrid<br><span style="font-size:11px;color:var(--muted)">📤 Compartilhar projeto na tela Projetos</span></div>';
+    for(const t of recent){const last=t.history?.[t.history.length-1];h+='<div class="notif-item" onclick="openTicketDetail('+t.id+');toggleInfoPanel()"><span style="font-family:var(--mono);font-weight:600">'+t.ticket+'</span> <span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+t.status+'</span><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(last?.action||'—')+'</div></div>';}
+    h+='<div class="notif-section" style="margin-top:12px">ℹ️ Sistema</div><div style="font-size:12px;color:var(--text2);padding:6px 10px;line-height:1.8">🔵 Dados: Supabase<br>🟢 Sync: Automática<br>🗺 Mapa: Google Hybrid</div>';
     panel.innerHTML=h;
   }
+}
+
+/* ══════════ MOBILE NAV ══════════ */
+function toggleMobNav(){
+  const nav=document.getElementById('sidebar-nav');const ov=document.getElementById('mob-nav-overlay');
+  if(!nav)return;
+  const open=nav.classList.toggle('mob-open');
+  if(ov)ov.classList.toggle('open',open);
 }
 
 /* ══════════ CONTACTS ══════════ */
 let utilContacts=[],editingContactId=null;
 async function loadContacts(){
-  try{
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
-    if(r.ok)utilContacts=await r.json();
-    else utilContacts=[];
-    console.log('[Contacts]',utilContacts.length,'utilities com contatos');
-  }catch(e){console.error('Contacts load error:',e);utilContacts=[];}
+  try{const r=await fetch(SUPABASE_URL+'/rest/v1/utility_contacts?select=*&order=utility_name',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});if(r.ok)utilContacts=await r.json();else utilContacts=[];console.log('[Contacts]',utilContacts.length,'utilities com contatos');}catch(e){console.error('Contacts load error:',e);utilContacts=[];}
 }
 function renderContacts(){
   const grid=document.getElementById('contacts-grid');if(!grid)return;
   const sr=(document.getElementById('contacts-search')?.value||'').toLowerCase();
   const sf=document.getElementById('contacts-state-filter')?.value||'';
-  let f=utilContacts.filter(c=>{
-    if(sf&&(c.state||'')!==sf)return false;
-    if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;
-    return true;
-  });
+  let f=utilContacts.filter(c=>{if(sf&&(c.state||'')!==sf)return false;if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;return true;});
   if(!f.length){grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';return;}
   grid.innerHTML=f.map(c=>{
     const phones=[];
-    if(c.phone_main)phones.push(`<div class="cc-phone"><span class="cc-tag cc-tag-main">Principal</span> <a href="tel:${c.phone_main}">${c.phone_main}</a></div>`);
-    if(c.phone_alt)phones.push(`<div class="cc-phone"><span class="cc-tag cc-tag-alt">Alternativo</span> <a href="tel:${c.phone_alt}">${c.phone_alt}</a></div>`);
-    if(c.phone_emergency)phones.push(`<div class="cc-phone"><span class="cc-tag cc-tag-emerg">Emergência</span> <a href="tel:${c.phone_emergency}">${c.phone_emergency}</a></div>`);
-    return`<div class="contact-card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="cc-name">${c.utility_name}</div><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border);font-family:var(--mono)">${c.state||'—'}</span></div><div class="cc-phones">${phones.join('')}</div>${c.notes?`<div class="cc-meta">${c.notes}</div>`:''}${c.ticket_ref?`<div class="cc-meta">Ref: ${c.ticket_ref}</div>`:''}${isAdmin?`<div class="cc-actions"><button class="btn btn-sm" onclick="editContact(${c.id})">Editar</button><button class="btn btn-sm btn-danger" onclick="deleteContact(${c.id})">Excluir</button></div>`:''}</div>`;
+    if(c.phone_main)phones.push('<div class="cc-phone"><span class="cc-tag cc-tag-main">Principal</span> <a href="tel:'+c.phone_main+'">'+c.phone_main+'</a></div>');
+    if(c.phone_alt)phones.push('<div class="cc-phone"><span class="cc-tag cc-tag-alt">Alternativo</span> <a href="tel:'+c.phone_alt+'">'+c.phone_alt+'</a></div>');
+    if(c.phone_emergency)phones.push('<div class="cc-phone"><span class="cc-tag cc-tag-emerg">Emergência</span> <a href="tel:'+c.phone_emergency+'">'+c.phone_emergency+'</a></div>');
+    return'<div class="contact-card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="cc-name">'+c.utility_name+'</div><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border);font-family:var(--mono)">'+(c.state||'—')+'</span></div><div class="cc-phones">'+phones.join('')+'</div>'+(c.notes?'<div class="cc-meta">'+c.notes+'</div>':'')+(isAdmin?'<div class="cc-actions"><button class="btn btn-sm" onclick="editContact('+c.id+')">Editar</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')">Excluir</button></div>':'')+'</div>';
   }).join('');
 }
 function openContactModal(id){
@@ -966,28 +925,17 @@ function editContact(id){openContactModal(id);}
 async function saveContact(){
   const name=document.getElementById('ct-utility').value.trim();if(!name){toast('Preencha o nome da utility.','danger');return;}
   const data={utility_name:name,state:document.getElementById('ct-state').value,ticket_ref:document.getElementById('ct-ticket').value.trim(),phone_main:document.getElementById('ct-phone1').value.trim(),phone_alt:document.getElementById('ct-phone2').value.trim(),phone_emergency:document.getElementById('ct-phone3').value.trim(),notes:document.getElementById('ct-notes').value.trim()};
-  try{
-    let res;
-    if(editingContactId){res=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?id=eq.${editingContactId}`,{method:'PATCH',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}
-    else{res=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    await loadContacts();renderContacts();closeModal('ov-contact');toast('Contato salvo!','success');
-  }catch(e){toast('Erro ao salvar: '+e.message,'danger');}
+  try{let res;if(editingContactId){res=await fetch(SUPABASE_URL+'/rest/v1/utility_contacts?id=eq.'+editingContactId,{method:'PATCH',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}else{res=await fetch(SUPABASE_URL+'/rest/v1/utility_contacts',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}
+  if(!res.ok)throw new Error('HTTP '+res.status);await loadContacts();renderContacts();closeModal('ov-contact');toast('Contato salvo!','success');}catch(e){toast('Erro ao salvar: '+e.message,'danger');}
 }
 async function deleteContact(id){
   if(!confirm('Excluir este contato?'))return;
-  try{
-    await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?id=eq.${id}`,{method:'DELETE',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
-    await loadContacts();renderContacts();toast('Contato excluído','success');
-  }catch(e){toast('Erro: '+e.message,'danger');}
+  try{await fetch(SUPABASE_URL+'/rest/v1/utility_contacts?id=eq.'+id,{method:'DELETE',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});await loadContacts();renderContacts();toast('Contato excluído','success');}catch(e){toast('Erro: '+e.message,'danger');}
 }
 function exportContacts(){
-  if(!utilContacts.length){toast('Nenhum contato para exportar.','warn');return;}
-  const wb=XLSX.utils.book_new();
-  const data=[['Utility','Estado','Telefone Principal','Tel. Alternativo','Tel. Emergência','Ticket Ref','Notas'],...utilContacts.map(c=>[c.utility_name,c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',c.ticket_ref||'',c.notes||''])];
-  const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Contatos');
-  XLSX.writeFile(wb,'OneDrill_Contatos_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast('Contatos exportados!','success');
+  if(!utilContacts.length){toast('Nenhum contato.','warn');return;}
+  const wb=XLSX.utils.book_new();const data=[['Utility','Estado','Tel. Principal','Tel. Alternativo','Tel. Emergência','Ticket Ref','Notas'],...utilContacts.map(c=>[c.utility_name,c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',c.ticket_ref||'',c.notes||''])];
+  const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Contatos');XLSX.writeFile(wb,'OneDrill_Contatos_'+new Date().toISOString().slice(0,10)+'.xlsx');toast('Contatos exportados!','success');
 }
 
 window.addEventListener('load',async()=>{

@@ -87,8 +87,12 @@
     <button class="ntab" onclick="nav('proj')">Projetos</button>
     <button class="ntab" onclick="nav('map')">Mapa</button>
     <button class="ntab" onclick="nav('tickets')">Tickets</button>
+    <button class="ntab" onclick="nav('contacts')">Contatos</button>
   </div>
   <div class="hactions">
+    <div class="gsearch-wrap"><input class="gsearch-inp" id="gsearch" placeholder="Buscar ticket, cliente..." oninput="globalSearch(this.value)" onfocus="this.parentElement.classList.add('focus')" onblur="setTimeout(()=>this.parentElement.classList.remove('focus'),200)"><div class="gsearch-dd" id="gsearch-dd"></div></div>
+    <button class="notif-btn" id="notif-btn" onclick="toggleNotifPanel()">🔔<span class="notif-badge" id="notif-badge" style="display:none">0</span></button>
+    <div class="notif-panel" id="notif-panel"></div>
     <div class="sync-indicator"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
     <span class="role-badge" id="role-badge">VIEWER</span>
     <button class="btn" onclick="exportExcel()">↓ Excel</button>
@@ -346,6 +350,38 @@
 </div>
 
 
+
+<div class="page" id="pg-contacts">
+  <div class="contacts-inner">
+    <div class="contacts-header">
+      <div class="page-title">Contatos de Utilities</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="fi" id="contacts-search" placeholder="Buscar utility..." oninput="renderContacts()" style="width:200px">
+        <select class="fi" id="contacts-state-filter" onchange="renderContacts()" style="width:auto"><option value="">Todos estados</option><option>FL</option><option>IN</option></select>
+        <button class="btn btn-sm" onclick="exportContacts()">↓ Excel</button>
+        <button class="btn btn-primary btn-sm" id="btn-add-contact" onclick="openContactModal()" style="display:none">+ Contato</button>
+      </div>
+    </div>
+    <div id="contacts-grid"></div>
+  </div>
+</div>
+
+<!-- MODAL: Contact -->
+<div class="overlay" id="ov-contact">
+  <div class="modal narrow">
+    <div class="modal-head"><div class="mtitle" id="contact-modal-title">Novo contato</div><button class="modal-close" onclick="closeModal('ov-contact')">×</button></div>
+    <div class="fgrid">
+      <div class="fg full"><label class="fl">Utility</label><input class="finp" id="ct-utility" placeholder="Duke Energy"></div>
+      <div class="fg"><label class="fl">Estado</label><select class="fsel" id="ct-state"><option>FL</option><option>IN</option></select></div>
+      <div class="fg"><label class="fl">Ticket de referência</label><input class="finp" id="ct-ticket" placeholder="Número do ticket"></div>
+      <div class="fg"><label class="fl">Contato principal</label><input class="finp" id="ct-phone1" placeholder="(321) 555-1234"></div>
+      <div class="fg"><label class="fl">Contato alternativo</label><input class="finp" id="ct-phone2" placeholder="(321) 555-5678"></div>
+      <div class="fg"><label class="fl">Emergência</label><input class="finp" id="ct-phone3" placeholder="(321) 555-9999"></div>
+      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="ct-notes" style="min-height:40px"></textarea></div>
+    </div>
+    <div class="factions"><button class="btn" onclick="closeModal('ov-contact')">Cancelar</button><button class="btn btn-primary" onclick="saveContact()">Salvar</button></div>
+  </div>
+</div>
 
 <div class="toast" id="toast"><div class="tdot" id="tdot"></div><span id="tmsg"></span></div>
 

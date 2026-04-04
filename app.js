@@ -165,10 +165,11 @@ function enterApp(){
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
   const logoutBtn=document.getElementById('btn-logout');
   if(logoutBtn)logoutBtn.style.display=isAdmin?'':'none';
-  if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='');}
-  else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn'].forEach(id=>document.getElementById(id).style.display='none');document.getElementById('field-status-section').style.display='none';}
+  if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='';});}
+  else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
-  loadUtilCache().then(()=>{renderDash();renderTable();});
+  loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
+  loadContacts().then(()=>renderContacts());
   setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
@@ -510,7 +511,7 @@ function renderDash(){
   const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
   el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderUtilSummaryHtml()}${renderClearedStats(fTickets)}${renderClearTimeMetrics(fTickets)}
+  ${renderUtilSummaryHtml()}${renderClearedStats(fTickets)}${renderClearTimeMetrics(fTickets)}${renderWeeklyEvolution(fTickets)}
   <div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Progresso por projeto — Footage</div>${projStats.length?projStats.map(p=>`<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:4px"><span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700;color:var(--text)">📍 ${p.locs||p.state}</span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.name}</span></span><span style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.ticketFt.toLocaleString()} ft${p.hasTotalFromSheet?' / <strong style="color:var(--text)">'+p.totalFt.toLocaleString()+' ft total</strong>':''}</span></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.totalFt.toLocaleString()}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft${p.hasTotalFromSheet?'*':''}</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">${p.clearFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear ${p.pctClear}%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">${p.openFtP.toLocaleString()}</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Em aberto ${p.pctOpen}%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">${p.damageFt.toLocaleString()}</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage ${p.pctDamage}%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">${p.concluidoFt.toLocaleString()}</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído ${p.pctConcluido}%</div></div></div><div class="prog-bar"><div style="width:${p.pctClear}%;background:var(--green)"></div><div style="width:${Math.min(p.pctOpen,100-p.pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(p.pctDamage,100-p.pctClear-p.pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(p.pctConcluido,100-p.pctClear-p.pctOpen-p.pctDamage)}%;background:var(--text)"></div></div><div class="prog-legend"><span><span class="prog-dot" style="background:var(--green)"></span>Clear ${p.pctClear}%</span><span><span class="prog-dot" style="background:var(--red)"></span>Aberto ${p.pctOpen}%</span>${p.damageFt>0?`<span><span class="prog-dot" style="background:#f59e0b"></span>Damage ${p.pctDamage}%</span>`:''}<span><span class="prog-dot" style="background:var(--text)"></span>Concluído ${p.pctConcluido}%</span><span style="margin-left:auto">${p.count} tickets</span></div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sem projetos</div>'}</div></div>
   <div class="dash-row"><div class="dash-card"><div class="dash-card-title">Atividade recente</div>${recent.map(t=>{const last=t.history?.[t.history.length-1];return`<div class="recent-item" onclick="openTicketDetail(${t.id})"><div><div style="font-size:13px;font-weight:500;font-family:var(--mono)">${t.ticket}</div><div style="color:var(--muted);font-size:11px">${last?.action||'—'}</div></div><span class="sbadge b-${t.status.toLowerCase()}">${t.status}</span></div>`;}).join('')}</div><div class="dash-card"><div class="dash-card-title">Sobre o sistema</div><div style="font-size:13px;color:var(--text2);line-height:1.8"><div>🔵 <strong>Dados:</strong> Supabase (nuvem)</div><div>🟢 <strong>Sincronização:</strong> Automática</div><div>🗺 <strong>Mapa:</strong> Google Hybrid</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Para compartilhar um projeto: use 📤 Compartilhar na tela de Projetos.</div></div></div></div>`;
 }
@@ -855,7 +856,7 @@ function filterByUtil(utilName){
   },100);
 }
 
-function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const idx={dash:0,proj:1,map:2,tickets:3,contacts:4}[page];document.querySelectorAll('.ntab')[idx]?.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;
@@ -875,6 +876,152 @@ function checkProjectUrl(){
     if(p){enterSharedView(p.id);return true;}
   }
   return false;
+}
+
+/* ══════════ WEEKLY EVOLUTION ══════════ */
+function renderWeeklyEvolution(fTickets){
+  try{
+  const now=Date.now(),week=7*864e5;
+  const thisStart=now-week,lastStart=now-2*week;
+  // Use allFTickets (includes superseded) for cleared stats
+  const allF=dashStateVal?tickets.filter(t=>t.state===dashStateVal):tickets;
+  function countInRange(start,end,statusFn){return allF.filter(t=>{const evts=(t.history||[]);return evts.some(h=>h.ts>=start&&h.ts<end&&statusFn(h));}).length;}
+  function getClearEvts(h){const a=(h.action||'').toLowerCase();return a.includes('clear')&&(a.includes('→ clear')||a.includes('auto-clear')||a.includes('auto 811')||a.includes('status manual'));}
+  function getOpenEvts(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
+  const thisOpen=countInRange(thisStart,now,getOpenEvts),lastOpen=countInRange(lastStart,thisStart,getOpenEvts);
+  const thisClear=countInRange(thisStart,now,getClearEvts),lastClear=countInRange(lastStart,thisStart,getClearEvts);
+  // Concluidos = closed
+  function getClosedEvts(h){const a=(h.action||'').toLowerCase();return a.includes('→ closed')||a.includes('completed');}
+  const thisClosed=countInRange(thisStart,now,getClosedEvts),lastClosed=countInRange(lastStart,thisStart,getClosedEvts);
+  function arrow(curr,prev,greenUp){const diff=curr-prev;if(diff===0)return'<span class="evo-arrow" style="color:var(--muted)">—</span>';const up=diff>0;const color=(up===greenUp)?'var(--green)':'var(--red)';return`<span class="evo-arrow" style="color:${color}">${up?'▲':'▼'} ${Math.abs(diff)}</span>`;}
+  return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📊 Evolução Semanal</div><table class="evo-table"><thead><tr><th>Métrica</th><th>Esta semana</th><th>Semana anterior</th><th>Variação</th></tr></thead><tbody><tr><td style="color:var(--text2)">Tickets abertos</td><td>${thisOpen}</td><td>${lastOpen}</td><td>${arrow(thisOpen,lastOpen,true)}</td></tr><tr><td style="color:var(--text2)">Tickets clear</td><td style="color:var(--green);font-weight:700">${thisClear}</td><td>${lastClear}</td><td>${arrow(thisClear,lastClear,true)}</td></tr><tr><td style="color:var(--text2)">Concluídos</td><td>${thisClosed}</td><td>${lastClosed}</td><td>${arrow(thisClosed,lastClosed,true)}</td></tr></tbody></table></div></div>`;
+  }catch(e){console.error('Weekly evolution error:',e);return'';}
+}
+
+/* ══════════ GLOBAL SEARCH ══════════ */
+function globalSearch(q){
+  const dd=document.getElementById('gsearch-dd');if(!dd)return;
+  q=(q||'').toLowerCase().trim();
+  if(!q||q.length<2){dd.innerHTML='';dd.classList.remove('has-results');return;}
+  const results=[];
+  // Search tickets
+  for(const t of tickets){
+    if(results.length>=10)break;
+    if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)){
+      results.push({type:'ticket',id:t.id,title:t.ticket,sub:`${t.client} · ${t.location} · ${t.status}`,status:t.status});
+    }
+  }
+  // Search projects
+  for(const p of projects){
+    if(results.length>=12)break;
+    if(p.name.toLowerCase().includes(q)||(p.client||'').toLowerCase().includes(q)){
+      results.push({type:'project',id:p.id,title:p.name,sub:`${p.client} · ${p.state}`});
+    }
+  }
+  if(!results.length){dd.innerHTML='<div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">Nenhum resultado</div>';dd.classList.add('has-results');return;}
+  dd.innerHTML=results.map(r=>`<div class="gsr-item" onmousedown="${r.type==='ticket'?`openTicketDetail(${r.id})`:`openProjectMap('${r.id}')`};document.getElementById('gsearch').value='';document.getElementById('gsearch-dd').classList.remove('has-results')"><div class="gsr-num">${r.type==='ticket'?'🎫':'📁'} ${r.title}${r.status?` <span class="sbadge b-${r.status.toLowerCase()}" style="font-size:9px">${r.status}</span>`:''}</div><div class="gsr-sub">${r.sub}</div></div>`).join('');
+  dd.classList.add('has-results');
+}
+
+/* ══════════ NOTIFICATIONS ══════════ */
+function buildNotifications(){
+  try{
+  const notifs=[];const now=Date.now(),day3=3*864e5;
+  // Expiring soon (next 5 days)
+  const expiring=tickets.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel'||isSuperseded(t))return false;const d=new Date(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;});
+  for(const t of expiring)notifs.push({icon:'⏰',text:`${t.ticket} expira ${t.expire}`,id:t.id,type:'warn'});
+  // Recent clears (last 3 days)
+  for(const t of tickets){if(!t.history)continue;for(const h of t.history){if(h.ts>=now-day3&&(h.action||'').toLowerCase().includes('→ clear')){notifs.push({icon:'✅',text:`${t.ticket} clareado`,id:t.id,type:'good'});break;}}}
+  // Damage tickets
+  const damages=tickets.filter(t=>t.status==='Damage'&&!isSuperseded(t));
+  for(const t of damages)notifs.push({icon:'⚠️',text:`${t.ticket} com damage`,id:t.id,type:'danger'});
+  // Recent imports (last 3 days)
+  for(const t of tickets){if(!t.history)continue;const last=t.history[t.history.length-1];if(last&&last.ts>=now-day3&&(last.action||'').toLowerCase().includes('importado')){notifs.push({icon:'📥',text:`${t.ticket} importado`,id:t.id,type:'info'});}}
+  // Update badge
+  const badge=document.getElementById('notif-badge');
+  const urgent=notifs.filter(n=>n.type==='warn'||n.type==='danger').length;
+  if(badge){badge.textContent=urgent;badge.style.display=urgent>0?'':'none';}
+  // Store for panel
+  window._notifs=notifs.slice(0,30);
+  }catch(e){console.error('Notifications error:',e);}
+}
+function toggleNotifPanel(){
+  const panel=document.getElementById('notif-panel');if(!panel)return;
+  const open=panel.classList.toggle('open');
+  if(open){
+    const notifs=window._notifs||[];
+    if(!notifs.length){panel.innerHTML='<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Nenhuma notificação</div>';return;}
+    const byType={warn:[],danger:[],good:[],info:[]};
+    for(const n of notifs)(byType[n.type]||byType.info).push(n);
+    let h='';
+    if(byType.warn.length||byType.danger.length){h+='<div class="notif-section">⚠ Atenção</div>';for(const n of [...byType.danger,...byType.warn])h+=`<div class="notif-item" onclick="openTicketDetail(${n.id});toggleNotifPanel()">${n.icon} ${n.text}</div>`;}
+    if(byType.good.length){h+='<div class="notif-section">✅ Resolvidos</div>';for(const n of byType.good.slice(0,10))h+=`<div class="notif-item" onclick="openTicketDetail(${n.id});toggleNotifPanel()">${n.icon} ${n.text}</div>`;}
+    if(byType.info.length){h+='<div class="notif-section">📥 Recentes</div>';for(const n of byType.info.slice(0,8))h+=`<div class="notif-item" onclick="openTicketDetail(${n.id});toggleNotifPanel()">${n.icon} ${n.text}</div>`;}
+    panel.innerHTML=h;
+  }
+}
+
+/* ══════════ CONTACTS ══════════ */
+let utilContacts=[],editingContactId=null;
+async function loadContacts(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+    if(r.ok)utilContacts=await r.json();
+    else utilContacts=[];
+    console.log('[Contacts]',utilContacts.length,'utilities com contatos');
+  }catch(e){console.error('Contacts load error:',e);utilContacts=[];}
+}
+function renderContacts(){
+  const grid=document.getElementById('contacts-grid');if(!grid)return;
+  const sr=(document.getElementById('contacts-search')?.value||'').toLowerCase();
+  const sf=document.getElementById('contacts-state-filter')?.value||'';
+  let f=utilContacts.filter(c=>{
+    if(sf&&(c.state||'')!==sf)return false;
+    if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;
+    return true;
+  });
+  if(!f.length){grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';return;}
+  grid.innerHTML=f.map(c=>{
+    const phones=[];
+    if(c.phone_main)phones.push(`<div class="cc-phone"><span class="cc-tag cc-tag-main">Principal</span> <a href="tel:${c.phone_main}">${c.phone_main}</a></div>`);
+    if(c.phone_alt)phones.push(`<div class="cc-phone"><span class="cc-tag cc-tag-alt">Alternativo</span> <a href="tel:${c.phone_alt}">${c.phone_alt}</a></div>`);
+    if(c.phone_emergency)phones.push(`<div class="cc-phone"><span class="cc-tag cc-tag-emerg">Emergência</span> <a href="tel:${c.phone_emergency}">${c.phone_emergency}</a></div>`);
+    return`<div class="contact-card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="cc-name">${c.utility_name}</div><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--muted);border:1px solid var(--border);font-family:var(--mono)">${c.state||'—'}</span></div><div class="cc-phones">${phones.join('')}</div>${c.notes?`<div class="cc-meta">${c.notes}</div>`:''}${c.ticket_ref?`<div class="cc-meta">Ref: ${c.ticket_ref}</div>`:''}${isAdmin?`<div class="cc-actions"><button class="btn btn-sm" onclick="editContact(${c.id})">Editar</button><button class="btn btn-sm btn-danger" onclick="deleteContact(${c.id})">Excluir</button></div>`:''}</div>`;
+  }).join('');
+}
+function openContactModal(id){
+  editingContactId=id||null;
+  document.getElementById('contact-modal-title').textContent=id?'Editar contato':'Novo contato';
+  if(id){const c=utilContacts.find(x=>x.id===id);if(c){document.getElementById('ct-utility').value=c.utility_name||'';document.getElementById('ct-state').value=c.state||'FL';document.getElementById('ct-ticket').value=c.ticket_ref||'';document.getElementById('ct-phone1').value=c.phone_main||'';document.getElementById('ct-phone2').value=c.phone_alt||'';document.getElementById('ct-phone3').value=c.phone_emergency||'';document.getElementById('ct-notes').value=c.notes||'';}}
+  else{['ct-utility','ct-ticket','ct-phone1','ct-phone2','ct-phone3','ct-notes'].forEach(id=>document.getElementById(id).value='');document.getElementById('ct-state').value='FL';}
+  openModal('ov-contact');
+}
+function editContact(id){openContactModal(id);}
+async function saveContact(){
+  const name=document.getElementById('ct-utility').value.trim();if(!name){toast('Preencha o nome da utility.','danger');return;}
+  const data={utility_name:name,state:document.getElementById('ct-state').value,ticket_ref:document.getElementById('ct-ticket').value.trim(),phone_main:document.getElementById('ct-phone1').value.trim(),phone_alt:document.getElementById('ct-phone2').value.trim(),phone_emergency:document.getElementById('ct-phone3').value.trim(),notes:document.getElementById('ct-notes').value.trim()};
+  try{
+    let res;
+    if(editingContactId){res=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?id=eq.${editingContactId}`,{method:'PATCH',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}
+    else{res=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(data)});}
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    await loadContacts();renderContacts();closeModal('ov-contact');toast('Contato salvo!','success');
+  }catch(e){toast('Erro ao salvar: '+e.message,'danger');}
+}
+async function deleteContact(id){
+  if(!confirm('Excluir este contato?'))return;
+  try{
+    await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?id=eq.${id}`,{method:'DELETE',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
+    await loadContacts();renderContacts();toast('Contato excluído','success');
+  }catch(e){toast('Erro: '+e.message,'danger');}
+}
+function exportContacts(){
+  if(!utilContacts.length){toast('Nenhum contato para exportar.','warn');return;}
+  const wb=XLSX.utils.book_new();
+  const data=[['Utility','Estado','Telefone Principal','Tel. Alternativo','Tel. Emergência','Ticket Ref','Notas'],...utilContacts.map(c=>[c.utility_name,c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',c.ticket_ref||'',c.notes||''])];
+  const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Contatos');
+  XLSX.writeFile(wb,'OneDrill_Contatos_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Contatos exportados!','success');
 }
 
 window.addEventListener('load',async()=>{

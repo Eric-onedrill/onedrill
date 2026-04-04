@@ -15,11 +15,11 @@ let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
-let map,satL,strL,hybL,mkrs=[],lines=[],labels=[],drawn=[];
+let map,satL,strL,hybL,mkrs=[],lines=[],labels=[];
 let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
 let clusterGroup=null;
 let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
-let _tt;
+
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
 

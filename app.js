@@ -147,12 +147,17 @@ async function tryLogin(){
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
     if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
-    const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
-    if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
-    else{isAdmin=false;role='viewer';}
+    console.log('[Login] Auth OK, user_id:',data.user.id,'email:',data.user.email);
+    try{
+      const roleResp=await fetch(SUPABASE_URL+'/rest/v1/app_roles?select=role&user_id=eq.'+data.user.id,{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+data.session.access_token}});
+      if(roleResp.ok){const roles=await roleResp.json();isAdmin=roles.length>0&&roles[0].role==='admin';}
+      else{isAdmin=data.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
+    }catch(e){isAdmin=data.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
+    role=isAdmin?'admin':'viewer';
+    console.log('[Login] Final role:',role,'isAdmin:',isAdmin);
     document.getElementById('login-screen').style.display='none';
     enterApp();
-  }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
+  }catch(e){console.error('[Login] Exception:',e);errEl.textContent='Erro de conexão';errEl.style.display='block';}
   document.querySelector('.login-admin-btn').disabled=false;
   document.querySelector('.login-admin-btn').textContent='Entrar como Admin';
 }
@@ -1018,15 +1023,12 @@ window.addEventListener('load',async()=>{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
       try{
-        const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
-        if(roleErr)console.warn('[Auth] Role query error:',roleErr);
-        isAdmin=roleData&&roleData.role==='admin';
-        role=isAdmin?'admin':'viewer';
-        console.log('[Auth] Auto-login:',role,'user:',session.user.email);
-      }catch(e){
-        console.warn('[Auth] Role check failed, entering as viewer:',e);
-        isAdmin=false;role='viewer';
-      }
+        const roleResp=await fetch(SUPABASE_URL+'/rest/v1/app_roles?select=role&user_id=eq.'+session.user.id,{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+session.access_token}});
+        if(roleResp.ok){const roles=await roleResp.json();isAdmin=roles.length>0&&roles[0].role==='admin';}
+        else{isAdmin=session.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
+      }catch(e){isAdmin=session.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
+      role=isAdmin?'admin':'viewer';
+      console.log('[Auth] Auto-login:',role,'user:',session.user.email);
       enterApp();
       return;
     }

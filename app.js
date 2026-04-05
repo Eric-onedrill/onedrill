@@ -946,7 +946,7 @@ function renderContacts(){
       if(c.phone_alt)phones.push('<span class="cc-tag cc-tag-alt">Alt.</span> <a href="tel:'+c.phone_alt+'">'+c.phone_alt+'</a>');
       if(c.phone_emergency)phones.push('<span class="cc-tag cc-tag-emerg">Emerg.</span> <a href="tel:'+c.phone_emergency+'">'+c.phone_emergency+'</a>');
       return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--border)">'+(name?'<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:120px">'+name+'</span>':'')+'<div class="cc-phones" style="margin:0;gap:10px">'+phones.join(' ')+'</div>'+(isAdmin?'<div style="display:flex;gap:4px;margin-left:8px"><button class="btn btn-sm" onclick="editContact('+c.id+')" style="font-size:10px;padding:2px 6px">✏</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')" style="font-size:10px;padding:2px 6px">×</button></div>':'')+'</div>';
-    }).join('')+(c.notes?'<div class="cc-meta" style="margin-top:6px">'+contacts[0].notes+'</div>':'')+'</div>';
+    }).join('')+(contacts[0].notes?'<div class="cc-meta" style="margin-top:6px">'+contacts[0].notes+'</div>':'')+'</div>';
   }).join('');
 }
 function openContactModal(id){

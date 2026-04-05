@@ -933,7 +933,28 @@ function renderContacts(){
   const grid=document.getElementById('contacts-grid');if(!grid)return;
   const sr=(document.getElementById('contacts-search')?.value||'').toLowerCase();
   const sf=document.getElementById('contacts-state-filter')?.value||'';
-  let f=utilContacts.filter(c=>{if(sf&&(c.state||'')!==sf)return false;if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;return true;});
+  const pf=document.getElementById('contacts-proj-filter')?.value||'';
+  
+  // Populate project filter
+  const projSel=document.getElementById('contacts-proj-filter');
+  if(projSel&&projSel.options.length<=1){
+    for(const p of projects.filter(x=>x.status!=='Completed')){
+      const opt=document.createElement('option');opt.value=p.id;opt.textContent=projDropLabel(p);projSel.appendChild(opt);
+    }
+  }
+  
+  // Build set of ticket numbers for selected project
+  let projTicketNums=null;
+  if(pf){
+    projTicketNums=new Set(tickets.filter(t=>t.projectId===pf).map(t=>String(t.ticket)));
+  }
+  
+  let f=utilContacts.filter(c=>{
+    if(sf&&(c.state||'')!==sf)return false;
+    if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr)&&!(c.contact_name||'').toLowerCase().includes(sr))return false;
+    if(projTicketNums&&!(c.ticket_ref&&projTicketNums.has(c.ticket_ref)))return false;
+    return true;
+  });
   if(!f.length){grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';return;}
   // Agrupa por utility
   const byUtil={};
@@ -987,9 +1008,16 @@ window.addEventListener('load',async()=>{
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
-      const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
-      isAdmin=roleData&&roleData.role==='admin';
-      role=isAdmin?'admin':'viewer';
+      try{
+        const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
+        if(roleErr)console.warn('[Auth] Role query error:',roleErr);
+        isAdmin=roleData&&roleData.role==='admin';
+        role=isAdmin?'admin':'viewer';
+        console.log('[Auth] Auto-login:',role,'user:',session.user.email);
+      }catch(e){
+        console.warn('[Auth] Role check failed, entering as viewer:',e);
+        isAdmin=false;role='viewer';
+      }
       enterApp();
       return;
     }

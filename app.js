@@ -943,16 +943,25 @@ function renderContacts(){
     }
   }
   
-  // Build set of ticket numbers for selected project
-  let projTicketNums=null;
+  // Build set of utility names for selected project (via utilCache)
+  let projUtilNames=null;
   if(pf){
-    projTicketNums=new Set(tickets.filter(t=>t.projectId===pf).map(t=>String(t.ticket)));
+    const projTickets=tickets.filter(t=>t.projectId===pf);
+    const utilNames=new Set();
+    for(const t of projTickets){
+      const tnum=String(t.ticket).trim();
+      const utils=getTicketUtils(tnum);
+      for(const u of utils)utilNames.add(u.utility_name);
+    }
+    // Also match by ticket_ref
+    const projTicketNums=new Set(projTickets.map(t=>String(t.ticket)));
+    projUtilNames={utilNames,projTicketNums};
   }
   
   let f=utilContacts.filter(c=>{
     if(sf&&(c.state||'')!==sf)return false;
     if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr)&&!(c.contact_name||'').toLowerCase().includes(sr))return false;
-    if(projTicketNums&&!(c.ticket_ref&&projTicketNums.has(c.ticket_ref)))return false;
+    if(projUtilNames&&!projUtilNames.utilNames.has(c.utility_name)&&!(c.ticket_ref&&projUtilNames.projTicketNums.has(c.ticket_ref)))return false;
     return true;
   });
   if(!f.length){grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';return;}

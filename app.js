@@ -147,17 +147,12 @@ async function tryLogin(){
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
     if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
-    console.log('[Login] Auth OK, user_id:',data.user.id,'email:',data.user.email);
-    try{
-      const roleResp=await fetch(SUPABASE_URL+'/rest/v1/app_roles?select=role&user_id=eq.'+data.user.id,{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+data.session.access_token}});
-      if(roleResp.ok){const roles=await roleResp.json();isAdmin=roles.length>0&&roles[0].role==='admin';}
-      else{isAdmin=data.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
-    }catch(e){isAdmin=data.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
-    role=isAdmin?'admin':'viewer';
-    console.log('[Login] Final role:',role,'isAdmin:',isAdmin);
+    const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
+    if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
+    else{isAdmin=false;role='viewer';}
     document.getElementById('login-screen').style.display='none';
     enterApp();
-  }catch(e){console.error('[Login] Exception:',e);errEl.textContent='Erro de conexão';errEl.style.display='block';}
+  }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
   document.querySelector('.login-admin-btn').disabled=false;
   document.querySelector('.login-admin-btn').textContent='Entrar como Admin';
 }
@@ -182,8 +177,9 @@ function enterApp(){
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
+  loadLastSync();
   loadContacts().then(()=>renderContacts());
-  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
+  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();await loadLastSync();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -818,7 +814,59 @@ function exportAllPending(){
   toast(rows.length+' pendências exportadas','success');
 }
 
-/* ══════════ WEEKLY EVOLUTION (4 weeks) ══════════ */
+/* ══════════ LAST SYNC STATUS ══════════ */
+async function loadLastSync() {
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,tickets_updated,status` +
+      `&order=finished_at.desc&limit=20`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!r.ok) return;
+    const rows = await r.json();
+
+    // Pega o mais recente por estado (sucesso ou erro)
+    const byState = {};
+    for (const row of rows) {
+      if (!byState[row.state]) byState[row.state] = row;
+    }
+
+    // Monta texto para cada estado
+    const parts = [];
+    for (const state of ['IN', 'FL']) {
+      const row = byState[state];
+      if (!row || !row.finished_at) { parts.push(`${state}: —`); continue; }
+      const d = new Date(row.finished_at);
+      const now = Date.now();
+      const diffMin = Math.round((now - d.getTime()) / 60000);
+      let ago;
+      if (diffMin < 2)        ago = 'agora';
+      else if (diffMin < 60)  ago = `${diffMin}min atrás`;
+      else if (diffMin < 120) ago = '1h atrás';
+      else if (diffMin < 1440) ago = `${Math.round(diffMin/60)}h atrás`;
+      else                    ago = `${Math.round(diffMin/1440)}d atrás`;
+
+      const ok = row.status === 'success';
+      const icon = ok ? '🟢' : '🔴';
+      parts.push(`${icon} ${state}: ${ago}`);
+    }
+
+    // Atualiza elemento no sidebar
+    const el = document.getElementById('last-sync-status');
+    if (el) el.innerHTML = parts.join('<br>');
+
+    // Tambem atualiza tooltip com detalhes
+    const detail = Object.entries(byState).map(([st, row]) => {
+      if (!row.finished_at) return `${st}: sem dados`;
+      const d = new Date(row.finished_at);
+      return `${st}: ${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} — ${row.tickets_checked||0} verificados`;
+    }).join('\n');
+    if (el) el.title = detail;
+
+  } catch(e) { console.error('[LastSync]', e); }
+}
+
+
 function renderWeeklyEvolution(fTickets){
   try{
   const now=Date.now(),week=7*864e5;
@@ -938,39 +986,7 @@ function renderContacts(){
   const grid=document.getElementById('contacts-grid');if(!grid)return;
   const sr=(document.getElementById('contacts-search')?.value||'').toLowerCase();
   const sf=document.getElementById('contacts-state-filter')?.value||'';
-  const pf=document.getElementById('contacts-proj-filter')?.value||'';
-  
-  // Populate project filter
-  const projSel=document.getElementById('contacts-proj-filter');
-  if(projSel&&projSel.options.length<=1){
-    for(const p of projects.filter(x=>x.status!=='Completed')){
-      const opt=document.createElement('option');opt.value=p.id;opt.textContent=projDropLabel(p);projSel.appendChild(opt);
-    }
-  }
-  
-  // Build set of utility names for selected project (via utilCache)
-  let projUtilNames=null;
-  let projState='';
-  if(pf){
-    const projTickets=tickets.filter(t=>t.projectId===pf);
-    if(projTickets.length)projState=projTickets[0].state||'';
-    const utilNames=new Set();
-    for(const t of projTickets){
-      const tnum=String(t.ticket).trim();
-      const utils=getTicketUtils(tnum);
-      for(const u of utils)utilNames.add(u.utility_name);
-    }
-    const projTicketNums=new Set(projTickets.map(t=>String(t.ticket)));
-    projUtilNames={utilNames,projTicketNums};
-  }
-  
-  let f=utilContacts.filter(c=>{
-    if(sf&&(c.state||'')!==sf)return false;
-    if(!sf&&projState&&(c.state||'')!==projState)return false;
-    if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr)&&!(c.contact_name||'').toLowerCase().includes(sr))return false;
-    if(projUtilNames&&!projUtilNames.utilNames.has(c.utility_name)&&!(c.ticket_ref&&projUtilNames.projTicketNums.has(c.ticket_ref)))return false;
-    return true;
-  });
+  let f=utilContacts.filter(c=>{if(sf&&(c.state||'')!==sf)return false;if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;return true;});
   if(!f.length){grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';return;}
   // Agrupa por utility
   const byUtil={};
@@ -983,7 +999,7 @@ function renderContacts(){
       if(c.phone_alt)phones.push('<span class="cc-tag cc-tag-alt">Alt.</span> <a href="tel:'+c.phone_alt+'">'+c.phone_alt+'</a>');
       if(c.phone_emergency)phones.push('<span class="cc-tag cc-tag-emerg">Emerg.</span> <a href="tel:'+c.phone_emergency+'">'+c.phone_emergency+'</a>');
       return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--border)">'+(name?'<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:120px">'+name+'</span>':'')+'<div class="cc-phones" style="margin:0;gap:10px">'+phones.join(' ')+'</div>'+(isAdmin?'<div style="display:flex;gap:4px;margin-left:8px"><button class="btn btn-sm" onclick="editContact('+c.id+')" style="font-size:10px;padding:2px 6px">✏</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')" style="font-size:10px;padding:2px 6px">×</button></div>':'')+'</div>';
-    }).join('')+(contacts[0].notes?'<div class="cc-meta" style="margin-top:6px">'+contacts[0].notes+'</div>':'')+'</div>';
+    }).join('')+(c.notes?'<div class="cc-meta" style="margin-top:6px">'+contacts[0].notes+'</div>':'')+'</div>';
   }).join('');
 }
 function openContactModal(id){
@@ -1024,13 +1040,9 @@ window.addEventListener('load',async()=>{
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
-      try{
-        const roleResp=await fetch(SUPABASE_URL+'/rest/v1/app_roles?select=role&user_id=eq.'+session.user.id,{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+session.access_token}});
-        if(roleResp.ok){const roles=await roleResp.json();isAdmin=roles.length>0&&roles[0].role==='admin';}
-        else{isAdmin=session.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
-      }catch(e){isAdmin=session.user.id==='c3a2085f-4fb6-4bb2-ab87-dd93f694dd60';}
+      const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
+      isAdmin=roleData&&roleData.role==='admin';
       role=isAdmin?'admin':'viewer';
-      console.log('[Auth] Auto-login:',role,'user:',session.user.email);
       enterApp();
       return;
     }

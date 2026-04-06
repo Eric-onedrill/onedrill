@@ -502,13 +502,15 @@ function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
 function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
-  const dashStateFilter='<select class="fi" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+s+'"'+(dsf===s?' selected':'')+'>'+s+'</option>').join('')+'</select>';
   const fTickets=dsf?tickets.filter(t=>t.state===dsf&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
+  const now=Date.now(); const week=7*86400000;
+
+  // Counts
   const total=fTickets.length;
   const openT=fTickets.filter(t=>t.status==='Open');
   const clearT=fTickets.filter(t=>t.status==='Clear');
   const damageT=fTickets.filter(t=>t.status==='Damage');
-  const open=openT.length,clear=clearT.length,damage=damageT.length;
+  const open=openT.length, clear=clearT.length, damage=damageT.length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
   const openFt=openT.reduce((s,t)=>s+(t.footage||0),0);
   const clearFt=clearT.reduce((s,t)=>s+(t.footage||0),0);
@@ -516,228 +518,268 @@ function renderDash(){
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
   const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&t.status!=='Closed'&&t.status!=='Cancel';});
+
+  // Week-over-week
+  function wCount(status,start,end){return fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=start&&h.ts<end&&(status==='Open'?(a.includes('importado')||a.includes('ticket criado')):(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear')));} )).length;}
+  const openWk=wCount('Open',now-week,now), openPrev=wCount('Open',now-2*week,now-week);
+  const clearWk=wCount('Clear',now-week,now), clearPrev=wCount('Clear',now-2*week,now-week);
+  function trend(curr,prev,greenUp){const d=curr-prev;if(!d)return '<span style="font-size:10px;color:var(--muted)">sem mudança</span>';const up=d>0;const c=(up===greenUp)?'var(--green)':'var(--red)';return'<span style="font-size:10px;font-weight:700;color:'+c+'">'+(up?'▲':'▼')+Math.abs(d)+' vs semana passada</span>';}
+
+  // Projects with velocity
   const fProjects=dsf?projects.filter(p=>p.state===dsf):projects;
-
-  // Week-over-week comparison
-  const now=Date.now();const week=7*86400000;
-  function countStatusInRange(status,start,end){
-    return fTickets.filter(t=>t.history&&t.history.some(h=>{
-      const a=(h.action||'').toLowerCase();
-      const matchOpen=status==='Open'&&(a.includes('importado')||a.includes('ticket criado'));
-      const matchClear=status==='Clear'&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));
-      return h.ts>=start&&h.ts<end&&(matchOpen||matchClear);
-    })).length;
-  }
-  const openThisWeek=countStatusInRange('Open',now-week,now);
-  const openLastWeek=countStatusInRange('Open',now-2*week,now-week);
-  const clearThisWeek=countStatusInRange('Clear',now-week,now);
-  const clearLastWeek=countStatusInRange('Clear',now-2*week,now-week);
-  function trendBadge(curr,prev,greenUp){
-    const diff=curr-prev;if(diff===0)return'';
-    const up=diff>0;const color=(up===greenUp)?'var(--green)':'var(--red)';
-    return' <span style="font-size:10px;font-weight:700;color:'+color+'">'+(up?'▲':'▼')+Math.abs(diff)+' vs semana passada</span>';
-  }
-
-  // Projetos com velocity
   const projVel=fProjects.filter(p=>p.status!=='Completed').map(p=>{
     const ts=fTickets.filter(t=>t.projectId===p.id);
-    const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
-    const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);
-    const totalFtP=p.totalFeet||ticketFt||1;
-    const pctClear=totalFtP>0?Math.round(clearFtP/totalFtP*100):0;
-    const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';
-    const cleared4w=ts.filter(t=>{if(!t.history)return false;return t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));});});
-    const ftPerWeek=cleared4w.reduce((s,t)=>s+(t.footage||0),0)/4;
-    const weeksLeft=ftPerWeek>0?Math.ceil(openFtP/ftPerWeek):null;
-    return{id:p.id,name:p.name,locs,pctClear,clearFtP,openFtP,totalFtP,ftPerWeek:Math.round(ftPerWeek),weeksLeft,count:ts.length,state:p.state||''};
-  }).filter(p=>p.count>0).sort((a,b)=>b.pctClear-a.pctClear);
+    const cf=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const tf=ts.reduce((s,t)=>s+(t.footage||0),0); const tot=p.totalFeet||tf||1;
+    const pct=Math.round(cf/tot*100);
+    const c4w=ts.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
+    const fpw=c4w.reduce((s,t)=>s+(t.footage||0),0)/4;
+    const wl=fpw>0?Math.ceil(of2/fpw):null;
+    const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||p.state||'';
+    return{id:p.id,name:p.name,locs,pct,cf,of2,tot,fpw:Math.round(fpw),wl,count:ts.length};
+  }).filter(p=>p.count>0).sort((a,b)=>b.pct-a.pct);
 
-  // Utilities mais pendentes
-  const utilPending={};
-  if(utilCacheLoaded){
-    const activeNums=new Set(fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket).trim()));
-    for(const[tn,resps]of Object.entries(utilCache)){
-      if(!activeNums.has(tn))continue;
-      for(const u of resps){if(u.status==='Pending'){if(!utilPending[u.utility_name])utilPending[u.utility_name]=0;utilPending[u.utility_name]++;}}
-    }
-  }
-  const topUtils=Object.entries(utilPending).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const maxUtil=topUtils.length?topUtils[0][1]:1;
-  const totalPending=Object.values(utilPending).reduce((s,v)=>s+v,0);
-  const ticketsWithPending=utilCacheLoaded?new Set(fTickets.filter(t=>getTicketPendingUtils(String(t.ticket).trim()).length>0).map(t=>t.ticket)).size:0;
+  // Utilities pending
+  const utilP={};
+  if(utilCacheLoaded){const an=new Set(fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket).trim()));for(const[tn,rs]of Object.entries(utilCache)){if(!an.has(tn))continue;for(const u of rs){if(u.status==='Pending'){if(!utilP[u.utility_name])utilP[u.utility_name]=0;utilP[u.utility_name]++;}}}}
+  const topUtils=Object.entries(utilP).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxU=topUtils.length?topUtils[0][1]:1;
+  const totPend=Object.values(utilP).reduce((s,v)=>s+v,0);
+  const ticksWithPend=utilCacheLoaded?new Set(fTickets.filter(t=>getTicketPendingUtils(String(t.ticket).trim()).length>0).map(t=>t.ticket)).size:0;
 
-  // Atividade recente
-  const recentActs=[];
-  for(const t of fTickets){
-    if(!t.history)continue;
-    for(const h of [...t.history].reverse()){
-      recentActs.push({t,h,ts:h.ts||0});
-      if(recentActs.length>=30)break;
-    }
-  }
-  recentActs.sort((a,b)=>b.ts-a.ts);
-  const recent=recentActs.slice(0,6);
+  // Critical tickets
+  const crits=utilCacheLoaded?fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t)).map(t=>({t,s:riskScore(t)})).filter(x=>x.s>=35).sort((a,b)=>b.s-a.s).slice(0,6):[];
 
-  function timeAgo(ts){
-    const m=Math.round((now-ts)/60000);
-    if(m<2)return'agora';if(m<60)return m+'min';if(m<120)return'1h';if(m<1440)return Math.round(m/60)+'h';return Math.round(m/1440)+'d';
-  }
+  // Cleared today & this week
+  const day1=now-86400000;
+  const clearedToday=fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=day1&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
+  const clearedWeek=fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
+  const ftClearedWk=clearedWeek.reduce((s,t)=>s+(t.footage||0),0);
 
-  // Score de risco — top críticos
-  const criticalTickets=utilCacheLoaded?fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t)).map(t=>({t,s:riskScore(t)})).filter(x=>x.s>=35).sort((a,b)=>b.s-a.s).slice(0,6):[];
+  // Mini 7-day cleared chart
+  const dailyClear=[];
+  for(let i=6;i>=0;i--){const ds=now-(i+1)*day1/1,de=now-i*day1/1;const lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short'}).slice(0,3);let cnt=0;if(utilCacheLoaded){const tld={};for(const t of fTickets){const k=String(t.ticket).trim();const us=getTicketUtils(k);if(!us.every(u=>u.status==='Clear'))continue;let mx=0;for(const u of us){if(u.responded_at){const r=new Date(u.responded_at).getTime();if(r>mx)mx=r;}}if(mx>=ds&&mx<de){tld[k]=1;}}cnt=Object.keys(tld).length;}else{cnt=fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=ds&&h.ts<de&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));})).length;}dailyClear.push({lb,cnt});}
+  const maxDC=Math.max(...dailyClear.map(d=>d.cnt),1);
 
-  // Sync countdown
-  const syncEl=document.getElementById('sync-countdown');
+  // Recent cleared (for right column)
+  const recentCleared=[...fTickets].filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-7*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));})).sort((a,b)=>{const la=a.history.filter(h=>{const x=(h.action||'').toLowerCase();return x.includes('→ clear')||x.includes('auto 811')||x.includes('auto-clear');}).pop();const lb2=b.history.filter(h=>{const x=(h.action||'').toLowerCase();return x.includes('→ clear')||x.includes('auto 811')||x.includes('auto-clear');}).pop();return(lb2?.ts||0)-(la?.ts||0);}).slice(0,5);
+
+  // Recent activity
+  const acts=[];for(const t of fTickets){if(!t.history)continue;for(const h of [...t.history].reverse()){acts.push({t,h});if(acts.length>=40)break;}}
+  acts.sort((a,b)=>(b.h.ts||0)-(a.h.ts||0));
+  const recentActs=acts.slice(0,6);
+  function ago(ts){const m=Math.round((now-ts)/60000);if(m<2)return'agora';if(m<60)return m+'min';if(m<120)return'1h';if(m<1440)return Math.round(m/60)+'h';if(m<2880)return'ontem '+new Date(ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});return Math.round(m/1440)+'d';}
+
+  // State filter
+  const sf='<select class="fi" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+s+'"'+(dsf===s?' selected':'')+'>'+s+'</option>').join('')+'</select>';
 
   const el=document.getElementById('dash-content');if(!el)return;
 
   el.innerHTML=
-  // ── HEADER ──
-  '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:10px">'
-  +'<div><div style="font-size:22px;font-weight:700;color:var(--text);line-height:1.2">Dashboard</div>'
-  +'<div style="font-size:12px;color:var(--muted);margin-top:2px">OneDrill 811 — '+new Date().toLocaleDateString('pt-BR')+'</div></div>'
-  +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-  +'<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)"><div id="sync-dot-dash" style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div><span id="sync-label-dash">Sincronizado</span></div>'
-  +dashStateFilter+'</div></div>'
 
-  // ── SECTION LABEL ──
-  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Visão Geral</div>'
+  // ── HEADER ──────────────────────────────────────────────────────────────
+  '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap;gap:8px">'
+  +'<div><div style="font-size:22px;font-weight:700;color:var(--text)">Dashboard</div>'
+  +'<div style="font-size:11px;color:var(--muted)">OneDrill 811 — '+new Date().toLocaleDateString('pt-BR')+'</div></div>'
+  +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+  +'<div id="dash-sync-pill" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)">● Sincronizado</div>'
+  +sf+'</div></div>'
 
-  // ── STAT CARDS ──
-  +'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">'
-  +'<div class="stat-card" style="padding:12px 14px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Total ativo</div><div style="font-size:24px;font-weight:700;font-family:var(--mono)">'+total+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+totalFt.toLocaleString()+' ft</div></div>'
-  +'<div class="stat-card" style="padding:12px 14px;border-left:3px solid var(--red)"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Open</div><div style="font-size:24px;font-weight:700;font-family:var(--mono);color:var(--red)">'+open+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+openFt.toLocaleString()+' ft'+trendBadge(openThisWeek,openLastWeek,false)+'</div></div>'
-  +'<div class="stat-card" style="padding:12px 14px;border-left:3px solid var(--green)"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Clear</div><div style="font-size:24px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clear+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+clearFt.toLocaleString()+' ft'+trendBadge(clearThisWeek,clearLastWeek,true)+'</div></div>'
-  +'<div class="stat-card" style="padding:12px 14px;border-left:3px solid var(--amber)"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Damage</div><div style="font-size:24px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+damageFt.toLocaleString()+' ft'+(damage===0?'':' <span style=\'color:var(--amber)\'>atenção</span>')+'</div></div>'
-  +'<div class="stat-card" style="padding:12px 14px;border-left:3px solid var(--purple)"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Sem trajeto</div><div style="font-size:24px;font-weight:700;font-family:var(--mono);color:var(--purple)">'+noMap.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px">de '+total+' ativos · '+Math.round(noMap.length/Math.max(total,1)*100)+'% descobertos</div></div>'
+  // ── STATUS PILLS ─────────────────────────────────────────────────────────
+  +'<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
+  +'<div style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--bg);border:1px solid var(--border);color:var(--text2)">● '+total+' verificados'+(utilCacheLoaded?' · '+fTickets.filter(t=>t.status==='Clear'&&!getTicketPendingUtils(String(t.ticket).trim()).length).length+' em cache (Clear)':'')+'</div>'
+  +'<div id="dash-health-pill" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--green-bg);border:1px solid var(--green-border);color:var(--green)">● Health check OK</div>'
   +'</div>'
 
-  // ── TICKETS VENCENDO (acima da atenção imediata) ──
-  +(soon.length||true?
-  '<div style="background:var(--white);border:1px solid '+(soon.length?'var(--red-border)':'var(--border)')+';border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px">'
+  // ── STAT CARDS ───────────────────────────────────────────────────────────
+  +'<div style="display:grid;grid-template-columns:1fr 1.4fr 1.4fr 1.2fr 1.2fr;gap:8px;margin-bottom:16px">'
+  // Total
+  +'<div class="stat-card" style="padding:10px 12px;cursor:pointer" onclick="nav(\'tickets\')">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Total ativo</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+total+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">'+totalFt.toLocaleString()+' ft</div></div>'
+  // Open
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--red);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Open\';renderTable();},100)">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Open</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--red)">'+open+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">'+openFt.toLocaleString()+' ft</div>'
+  +'<div style="margin-top:3px">'+trend(openWk,openPrev,false)+'</div></div>'
+  // Clear
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--green);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Clear\';renderTable();},100)">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Clear</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clear+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">'+clearFt.toLocaleString()+' ft</div>'
+  +'<div style="margin-top:3px">'+trend(clearWk,clearPrev,true)+'</div></div>'
+  // Damage
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--amber);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Damage\';renderTable();},100)">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Damage</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">'+damageFt.toLocaleString()+' ft</div>'
+  +'<div style="margin-top:3px;font-size:10px;color:'+(damage>0?'var(--amber)':'var(--muted)')+'">'+( damage>0?'atenção':'sem mudança')+'</div></div>'
+  // Sem trajeto
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--purple);cursor:pointer" onclick="nav(\'map\')">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem trajeto</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--purple)">'+noMap.length+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">de '+total+' ativos</div>'
+  +'<div style="font-size:10px;color:var(--purple);margin-top:3px">'+Math.round(noMap.length/Math.max(total,1)*100)+'% descobertos</div></div>'
+  +'</div>'
+
+  // ── TICKETS VENCENDO ────────────────────────────────────────────────────
+  +'<div style="background:var(--white);border:1px solid '+(soon.length?'var(--red-border)':'var(--border)')+';border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
   +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(soon.length?'8px':'0')+'">'
-  +'<div style="font-size:13px;font-weight:600;color:'+(soon.length?'var(--red)':'var(--green)')+'"><span>'+(soon.length?'⚠ '+soon.length+' ticket(s) vencendo':'✅ Nenhum ticket vencendo')+'</span> nos próximos '+_sd+' dias</div>'
+  +'<span style="font-size:12px;font-weight:600;color:'+(soon.length?'var(--red)':'var(--green)')+'">'+( soon.length?'⚠ '+soon.length+' ticket(s) vencendo':'✅ Nenhum ticket vencendo')+' nos próximos '+_sd+' dias</span>'
   +'<div style="display:flex;gap:6px;align-items:center">'
   +'<select class="fi" onchange="_soonDays=parseInt(this.value);renderDash()" style="font-size:11px;padding:3px 6px;width:auto">'
-  +'<option value="3"'+(_sd===3?' selected':'')+'>3d</option>'
-  +'<option value="5"'+(_sd===5?' selected':'')+'>5d</option>'
-  +'<option value="10"'+(_sd===10?' selected':'')+'>10d</option>'
-  +'<option value="15"'+(_sd===15?' selected':'')+'>15d</option>'
-  +'<option value="30"'+(_sd===30?' selected':'')+'>30d</option>'
-  +'</select>'
+  +'<option value="3"'+(_sd===3?' selected':'')+'>3d</option><option value="5"'+(_sd===5?' selected':'')+'>5d</option>'
+  +'<option value="10"'+(_sd===10?' selected':'')+'>10d</option><option value="15"'+(_sd===15?' selected':'')+'>15d</option>'
+  +'<option value="30"'+(_sd===30?' selected':'')+'>30d</option></select>'
   +(soon.length?'<button class="btn btn-sm" onclick="exportExpiring()" style="background:var(--red);color:white;border-color:var(--red);font-size:11px">↓ Excel</button>':'')
   +'</div></div>'
-  +(soon.length?'<div style="display:flex;flex-wrap:wrap;gap:4px">'+soon.map(t=>{const diff2=Math.round((new Date(t.expire)-now)/86400000);return'<span style="font-size:11px;font-family:var(--mono);padding:3px 8px;border-radius:10px;cursor:pointer;background:'+(diff2<=3?'var(--red-bg)':'var(--bg)')+';color:'+(diff2<=3?'var(--red)':'var(--text2)')+';border:1px solid '+(diff2<=3?'var(--red-border)':'var(--border)')+'" onclick="openTicketDetail('+t.id+')">'+t.ticket+' · '+t.expire+'</span>';}).join('')+'</div>':'')
+  +(soon.length?'<div style="display:flex;flex-wrap:wrap;gap:4px">'+soon.map(t=>{const d2=Math.round((new Date(t.expire)-now)/86400000);return'<span style="font-size:11px;font-family:var(--mono);padding:2px 8px;border-radius:10px;cursor:pointer;background:'+(d2<=3?'var(--red-bg)':'var(--bg)')+';color:'+(d2<=3?'var(--red)':'var(--text2)')+';border:1px solid '+(d2<=3?'var(--red-border)':'var(--border)')+'" onclick="openTicketDetail('+t.id+')">'+t.ticket+' · '+t.expire+'</span>';}).join('')+'</div>':'')
   +'</div>'
-  :'')
 
-  // ── ATENÇÃO IMEDIATA ──
-  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Atenção Imediata</div>'
-  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'
+  // ── 3-COLUMN GRID ────────────────────────────────────────────────────────
+  +'<div style="display:grid;grid-template-columns:220px 1fr 260px;gap:12px;align-items:start">'
 
-  // ── LEFT: RISK + UTILITIES ──
-  +'<div style="display:flex;flex-direction:column;gap:12px">'
+  // ── COL 1: SCORE + UTILITIES ──────────────────────────────────────────
+  +'<div style="display:flex;flex-direction:column;gap:10px">'
 
-  // Risk card
-  +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
-  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-  +'<div style="font-size:12px;font-weight:700;color:var(--text)">Score de risco — tickets críticos</div>'
-  +'<button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:10px">ver todos →</button>'
-  +'</div>'
-  +(criticalTickets.length?
-    criticalTickets.map(({t,s})=>{
-      const exp=t.expire&&t.expire!=='—'?new Date(t.expire):null;
-      const diff=exp?Math.round((exp-now)/86400000):null;
-      const badge=diff===null?'':diff<0?'<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:var(--red-bg);color:var(--red);font-weight:700;border:1px solid var(--red-border)">vencido</span>':diff<=2?'<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:var(--red-bg);color:var(--red);font-weight:700;border:1px solid var(--red-border)">vence em '+diff+'d</span>':diff<=5?'<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:#fffbeb;color:#d97706;font-weight:700;border:1px solid #fde68a">vence em '+diff+'d</span>':'<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:#eff6ff;color:#2563eb;font-weight:700;border:1px solid #bfdbfe">vence em '+diff+'d</span>';
-      const loc=(t.location||'').split(',')[0].trim()||t.state;
-      return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')">'
-      +'<div style="min-width:0;flex:1"><div style="font-size:11px;font-family:var(--mono);font-weight:600;color:var(--text)">'+t.ticket+'</div>'
-      +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+loc+' · '+t.state+' · '+t.status+'</div></div>'
-      +'<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">'+badge+'<span style="font-size:11px;font-weight:700;font-family:var(--mono);color:'+(s>=60?'#dc2626':'#d97706')+';min-width:22px;text-align:right">'+s+'</span></div>'
-      +'</div>';
-    }).join('')
-  :'<div style="font-size:12px;color:var(--green);padding:10px 0">✅ Nenhum ticket crítico</div>')
+  // Score card
+  +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px">'
+  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Score de Risco</div>'
+  +(crits.length?crits.map(({t,s})=>{
+    const exp=t.expire&&t.expire!=='—'?Math.round((new Date(t.expire)-now)/86400000):null;
+    const badge=exp===null?'':exp<0?'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);font-weight:700">vencido</span>':exp<=2?'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);font-weight:700">'+exp+'d</span>':exp<=5?'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700">'+exp+'d</span>':'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;font-weight:700">'+exp+'d</span>';
+    const loc=(t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim();
+    return'<div style="padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="openTicketDetail('+t.id+')">'
+    +'<div style="min-width:0;flex:1;margin-right:4px"><div style="font-size:10px;font-family:var(--mono);font-weight:700;color:var(--text)">'+t.ticket+'</div>'
+    +'<div style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+loc+' · '+t.state+' · '+t.status+'</div></div>'
+    +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0">'+badge+'<span style="font-size:11px;font-weight:700;font-family:var(--mono);color:'+(s>=60?'#dc2626':'#d97706')+'">'+s+'</span></div>'
+    +'</div>';
+  }).join(''):'<div style="font-size:11px;color:var(--green);padding:6px 0">✅ Sem tickets críticos</div>')
+  +'<button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:10px;width:100%;margin-top:8px">ver todos na tabela →</button>'
   +'</div>'
 
   // Utilities card
+  +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px">'
+  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Utilities Pendentes</div>'
+  +(topUtils.length?topUtils.map(([name,cnt])=>{
+    const sh=name.length>20?name.substring(0,20)+'…':name;
+    return'<div style="margin-bottom:7px">'
+    +'<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">'
+    +'<span style="color:var(--text2);cursor:pointer" onclick="filterByUtil(\''+name.replace(/'/g,"\\'")+'\')">'+sh+'</span>'
+    +'<span style="font-weight:700;color:var(--red);font-family:var(--mono)">'+cnt+'</span></div>'
+    +'<div style="height:3px;background:var(--border);border-radius:2px"><div style="width:'+Math.round(cnt/maxU*100)+'%;height:100%;background:var(--red);border-radius:2px"></div></div>'
+    +'</div>';
+  }).join('')+'<div style="font-size:9px;color:var(--muted);margin-top:6px;border-top:1px solid var(--border);padding-top:5px">'+totPend+' pendências em '+ticksWithPend+' tickets</div>'
+  :'<div style="font-size:11px;color:var(--green)">✅ Nenhuma pendência</div>')
+  +'<button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-util\').value=\'__any_pending__\';renderTable();},100)" style="font-size:10px;width:100%;margin-top:8px">filtrar na tabela →</button>'
+  +'</div>'
+  +'</div>' // end col1
+
+  // ── COL 2: PROJETOS + ATIVIDADE ──────────────────────────────────────
+  +'<div style="display:flex;flex-direction:column;gap:10px">'
+
+  // Projetos
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
   +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-  +'<div style="font-size:12px;font-weight:700;color:var(--text)">Utilities mais pendentes</div>'
-  +'<button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-util\').value=\'__any_pending__\';renderTable();},100)" style="font-size:10px">filtrar →</button>'
-  +'</div>'
-  +(topUtils.length?
-    topUtils.map(([name,count])=>{
-      const short=name.length>18?name.substring(0,18)+'…':name;
-      const pct=Math.round(count/maxUtil*100);
-      return'<div style="margin-bottom:8px">'
-      +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
-      +'<span style="color:var(--text2);cursor:pointer" onclick="filterByUtil(\''+name.replace(/'/g,"\\'")+'\')" title="'+name+'">'+short+'</span>'
-      +'<span style="font-weight:700;font-family:var(--mono);color:var(--red)">'+count+'</span></div>'
-      +'<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">'
-      +'<div style="width:'+pct+'%;height:100%;background:var(--red);border-radius:2px"></div></div></div>';
-    }).join('')
-    +'<div style="font-size:10px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">'+totalPending+' pendências em '+ticketsWithPending+' tickets</div>'
-  :'<div style="font-size:12px;color:var(--green)">✅ Nenhuma pendência</div>')
-  +'</div>'
-  +'</div>'// end left col
-
-  // ── RIGHT: PROJETOS + ATIVIDADE ──
-  +'<div style="display:flex;flex-direction:column;gap:12px">'
-
-  // Projetos card
-  +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
-  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-  +'<div style="font-size:12px;font-weight:700;color:var(--text)">Progresso por projeto</div>'
-  +'<button class="btn btn-sm" onclick="nav(\'proj\')" style="font-size:10px">ver projetos →</button>'
-  +'</div>'
+  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Progresso de Projetos</div>'
+  +'<button class="btn btn-sm" onclick="nav(\'proj\')" style="font-size:10px">ver projetos →</button></div>'
   +projVel.slice(0,5).map(p=>{
-    const fc=p.weeksLeft!==null&&p.weeksLeft>0?'~'+p.weeksLeft+' sem. para concluir':p.weeksLeft===0?'Concluído':'sem velocity suficiente';
-    const fcColor=p.weeksLeft===null?'var(--muted)':p.weeksLeft<=1?'var(--green)':p.weeksLeft<=4?'var(--amber)':'var(--muted)';
-    const barColor=p.pctClear>=80?'var(--green)':p.pctClear>=50?'var(--amber)':'var(--red)';
-    return'<div style="margin-bottom:12px;cursor:pointer" onclick="nav(\'analytics\')">'
-    +'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">'
-    +'<span style="font-size:12px;font-weight:600;color:var(--text)">'+(p.locs||p.name)+' <span style="font-size:10px;color:var(--muted);font-weight:400">('+p.name+')</span></span>'
-    +'<span style="font-size:11px;font-weight:700;font-family:var(--mono);color:'+barColor+'">'+p.pctClear+'%</span>'
-    +'</div>'
-    +'<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:3px">'
-    +'<div style="width:'+p.pctClear+'%;height:100%;background:'+barColor+';border-radius:3px"></div></div>'
-    +'<div style="font-size:10px;color:var(--muted)">'+p.clearFtP.toLocaleString()+' / '+p.totalFtP.toLocaleString()+' ft clear — <span style="color:'+fcColor+'">'+fc+'</span></div>'
+    const fc=p.wl!==null&&p.wl>0?'~'+p.wl+' sem. para concluir':p.wl===0?'concluído':'velocity insuficiente';
+    const fc_c=p.wl===null?'var(--muted)':p.wl<=2?'var(--green)':p.wl<=6?'var(--amber)':'var(--muted)';
+    const bc=p.pct>=80?'var(--green)':p.pct>=50?'var(--amber)':'var(--red)';
+    return'<div style="margin-bottom:10px;cursor:pointer" onclick="nav(\'analytics\')">'
+    +'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">'
+    +'<span style="font-size:12px;font-weight:600;color:var(--text)">'+(p.locs||p.name)+'</span>'
+    +'<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+bc+'">'+p.pct+'%</span></div>'
+    +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:3px">'
+    +'<div style="width:'+p.pct+'%;height:100%;background:'+bc+'"></div></div>'
+    +'<div style="font-size:10px;color:var(--muted)">'+p.cf.toLocaleString()+' / '+p.tot.toLocaleString()+' ft — <span style="color:'+fc_c+'">'+fc+'</span></div>'
     +'</div>';
   }).join('')
-  +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+projVel.length+' projeto'+( projVel.length!==1?'s':'')+' ativo'+( projVel.length!==1?'s':'')+'</div>'
+  +'<div style="font-size:10px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px;margin-top:4px">'+projVel.length+' projeto(s) ativo(s)</div>'
   +'</div>'
 
-  // Atividade recente card
+  // Atividade recente
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
-  +'<div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:10px">Atividade recente</div>'
-  +recent.map(({t,h})=>'<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')">'
-  +'<div style="width:8px;height:8px;border-radius:50%;background:'+(h.color||'#9a9888')+';margin-top:4px;flex-shrink:0"></div>'
-  +'<div style="flex:1;min-width:0"><span style="font-size:11px;font-family:var(--mono);font-weight:600;color:var(--text)">'+t.ticket+'</span>'
-  +' <span style="font-size:11px;color:var(--text2)">— '+( h.action||'').substring(0,50)+( (h.action||'').length>50?'…':'')+'</span>'
-  +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+timeAgo(h.ts||0)+'</div></div></div>'
-  ).join('')
+  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Atividade Recente</div>'
+  +recentActs.map(({t,h})=>'<div style="display:flex;gap:7px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')">'
+  +'<div style="width:7px;height:7px;border-radius:50%;background:'+(h.color||'#9a9888')+';margin-top:4px;flex-shrink:0"></div>'
+  +'<div style="flex:1;min-width:0">'
+  +'<span style="font-size:10px;font-family:var(--mono);font-weight:700">'+t.ticket+'</span>'
+  +' <span style="font-size:10px;color:var(--text2)">— '+(h.action||'').substring(0,45)+(( h.action||'').length>45?'…':'')+'</span>'
+  +'<div style="font-size:9px;color:var(--muted)">'+ago(h.ts||0)+'</div>'
+  +'</div></div>').join('')
+  +'</div>'
+  +'</div>' // end col2
+
+  // ── COL 3: TICKETS CLAREADOS ─────────────────────────────────────────
+  +'<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r-lg);padding:14px">'
+  +'<div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Tickets Clareados</div>'
+
+  // 3 numbers
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
+  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
+  +'<div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedToday.length+'</div>'
+  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">hoje</div></div>'
+  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
+  +'<div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedWeek.length+'</div>'
+  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">esta semana</div></div>'
+  +'</div>'
+  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r);margin-bottom:12px">'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green)">'+ftClearedWk.toLocaleString()+' ft</div>'
+  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">ft clareados (7d)</div></div>'
+
+  // Mini bar chart
+  +'<div style="display:flex;align-items:flex-end;gap:3px;height:40px;margin-bottom:4px">'
+  +dailyClear.map(d=>'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px">'
+  +'<div style="width:100%;background:'+(d.cnt?'var(--green)':'rgba(22,163,74,.15)')+';border-radius:2px 2px 0 0;height:'+Math.max(d.cnt/maxDC*32,2)+'px"></div>'
+  +'</div>').join('')
+  +'</div>'
+  +'<div style="display:flex;justify-content:space-between;margin-bottom:12px">'
+  +dailyClear.map(d=>'<div style="flex:1;text-align:center;font-size:8px;color:var(--green);opacity:.7">'+d.lb+'</div>').join('')
   +'</div>'
 
-  +'</div>'// end right col
-  +'</div>'// end 2-col grid
+  // Recent cleared list
+  +recentCleared.map(t=>{
+    const clearH=t.history.filter(h=>{const a=(h.action||'').toLowerCase();return a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear');}).pop();
+    const utils=utilCacheLoaded?getTicketUtils(String(t.ticket).trim()).filter(u=>u.status==='Clear').map(u=>u.utility_name.split(' ')[0]).slice(0,2).join(' + '):'';
+    return'<div style="padding:5px 0;border-bottom:1px solid var(--green-border);cursor:pointer;font-size:10px" onclick="openTicketDetail('+t.id+')">'
+    +'<div style="display:flex;justify-content:space-between">'
+    +'<span style="font-family:var(--mono);font-weight:700;color:var(--text)">'+t.ticket+'</span>'
+    +'<span style="color:var(--muted)">'+(t.footage||0)+' ft</span></div>'
+    +(utils?'<div style="color:var(--green);opacity:.8">'+utils+'</div>':'')
+    +'<div style="color:var(--muted)">'+ago(clearH?.ts||0)+' AUTO</div>'
+    +'</div>';
+  }).join('')
 
-  // ── SYNC TIMER ──
-  +'<div id="dash-sync-timer" style="text-align:center;font-size:11px;color:var(--muted);padding:8px 0">sync automático em breve</div>'
-  ;
+  +'<button class="btn btn-sm" onclick="nav(\'analytics\')" style="font-size:10px;width:100%;margin-top:10px;background:white;border-color:var(--green-border)">ver todos os clareados →</button>'
+  +'</div>' // end col3
 
-  // Update sync timer
+  +'</div>' // end 3-col grid
+
+  // ── SYNC TIMER ──────────────────────────────────────────────────────────
+  +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';
+
+  // Update sync pill & timer
+  loadLastSync();
   updateSyncTimer();
 }
 
 function updateSyncTimer(){
-  const el=document.getElementById('dash-sync-timer');if(!el)return;
+  const tEl=document.getElementById('dash-sync-timer');
+  const pill=document.getElementById('dash-sync-pill');
   const last=window._lastSyncTime;
-  if(!last){el.textContent='sync: aguardando dados...';return;}
-  const nextSync=last+2*3600000;
-  const diff=Math.round((nextSync-Date.now())/60000);
-  if(diff<=0)el.textContent='sync em andamento...';
-  else el.textContent='sync automático em ~'+diff+' min';
+  if(last){
+    const next=last+2*3600000;
+    const diff=Math.round((next-Date.now())/60000);
+    const d=new Date(last);
+    const hm=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    if(pill)pill.textContent='● Último sync '+hm+(diff>0?' · próximo em '+diff+' min':'');
+    if(tEl)tEl.textContent=diff>0?'sync automático em ~'+diff+' min':'sync em andamento ou aguardando...';
+  }
   setTimeout(updateSyncTimer,60000);
 }
 
@@ -904,58 +946,125 @@ function syncAll(){rebuildSupersededSet();syncProjectSelects();syncClients();syn
 
 
 
+function renderRiskAnalytics(fT){
+  if(!utilCacheLoaded)return'';
+  const active=fT.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));
+  const scored=active.map(t=>({t,s:riskScore(t)}));
+  const crit=scored.filter(x=>x.s>=60);const high=scored.filter(x=>x.s>=35&&x.s<60);
+  const med=scored.filter(x=>x.s>=15&&x.s<35);const low=scored.filter(x=>x.s<15);
+  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&new Date(t.expire)<new Date());
+  const card=(label,count,color,bg,border,sub)=>'<div style="padding:14px;background:'+bg+';border:1px solid '+border+';border-radius:var(--r)"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+color+'">'+count+'</div><div style="font-size:10px;font-weight:700;color:'+color+';text-transform:uppercase;margin-top:2px">'+label+'</div>'+(sub?'<div style="font-size:10px;color:'+color+';opacity:.7;margin-top:2px">'+sub+'</div>':'')+'</div>';
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🎯 Score de Risco</div><button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:'+(crit.length?'14px':'4px')+'">'+card('Crítico ≥60',crit.length,'#dc2626','#fef2f2','#fecaca',crit.length?crit.map(x=>x.t.ticket).slice(0,2).join(', ')+(crit.length>2?'…':''):'Nenhum')+card('Alto 35–59',high.length,'#d97706','#fffbeb','#fde68a','')+card('Médio 15–34',med.length,'#2563eb','#eff6ff','#bfdbfe','')+card('Baixo <15',low.length,'#16a34a','#f0fdf4','#bbf7d0','')+card('⚠ Vencidos',exp.length,'#7c3aed','#f5f3ff','#ddd6fe',exp.length?'ainda Open':'Nenhum')+'</div>'+(crit.length?'<div style="display:flex;flex-wrap:wrap;gap:5px">'+crit.sort((a,b)=>b.s-a.s).slice(0,15).map(({t,s})=>'<span style="font-size:11px;font-family:var(--mono);padding:3px 9px;border-radius:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;cursor:pointer" onclick="openTicketDetail('+t.id+')" title="Score: '+s+'">'+t.ticket+' · '+s+'</span>').join('')+'</div>':'')+'</div></div>';
+}
+
 async function loadLastSync(){
   try{
     const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,status&order=finished_at.desc&limit=20',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
     if(!r.ok)return;
     const rows=await r.json();
-    const byState={};
-    for(const row of rows){if(!byState[row.state])byState[row.state]=row;}
+    const by={};for(const row of rows){if(!by[row.state])by[row.state]=row;}
     const parts=[];
     for(const st of ['IN','FL']){
-      const row=byState[st];
-      if(!row||!row.finished_at){parts.push(st+': —');continue;}
-      const d=new Date(row.finished_at);
-      const diffMin=Math.round((Date.now()-d.getTime())/60000);
-      let ago;
-      if(diffMin<2)ago='agora';
-      else if(diffMin<60)ago=diffMin+'min atrás';
-      else if(diffMin<120)ago='1h atrás';
-      else if(diffMin<1440)ago=Math.round(diffMin/60)+'h atrás';
-      else ago=Math.round(diffMin/1440)+'d atrás';
+      const row=by[st];if(!row||!row.finished_at){parts.push(st+': —');continue;}
+      const d=new Date(row.finished_at);const dm=Math.round((Date.now()-d.getTime())/60000);
+      let ago;if(dm<2)ago='agora';else if(dm<60)ago=dm+'min atrás';else if(dm<120)ago='1h atrás';else if(dm<1440)ago=Math.round(dm/60)+'h atrás';else ago=Math.round(dm/1440)+'d atrás';
       parts.push((row.status==='success'?'🟢':'🔴')+' '+st+': '+ago+' ('+(row.tickets_checked||0)+')');
     }
-    const el=document.getElementById('last-sync-status');
-    if(el)el.innerHTML=parts.join('<br>');
-    // Update sync dot
-    const dotDash=document.getElementById('sync-dot-dash');
-    const lblDash=document.getElementById('sync-label-dash');
-    if(byState.FL&&byState.FL.finished_at){
-      const minAgo=Math.round((Date.now()-new Date(byState.FL.finished_at).getTime())/60000);
-      if(dotDash)dotDash.style.background=minAgo<130?'var(--green)':'var(--amber)';
-      if(lblDash)lblDash.textContent='Sincronizado às '+(new Date(byState.FL.finished_at)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-      window._lastSyncTime=new Date(byState.FL.finished_at).getTime();
+    const el=document.getElementById('last-sync-status');if(el)el.innerHTML=parts.join('<br>');
+    const lastFL=by['FL'];
+    if(lastFL&&lastFL.finished_at){
+      window._lastSyncTime=new Date(lastFL.finished_at).getTime();
+      const pill=document.getElementById('dash-sync-pill');
+      if(pill){const hm=new Date(lastFL.finished_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});const diff=Math.round((Date.now()-window._lastSyncTime)/60000);pill.textContent='● Último sync '+hm+(diff<130?' · próximo em '+Math.max(0,120-diff)+' min':'');}
       updateSyncTimer();
     }
   }catch(e){console.error('[LastSync]',e);}
 }
 
-/* ══ RISK SCORE ══ */
-function riskScore(t){
-  if(!utilCacheLoaded)return 0;
-  let s=0;const now=Date.now();
-  if(t.expire&&t.expire!=='—'){const diff=(new Date(t.expire)-now)/86400000;if(diff<0)s+=60;else if(diff<=2)s+=45;else if(diff<=5)s+=30;else if(diff<=10)s+=18;else if(diff<=20)s+=8;}
-  const pends=getTicketPendingUtils(String(t.ticket).trim());s+=Math.min(pends.length*8,35);
-  if(t.status==='Damage')s+=30;else if(t.status==='Clear')s=Math.max(s-20,0);else if(t.status==='Closed'||t.status==='Cancel')return 0;
-  if(t.history&&t.history.length){const daysSince=(now-(t.history[t.history.length-1].ts||0))/86400000;if(daysSince>30)s+=15;else if(daysSince>14)s+=8;}
-  return Math.min(s,100);
+function riskScore(t){if(!utilCacheLoaded)return 0;let s=0;const now=Date.now();if(t.expire&&t.expire!=='—'){const diff=(new Date(t.expire)-now)/86400000;if(diff<0)s+=60;else if(diff<=2)s+=45;else if(diff<=5)s+=30;else if(diff<=10)s+=18;else if(diff<=20)s+=8;}const pends=getTicketPendingUtils(String(t.ticket).trim());s+=Math.min(pends.length*8,35);if(t.status==='Damage')s+=30;else if(t.status==='Clear')s=Math.max(s-20,0);else if(t.status==='Closed'||t.status==='Cancel')return 0;if(t.history&&t.history.length){const ds=(now-(t.history[t.history.length-1].ts||0))/86400000;if(ds>30)s+=15;else if(ds>14)s+=8;}return Math.min(s,100);}
+function riskLabel(s){if(s>=60)return{label:'CRÍTICO',color:'#dc2626',bg:'#fef2f2',border:'#fecaca'};if(s>=35)return{label:'ALTO',color:'#d97706',bg:'#fffbeb',border:'#fde68a'};if(s>=15)return{label:'MÉDIO',color:'#2563eb',bg:'#eff6ff',border:'#bfdbfe'};return{label:'BAIXO',color:'#16a34a',bg:'#f0fdf4',border:'#bbf7d0'};}
+
+/* == ANALYTICS PAGE == */
+function renderAnalytics(){
+  const el=document.getElementById('analytics-content');if(!el)return;
+  const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
+  const dsf=dashStateVal;
+  const sf='<select class="fi" onchange="dashStateVal=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+s+'"'+(dsf===s?' selected':'')+'>'+s+'</option>').join('')+'</select>';
+  const fT=dsf?tickets.filter(t=>t.state===dsf&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
+  const fP=dsf?projects.filter(p=>p.state===dsf):projects;
+  const now=Date.now();const week=7*86400000;
+  const ps=fP.filter(p=>p.status!=='Completed').map(p=>{
+    const ts=fT.filter(t=>t.projectId===p.id);
+    const cf=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const con=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
+    const df=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
+    const tf=ts.reduce((s,t)=>s+(t.footage||0),0);const tot=p.totalFeet||tf||1;
+    const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';
+    const c4w=ts.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
+    const fpw=c4w.reduce((s,t)=>s+(t.footage||0),0)/4;
+    return{id:p.id,name:p.name,locs,clearFtP:cf,openFtP:of2,concluidoFt:con,damageFt:df,ticketFt:tf,totalFt:tot,
+      pctClear:tot>0?Math.round(cf/tot*100):0,pctOpen:tot>0?Math.round(of2/tot*100):0,
+      pctConcluido:tot>0?Math.round(con/tot*100):0,pctDamage:tot>0?Math.round(df/tot*100):0,
+      hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||'',ftPerWeek:Math.round(fpw),
+      weeksLeft:fpw>0?Math.ceil(of2/fpw):null,count:ts.length};
+  }).sort((a,b)=>b.count-a.count);
+
+  // Order: 1.Clareados 2.Evolução 3.Progresso 4.Score 5.Velocity 6.TempMédio 7.Utilities 8.Sync
+  el.innerHTML=
+    '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span><span style="margin-left:auto">'+sf+'</span></div>'
+    +renderClearedStats(fT)
+    +renderWeeklyEvolution(fT)
+    +renderProgressoFootage(fT,ps)
+    +renderRiskAnalytics(fT)
+    +renderVelocity(fT,ps)
+    +renderClearTimeMetrics(fT)
+    +renderUtilSummaryHtml()
+    +renderSyncHealthCard();
 }
-function riskLabel(s){
-  if(s>=60)return{label:'CRÍTICO',color:'#dc2626',bg:'#fef2f2',border:'#fecaca'};
-  if(s>=35)return{label:'ALTO',color:'#d97706',bg:'#fffbeb',border:'#fde68a'};
-  if(s>=15)return{label:'MÉDIO',color:'#2563eb',bg:'#eff6ff',border:'#bfdbfe'};
-  return{label:'BAIXO',color:'#16a34a',bg:'#f0fdf4',border:'#bbf7d0'};
+
+function renderVelocity(fT,ps){
+  try{
+    const vf=_velProjFilter||'';const week=7*86400000;const now=Date.now();
+    const pv=ps.filter(p=>p.count>0);
+    if(!pv.length)return'';
+    const opts='<option value="">Todos projetos</option>'+pv.map(p=>'<option value="'+p.id+'"'+(vf===p.id?' selected':'')+'>'+(p.locs?p.locs+' ('+p.name+')':p.name)+'</option>').join('');
+    const sh=vf?pv.filter(p=>p.id===vf):pv.filter(p=>(p.ftPerWeek||0)>0||p.openFtP>0).slice(0,8);
+    if(!sh.length)return'';
+    const rows=sh.map(p=>{
+      const ft=p.ftPerWeek||0;const wl=p.weeksLeft;
+      const fc=wl!==null?(wl<=0?'<span style="color:var(--green);font-weight:700">Concluído</span>':wl===1?'<span style="color:var(--amber);font-weight:700">~1 semana</span>':'<span style="color:var(--text2)">~'+wl+' sem.</span>'):'<span style="color:var(--muted)">sem dados</span>';
+      const vel=ft>0?'<span style="color:var(--green);font-family:var(--mono);font-weight:600">'+ft.toLocaleString()+' ft/sem</span>':'<span style="color:var(--muted);font-size:11px">parado</span>';
+      return'<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px;font-weight:600">'+(p.locs||p.name)+'</td><td style="padding:8px 6px">'+vel+'</td><td style="padding:8px 6px">'+fc+'</td><td style="padding:8px 6px;min-width:120px"><div style="display:flex;align-items:center;gap:6px"><div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:'+p.pctClear+'%;height:100%;background:var(--green);border-radius:3px"></div></div><span style="font-size:10px;font-family:var(--mono);color:var(--muted)">'+p.pctClear+'%</span></div></td><td style="padding:8px 6px;font-size:11px;color:var(--muted);font-family:var(--mono)">'+(p.openFtP||0).toLocaleString()+' ft</td></tr>';
+    }).join('');
+    return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🚀 Velocity & Previsão</div><select class="fi" onchange="_velProjFilter=this.value;renderAnalytics()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+opts+'</select></div><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--border)"><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Projeto</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Velocidade</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Previsão</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Progresso</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Restante</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  }catch(e){console.error('Velocity:',e);return'';}
 }
+
+function renderSyncHealthCard(){
+  setTimeout(()=>renderSyncHealth(),100);
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📡 Saúde do Sync (últimas 20 execuções)</div><div id="sync-health-widget"><div style="color:var(--muted);font-size:12px">Carregando...</div></div></div></div>';
+}
+
+async function renderSyncHealth(){
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,status,started_at&order=started_at.desc&limit=40',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
+    if(!r.ok)return;const rows=await r.json();
+    const el=document.getElementById('sync-health-widget');if(!el)return;
+    const by={IN:[],FL:[]};for(const row of rows){if(by[row.state])by[row.state].push(row);}
+    let h='';
+    for(const[st,lg]of Object.entries(by)){
+      if(!lg.length)continue;const l20=lg.slice(0,20);
+      const sc=l20.filter(x=>x.status==='success').length;
+      const rt=Math.round(sc/l20.length*100);
+      const c=rt>=90?'var(--green)':rt>=70?'var(--amber)':'var(--red)';
+      const dots=l20.map(x=>'<span title="'+(x.started_at||'').slice(0,16)+'" style="display:inline-block;width:10px;height:10px;border-radius:50%;margin:1px;background:'+(x.status==='success'?'var(--green)':'var(--red)')+'"></span>').join('');
+      h+='<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-weight:700;font-family:var(--mono);width:24px">'+st+'</span><span style="font-size:16px;font-weight:700;font-family:var(--mono);color:'+c+';width:42px">'+rt+'%</span><div style="flex:1;display:flex;flex-wrap:wrap;gap:2px">'+dots+'</div><span style="font-size:10px;color:var(--muted)">'+sc+'/'+l20.length+'</span></div>';
+    }
+    el.innerHTML=h||'<div style="color:var(--muted);font-size:12px">Sem dados</div>';
+  }catch(e){console.error('SyncHealth:',e);}
+}
+
 function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
   var cpf=_clearProjFilter||'';
@@ -1099,52 +1208,6 @@ function exportAllPending(){
   toast(rows.length+' pendências exportadas','success');
 }
 
-
-/* ══ ANALYTICS PAGE ══ */
-function renderAnalytics(){
-  const el=document.getElementById('analytics-content');if(!el)return;
-  const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
-  const dsf=dashStateVal;
-  const sf='<select class="fi" onchange="dashStateVal=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+s+'"'+(dsf===s?' selected':'')+'>'+s+'</option>').join('')+'</select>';
-  const fT=dsf?tickets.filter(t=>t.state===dsf&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
-  const fP=dsf?projects.filter(p=>p.state===dsf):projects;
-  const now=Date.now();const week=7*86400000;
-  const ps=fP.filter(p=>p.status!=='Completed').map(p=>{
-    const ts=fT.filter(t=>t.projectId===p.id);
-    const cf=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
-    const con=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
-    const df=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
-    const tf=ts.reduce((s,t)=>s+(t.footage||0),0);const tot=p.totalFeet||tf||1;
-    const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';
-    const c4w=ts.filter(t=>{if(!t.history)return false;return t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));});});
-    const fpw=c4w.reduce((s,t)=>s+(t.footage||0),0)/4;
-    return{id:p.id,name:p.name,locs,clearFtP:cf,openFtP:of2,concluidoFt:con,damageFt:df,ticketFt:tf,totalFt:tot,pctClear:tot>0?Math.round(cf/tot*100):0,pctOpen:tot>0?Math.round(of2/tot*100):0,pctConcluido:tot>0?Math.round(con/tot*100):0,pctDamage:tot>0?Math.round(df/tot*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||'',ftPerWeek:Math.round(fpw),weeksLeft:fpw>0?Math.ceil(of2/fpw):null,count:ts.length};
-  }).sort((a,b)=>b.count-a.count);
-  el.innerHTML='<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span><span style="margin-left:auto">'+sf+'</span></div>'+renderProgressoFootage(fT,ps)+renderVelocity(fT,ps)+renderClearedStats(fT)+renderClearTimeMetrics(fT)+renderUtilSummaryHtml()+renderSyncHealthCard()+renderWeeklyEvolution(fT);
-}
-function renderSyncHealthCard(){setTimeout(()=>renderSyncHealth(),100);return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📡 Saúde do Sync</div><div id="sync-health-widget"><div style="color:var(--muted);font-size:12px">Carregando...</div></div></div></div>';}
-async function renderSyncHealth(){
-  try{
-    const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,status,started_at&order=started_at.desc&limit=40',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
-    if(!r.ok)return;const rows=await r.json();const el=document.getElementById('sync-health-widget');if(!el)return;
-    const by={IN:[],FL:[]};for(const r2 of rows){if(by[r2.state])by[r2.state].push(r2);}
-    let h='';
-    for(const[st,lg]of Object.entries(by)){if(!lg.length)continue;const l20=lg.slice(0,20);const sc=l20.filter(x=>x.status==='success').length;const rt=Math.round(sc/l20.length*100);const c=rt>=90?'var(--green)':rt>=70?'var(--amber)':'var(--red)';const dots=l20.map(x=>'<span title="'+(x.started_at||'').slice(0,16)+'" style="display:inline-block;width:10px;height:10px;border-radius:50%;margin:1px;background:'+(x.status==='success'?'var(--green)':'var(--red)')+'"></span>').join('');h+='<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-weight:700;font-family:var(--mono);width:24px">'+st+'</span><span style="font-size:16px;font-weight:700;font-family:var(--mono);color:'+c+';width:42px">'+rt+'%</span><div style="flex:1;display:flex;flex-wrap:wrap;gap:2px">'+dots+'</div><span style="font-size:10px;color:var(--muted)">'+sc+'/'+l20.length+'</span></div>';}
-    el.innerHTML=h||'<div style="color:var(--muted);font-size:12px">Sem dados</div>';
-  }catch(e){}
-}
-function renderVelocity(fT,ps){
-  try{
-    const vf=_velProjFilter||'';const week=7*86400000;const now=Date.now();
-    const pv=ps.map(p=>({...p,ftPerWeek:p.ftPerWeek||0,weeksLeft:p.weeksLeft})).filter(p=>p.count>0);
-    if(!pv.length)return'';
-    const opts='<option value="">Todos projetos</option>'+pv.map(p=>'<option value="'+p.id+'"'+(vf===p.id?' selected':'')+'>'+(p.locs?p.locs+' ('+p.name+')':p.name)+'</option>').join('');
-    const sh=vf?pv.filter(p=>p.id===vf):pv.filter(p=>p.ftPerWeek>0||p.openFtP>0).slice(0,8);
-    const rows=sh.map(p=>{const fc=p.weeksLeft!==null?(p.weeksLeft<=0?'<span style="color:var(--green);font-weight:700">Concluído</span>':p.weeksLeft===1?'<span style="color:var(--amber);font-weight:700">~1 semana</span>':'<span style="color:var(--text2)">~'+p.weeksLeft+' sem.</span>'):'<span style="color:var(--muted)">sem dados</span>';const vel=p.ftPerWeek>0?'<span style="color:var(--green);font-family:var(--mono);font-weight:600">'+p.ftPerWeek.toLocaleString()+' ft/sem</span>':'<span style="color:var(--muted);font-size:11px">parado</span>';return'<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px;font-weight:600">'+(p.locs||p.name)+'</td><td style="padding:8px 6px">'+vel+'</td><td style="padding:8px 6px">'+fc+'</td><td style="padding:8px 6px;min-width:120px"><div style="display:flex;align-items:center;gap:6px"><div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:'+p.pctClear+'%;height:100%;background:var(--green);border-radius:3px"></div></div><span style="font-size:10px;font-family:var(--mono);color:var(--muted)">'+p.pctClear+'%</span></div></td><td style="padding:8px 6px;font-size:11px;color:var(--muted);font-family:var(--mono)">'+(p.openFtP||0).toLocaleString()+' ft</td></tr>';}).join('');
-    return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🚀 Velocity & Previsão</div><select class="fi" onchange="_velProjFilter=this.value;if(document.getElementById(\'analytics-content\'))renderAnalytics();" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+opts+'</select></div><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--border)"><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Projeto</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Velocidade</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Previsão</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Progresso</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Restante</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
-  }catch(e){return'';}
-}
 /* ══════════ WEEKLY EVOLUTION (4 weeks) ══════════ */
 function renderWeeklyEvolution(fTickets){
   try{

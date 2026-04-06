@@ -172,14 +172,13 @@ function enterApp(){
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
   const logoutBtn=document.getElementById('btn-logout');
-  if(logoutBtn)logoutBtn.style.display=isAdmin?'':'none';
+  if(logoutBtn)logoutBtn.style.display='';
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='';});}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
-  loadLastSync();
   loadContacts().then(()=>renderContacts());
-  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();await loadLastSync();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
+  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -814,59 +813,7 @@ function exportAllPending(){
   toast(rows.length+' pendências exportadas','success');
 }
 
-/* ══════════ LAST SYNC STATUS ══════════ */
-async function loadLastSync() {
-  try {
-    const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,tickets_updated,status` +
-      `&order=finished_at.desc&limit=20`,
-      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-    );
-    if (!r.ok) return;
-    const rows = await r.json();
-
-    // Pega o mais recente por estado (sucesso ou erro)
-    const byState = {};
-    for (const row of rows) {
-      if (!byState[row.state]) byState[row.state] = row;
-    }
-
-    // Monta texto para cada estado
-    const parts = [];
-    for (const state of ['IN', 'FL']) {
-      const row = byState[state];
-      if (!row || !row.finished_at) { parts.push(`${state}: —`); continue; }
-      const d = new Date(row.finished_at);
-      const now = Date.now();
-      const diffMin = Math.round((now - d.getTime()) / 60000);
-      let ago;
-      if (diffMin < 2)        ago = 'agora';
-      else if (diffMin < 60)  ago = `${diffMin}min atrás`;
-      else if (diffMin < 120) ago = '1h atrás';
-      else if (diffMin < 1440) ago = `${Math.round(diffMin/60)}h atrás`;
-      else                    ago = `${Math.round(diffMin/1440)}d atrás`;
-
-      const ok = row.status === 'success';
-      const icon = ok ? '🟢' : '🔴';
-      parts.push(`${icon} ${state}: ${ago}`);
-    }
-
-    // Atualiza elemento no sidebar
-    const el = document.getElementById('last-sync-status');
-    if (el) el.innerHTML = parts.join('<br>');
-
-    // Tambem atualiza tooltip com detalhes
-    const detail = Object.entries(byState).map(([st, row]) => {
-      if (!row.finished_at) return `${st}: sem dados`;
-      const d = new Date(row.finished_at);
-      return `${st}: ${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} — ${row.tickets_checked||0} verificados`;
-    }).join('\n');
-    if (el) el.title = detail;
-
-  } catch(e) { console.error('[LastSync]', e); }
-}
-
-
+/* ══════════ WEEKLY EVOLUTION (4 weeks) ══════════ */
 function renderWeeklyEvolution(fTickets){
   try{
   const now=Date.now(),week=7*864e5;

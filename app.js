@@ -148,12 +148,7 @@ async function tryLogin(){
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
     if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
-    try{
-      const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
-      if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
-      else{isAdmin=false;role='viewer';}
-      if(roleErr) console.warn('[Auth] app_roles error:',roleErr.message);
-    }catch(e){isAdmin=false;role='viewer';console.warn('[Auth] Erro ao verificar role:',e.message);}
+    try{const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}else{isAdmin=false;role='viewer';}}catch(e){isAdmin=false;role='viewer';console.warn('[Auth] role check failed:',e.message);}
     document.getElementById('login-screen').style.display='none';
     enterApp();
   }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
@@ -182,7 +177,6 @@ function enterApp(){
   syncAll();renderDash();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
   loadContacts().then(()=>renderContacts());
-  loadLastSync();
   setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();await loadLastSync();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
@@ -702,7 +696,7 @@ function renderClearedStats(fTickets){
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
-  // Gráfico: usa data da ÚLTIMA utility Clear por ticket (momento real do clear)
+  // Gráfico: data da ÚLTIMA utility Clear por ticket (= momento real do clear)
   var ticketLastClearDate={};
   if(utilCacheLoaded){for(var k=0;k<ft2.length;k++){var tkey=String(ft2[k].ticket||'').trim();var utils=getTicketUtils(tkey);var allClear=utils.length>0&&utils.every(function(u){return u.status==='Clear';});if(!allClear)continue;var maxTs=0;for(var j=0;j<utils.length;j++){if(utils[j].responded_at){var rts=new Date(utils[j].responded_at).getTime();if(rts>maxTs)maxTs=rts;}}if(maxTs>0)ticketLastClearDate[tkey]=maxTs;}}
   var daily=[];
@@ -839,18 +833,17 @@ function exportAllPending(){
 
 async function loadLastSync(){
   try{
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,tickets_updated,status&order=finished_at.desc&limit=20`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}` }});
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,status&order=finished_at.desc&limit=20`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
     if(!r.ok)return;
     const rows=await r.json();
     const byState={};
     for(const row of rows){if(!byState[row.state])byState[row.state]=row;}
     const parts=[];
     for(const state of ['IN','FL']){
-      const row=byState[state];
-      if(!row||!row.finished_at){parts.push(`${state}: —`);continue;}
-      const d=new Date(row.finished_at);const now=Date.now();const diffMin=Math.round((now-d.getTime())/60000);
-      let ago;if(diffMin<2)ago='agora';else if(diffMin<60)ago=`${diffMin}min atrás`;else if(diffMin<120)ago='1h atrás';else if(diffMin<1440)ago=`${Math.round(diffMin/60)}h atrás`;else ago=`${Math.round(diffMin/1440)}d atrás`;
-      const ok=row.status==='success';parts.push(`${ok?'🟢':'🔴'} ${state}: ${ago}`);
+      const row=byState[state];if(!row||!row.finished_at){parts.push(`${state}: —`);continue;}
+      const d=new Date(row.finished_at);const diffMin=Math.round((Date.now()-d.getTime())/60000);
+      let ago;if(diffMin<2)ago='agora';else if(diffMin<60)ago=diffMin+'min atrás';else if(diffMin<120)ago='1h atrás';else if(diffMin<1440)ago=Math.round(diffMin/60)+'h atrás';else ago=Math.round(diffMin/1440)+'d atrás';
+      parts.push((row.status==='success'?'🟢':'🔴')+' '+state+': '+ago+' ('+( row.tickets_checked||0)+' tickets)');
     }
     const el=document.getElementById('last-sync-status');
     if(el)el.innerHTML=parts.join('<br>');
@@ -884,7 +877,7 @@ function renderWeeklyEvolution(fTickets){
 /* ══════════ PROGRESSO FOOTAGE (aggregated + filter) ══════════ */
 function renderProgressoFootage(fTickets,projStats){
   try{
-  const pf=_progProjFilter||'';
+  const pf=window._progProjFilter||'';
   const projOpts='<option value="">Todos (agrupado)</option>'+projStats.map(p=>'<option value="'+p.id+'"'+(pf===p.id?' selected':'')+'>'+(p.locs?p.locs+' ('+p.name+')':p.name)+'</option>').join('');
   const projSel='<select class="fi" onchange="_progProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
   function mkGrid(d){return'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.totalFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">'+d.clearFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+d.pctClear+'%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">'+d.openFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto '+d.pctOpen+'%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+d.damageFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+d.pctDamage+'%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.concluidoFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+d.pctConcluido+'%</div></div></div><div class="prog-bar"><div style="width:'+d.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(d.pctOpen,100-d.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(d.pctDamage,100-d.pctClear-d.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(d.pctConcluido,100-d.pctClear-d.pctOpen-d.pctDamage)+'%;background:var(--text)"></div></div>';}
@@ -1030,7 +1023,7 @@ window.addEventListener('load',async()=>{
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
-      try{const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();isAdmin=!!(roleData&&roleData.role==='admin');}catch(e){isAdmin=false;console.warn('[Auth] Session role check failed:',e.message);}
+      try{const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();isAdmin=!!(roleData&&roleData.role==='admin');}catch(e){isAdmin=false;}
       role=isAdmin?'admin':'viewer';
       enterApp();
       return;

@@ -189,6 +189,7 @@ function enterApp(){
   if(isAdmin){['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='';});}
   else{['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});document.getElementById('field-status-section').style.display='none';}
   syncAll();renderDash();
+  loadLastSync();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
   loadContacts().then(()=>renderContacts());
   setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();await loadLastSync();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
@@ -985,11 +986,16 @@ async function loadLastSync(){
       parts.push((row.status==='success'?'🟢':'🔴')+' '+st+': '+ago+' ('+(row.tickets_checked||0)+')');
     }
     const el=document.getElementById('last-sync-status');if(el)el.innerHTML=parts.join('<br>');
-    const lastFL=by['FL'];
-    if(lastFL&&lastFL.finished_at){
-      window._lastSyncTime=new Date(lastFL.finished_at).getTime();
+    // Use most recent sync from any state
+    const allFinished=Object.values(by).filter(r=>r&&r.finished_at).sort((a,b)=>new Date(b.finished_at)-new Date(a.finished_at));
+    const latest=allFinished[0];
+    if(latest&&latest.finished_at){
+      window._lastSyncTime=new Date(latest.finished_at).getTime();
       const pill=document.getElementById('dash-sync-pill');
-      if(pill){const hm=new Date(lastFL.finished_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});const diff=Math.round((Date.now()-window._lastSyncTime)/60000);pill.textContent='● Último sync '+hm+(diff<130?' · próximo em '+Math.max(0,120-diff)+' min':'');}
+      if(pill){const hm=new Date(latest.finished_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});const diff=Math.round((Date.now()-window._lastSyncTime)/60000);pill.textContent='● Último sync '+hm+(diff<130?' · próximo em '+Math.max(0,120-diff)+' min':'');}
+      // Update analytics pill too
+      const ap=document.getElementById('analytics-sync-pill');
+      if(ap){const hm2=new Date(latest.finished_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});const diff2=Math.round((Date.now()-window._lastSyncTime)/60000);let ago2;if(diff2<2)ago2='agora';else if(diff2<60)ago2=diff2+'min atrás';else if(diff2<120)ago2='1h atrás';else ago2=Math.round(diff2/60)+'h atrás';ap.style.background='var(--green-bg)';ap.style.color='var(--green)';ap.style.borderColor='var(--green-border)';ap.textContent='● Último sync '+hm2+' ('+ago2+')';}
       updateSyncTimer();
     }
   }catch(e){console.error('[LastSync]',e);}
@@ -1025,8 +1031,9 @@ function renderAnalytics(){
   }).sort((a,b)=>b.count-a.count);
 
   // Order: 1.Clareados 2.Evolução 3.Progresso 4.Score 5.Velocity 6.TempMédio 7.Utilities 8.Sync
+  const syncPill=window._lastSyncTime?function(){var d=new Date(window._lastSyncTime);var hm=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});var diff=Math.round((Date.now()-window._lastSyncTime)/60000);var ago2;if(diff<2)ago2='agora';else if(diff<60)ago2=diff+'min atrás';else if(diff<120)ago2='1h atrás';else ago2=Math.round(diff/60)+'h atrás';return'<span id="analytics-sync-pill" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);margin-left:8px;white-space:nowrap">● Último sync '+hm+' ('+ago2+')</span>';}():'<span id="analytics-sync-pill" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--bg);color:var(--muted);border:1px solid var(--border);margin-left:8px;white-space:nowrap">⏳ Carregando sync...</span>';
   el.innerHTML=
-    '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span><span style="margin-left:auto">'+sf+'</span></div>'
+    '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span>'+syncPill+'<span style="margin-left:auto">'+sf+'</span></div>'
     +renderClearedStats(fT)
     +renderWeeklyEvolution(fT)
     +renderProgressoFootage(fT,ps)
@@ -1035,6 +1042,7 @@ function renderAnalytics(){
     +renderClearTimeMetrics(fT)
     +renderUtilSummaryHtml()
     +renderSyncHealthCard();
+  loadLastSync().then(function(){var p2=document.getElementById('analytics-sync-pill');if(p2&&window._lastSyncTime){var d2=new Date(window._lastSyncTime);var hm2=d2.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});var diff2=Math.round((Date.now()-window._lastSyncTime)/60000);var ago3;if(diff2<2)ago3='agora';else if(diff2<60)ago3=diff2+'min atrás';else if(diff2<120)ago3='1h atrás';else ago3=Math.round(diff2/60)+'h atrás';p2.style.background='var(--green-bg)';p2.style.color='var(--green)';p2.style.borderColor='var(--green-border)';p2.textContent='● Último sync '+hm2+' ('+ago3+')';}});
 }
 
 function renderVelocity(fT,ps){

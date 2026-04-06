@@ -147,21 +147,7 @@ async function tryLogin(){
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
     if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
-    try{
-      const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
-      if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
-      else if(roleErr){
-        // RLS bloqueando app_roles — usa email como fallback
-        const adminEmails=['engineering@onedrill.us','carlos@onedrill.us'];
-        isAdmin=adminEmails.includes(data.user.email);
-        role=isAdmin?'admin':'viewer';
-        console.warn('[Auth] app_roles inacessivel, fallback por email:',data.user.email,'->',role);
-      }else{isAdmin=false;role='viewer';}
-    }catch(e){
-      const adminEmails=['engineering@onedrill.us','carlos@onedrill.us'];
-      isAdmin=adminEmails.includes(data.user.email);
-      role=isAdmin?'admin':'viewer';
-    }
+    try{const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}else if(roleErr){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(data.user.email);role=isAdmin?'admin':'viewer';}else{isAdmin=false;role='viewer';}}catch(e){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(data.user.email);role=isAdmin?'admin':'viewer';}
     document.getElementById('login-screen').style.display='none';
     enterApp();
   }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
@@ -523,13 +509,13 @@ function renderDash(){
   const clearFt=fTickets.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
   const damageFt=fTickets.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
-  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=10&&t.status!=='Closed'&&t.status!=='Cancel';});
+  const _soonDays=window._soonDays||10;const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_soonDays&&t.status!=='Closed'&&t.status!=='Cancel';});
   const fProjects=dsf?projects.filter(p=>p.state===dsf):projects;
   const projStats=fProjects.filter(p=>p.status!=='Completed').map(p=>{const ts=fTickets.filter(t=>t.projectId===p.id);const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);const damageFtP=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const totalFt=p.totalFeet||ticketFt||1;const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';return{name:p.name,id:p.id,count:ts.length,clearFtP,openFtP,concluidoFt,damageFt:damageFtP,ticketFt,totalFt,pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0,pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0,pctDamage:totalFt>0?Math.round(damageFtP/totalFt*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||''};}).sort((a,b)=>b.count-a.count);
   const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
-  el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div class="warn-title">⚠ ${soon.length} ticket(s) vencendo nos próximos 10 dias</div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderClearedStats(fTickets)}${renderProgressoFootage(fTickets,projStats)}${renderClearTimeMetrics(fTickets)}${renderUtilSummaryHtml()}${renderWeeklyEvolution(fTickets)}`;
+  el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div>${soon.length?`<div class="warn-banner"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px"><div class="warn-title" style="margin:0">⚠ ${soon.length} ticket(s) vencendo nos próximos ${window._soonDays||10} dias</div><div style="display:flex;gap:6px;align-items:center"><select class="fi" onchange="window._soonDays=parseInt(this.value);renderDash()" style="font-size:11px;padding:4px 7px;width:auto"><option value="3">3 dias</option><option value="5">5 dias</option><option value="10" selected>10 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select><button class="btn btn-sm" onclick="exportExpiring()" style="background:var(--red);color:white;border-color:var(--red);font-size:11px">↓ Excel</button></div></div><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
+  ${renderClearedStats(fTickets)}${renderProgressoFootage(fTickets,projStats)}${renderWeeklyEvolution(fTickets)}${renderClearTimeMetrics(fTickets)}${renderUtilSummaryHtml()}`;
 }
 
 
@@ -635,6 +621,29 @@ async function doImport(){
   if(mode==='update')toast(`✅ ${updated} atualizados · ${novo.length} novos`,'success');else toast(`${novo.length} tickets importados`,'success');
 }
 
+
+function exportExpiring(){
+  const days=window._soonDays||10;
+  const f=tickets.filter(t=>{
+    if(!t.expire||t.expire==='—')return false;
+    const d=new Date(t.expire);const diff=(d-Date.now())/86400000;
+    return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t);
+  });
+  if(!f.length){toast('Nenhum ticket vencendo nesse período.','warn');return;}
+  const wb=XLSX.utils.book_new();
+  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
+  for(const t of f){
+    const proj=projects.find(p=>p.id===t.projectId)?.name||'';
+    const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
+    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);
+  }
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,ws,'Vencendo');
+  XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(f.length+' tickets exportados — vencendo em '+days+' dias','success');
+}
+
 function exportFiltered(){
   const sr=(document.getElementById('tbl-srch')?.value||'').toLowerCase();
   const st=document.getElementById('tbl-stat')?.value||'';
@@ -697,8 +706,40 @@ function renderClearedStats(fTickets){
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
+  // Gráfico diário usa responded_at das utilities (mais preciso que history)
+  // Fallback para history se utilCache não tiver dados
   var daily=[];
-  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;for(var k=0;k<ft2.length;k++){var evts=getClearEvts(ft2[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft2[k].footage||0);}}}daily.push({l:lb,c:cnt,f:dft});}
+  for(var i=6;i>=0;i--){
+    var ds=now-(i+1)*864e5,de=now-i*864e5;
+    var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});
+    var cnt=0,dft=0;
+    var seenInDay=new Set();
+    // Prioridade 1: responded_at do utilCache
+    if(utilCacheLoaded){
+      for(var k=0;k<ft2.length;k++){
+        var tkey=String(ft2[k].ticket||'').trim();
+        var utils=getTicketUtils(tkey);
+        for(var j=0;j<utils.length;j++){
+          if(utils[j].status==='Clear'&&utils[j].responded_at){
+            var rts=new Date(utils[j].responded_at).getTime();
+            if(rts>=ds&&rts<de&&!seenInDay.has(tkey)){
+              seenInDay.add(tkey);cnt++;dft+=(ft2[k].footage||0);
+            }
+          }
+        }
+      }
+    }
+    // Fallback: history se não encontrou via utilCache
+    if(cnt===0){
+      for(var k=0;k<ft2.length;k++){
+        var evts=getClearEvts(ft2[k]);
+        for(var j=0;j<evts.length;j++){
+          if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft2[k].footage||0);}
+        }
+      }
+    }
+    daily.push({l:lb,c:cnt,f:dft});
+  }
   var mx=1;for(var i=0;i<daily.length;i++)if(daily[i].c>mx)mx=daily[i].c;
   var su7=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
   if(!c30.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Tickets Clareados</div><div style="color:var(--muted);font-size:13px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';
@@ -999,12 +1040,7 @@ window.addEventListener('load',async()=>{
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
-      try{
-        const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
-        if(roleData&&roleData.role==='admin'){isAdmin=true;}
-        else if(roleErr){const adminEmails=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=adminEmails.includes(session.user.email);}
-        else{isAdmin=false;}
-      }catch(e){const adminEmails=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=adminEmails.includes(session.user.email);}
+      try{const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();if(roleData&&roleData.role==='admin'){isAdmin=true;}else if(roleErr){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(session.user.email);}else{isAdmin=false;}}catch(e){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(session.user.email);}
       role=isAdmin?'admin':'viewer';
       enterApp();
       return;

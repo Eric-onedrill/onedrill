@@ -1241,19 +1241,75 @@ function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
   var cpf=_clearProjFilter||'';
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
-  function getClearEvts(t){
-    if(!t.history||!t.history.length)return[];
-    return t.history.filter(function(h){var a=(h.action||'').toLowerCase();return a.indexOf('clear')>=0&&(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||a.indexOf('status manual')>=0);});
+
+  // Detecta data de clear de cada ticket usando DUAS fontes:
+  // 1. Eventos de histórico ("→ clear", "auto-clear", "auto 811")
+  // 2. Data da ÚLTIMA resposta de utility (quando TODAS são Clear)
+  function getTicketClearDate(t){
+    var clearTs=0;
+    // Fonte 1: histórico
+    if(t.history&&t.history.length){
+      for(var j=t.history.length-1;j>=0;j--){
+        var a=(t.history[j].action||'').toLowerCase();
+        if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||a.indexOf('status manual')>=0&&a.indexOf('clear')>=0){
+          if(t.history[j].ts>clearTs)clearTs=t.history[j].ts;
+          break;
+        }
+      }
+    }
+    // Fonte 2: respostas de utilities (usa data da última resposta quando TODAS são Clear)
+    if(utilCacheLoaded){
+      var tkey=String(t.ticket||'').trim();
+      var utils=getTicketUtils(tkey);
+      if(utils.length>0){
+        var allClear=true;var latestResp=0;
+        for(var j=0;j<utils.length;j++){
+          if(utils[j].status!=='Clear'){allClear=false;break;}
+          if(utils[j].responded_at){
+            var rts=new Date(utils[j].responded_at).getTime();
+            if(!isNaN(rts)&&rts>latestResp)latestResp=rts;
+          }
+        }
+        if(allClear&&latestResp>clearTs)clearTs=latestResp;
+      }
+    }
+    return clearTs;
   }
+
   var c24=[],c7=[],c30=[],byU7={};
-  for(var i=0;i<ft2.length;i++){var t=ft2[i];var evts=getClearEvts(t);for(var j=0;j<evts.length;j++){if(evts[j].ts>=day1)c24.push(t);if(evts[j].ts>=day7)c7.push(t);if(evts[j].ts>=day30)c30.push(t);}}
+  var seen24={},seen7={},seen30={};
+  for(var i=0;i<ft2.length;i++){
+    var t=ft2[i];
+    // Não filtra por status — getTicketClearDate retorna 0 se não está cleared
+    if(t.status==='Cancel')continue;
+    var cd=getTicketClearDate(t);
+    if(!cd)continue;
+    var tk=t.ticket;
+    if(cd>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
+    if(cd>=day7&&!seen7[tk]){c7.push(t);seen7[tk]=1;}
+    if(cd>=day30&&!seen30[tk]){c30.push(t);seen30[tk]=1;}
+  }
+
   if(utilCacheLoaded){for(var i=0;i<c7.length;i++){var us=getTicketUtils(String(c7[i].ticket).trim());for(var j=0;j<us.length;j++){if(us[j].status==='Clear'){if(!byU7[us[j].utility_name])byU7[us[j].utility_name]=0;byU7[us[j].utility_name]++;}}}}
   var ft24=0,ft7=0,ft30=0;
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
+
+  // Daily chart — usa mesma lógica de getTicketClearDate
   var daily=[];
-  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;for(var k=0;k<ft2.length;k++){var evts=getClearEvts(ft2[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft2[k].footage||0);}}}daily.push({l:lb,c:cnt,f:dft});}
+  for(var i=6;i>=0;i--){
+    var ds=now-(i+1)*864e5,de=now-i*864e5;
+    var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});
+    var cnt=0,dft=0,daySeen={};
+    for(var k=0;k<ft2.length;k++){
+      var t2=ft2[k];
+      if(t2.status==='Cancel')continue;
+      var cd2=getTicketClearDate(t2);
+      if(cd2>=ds&&cd2<de&&!daySeen[t2.ticket]){cnt++;dft+=(t2.footage||0);daySeen[t2.ticket]=1;}
+    }
+    daily.push({l:lb,c:cnt,f:dft});
+  }
   var mx=1;for(var i=0;i<daily.length;i++)if(daily[i].c>mx)mx=daily[i].c;
   var su7=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
   if(!c30.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Tickets Clareados</div><div style="color:var(--muted);font-size:13px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';

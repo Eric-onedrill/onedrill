@@ -107,7 +107,7 @@
     <button class="btn btn-primary snav-action-btn" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
   </div>
   <div class="snav-footer">
-    <div class="snav-sync"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
+    <div class="snav-sync"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span><button onclick="manualRefresh()" title="Atualizar dados" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,.15);border-radius:var(--r);padding:2px 8px;cursor:pointer;font-size:11px;color:rgba(255,255,255,.5);font-family:var(--mono);transition:all .15s" onmouseover="this.style.color='#b8922f';this.style.borderColor='#b8922f'" onmouseout="this.style.color='rgba(255,255,255,.5)';this.style.borderColor='rgba(255,255,255,.15)'">⟳</button></div>
     <div id="last-sync-status" style="font-size:10px;color:var(--muted);line-height:1.8;padding:3px 0 4px;font-family:var(--mono)">🟡 IN: —<br>🟡 FL: —</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span class="role-badge" id="role-badge">VIEWER</span>

@@ -1242,26 +1242,16 @@ function renderClearedStats(fTickets){
   var cpf=_clearProjFilter||'';
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
 
-  // Detecta data de clear usando histórico + fallback por notes
+  // Detecta data de clear usando APENAS eventos do histórico
+  // Notes tem data errada (data do sync, não da resposta real)
   function getTicketClearDate(t){
-    if(!t.history||!t.history.length)return _parseClearFromNotes(t);
+    if(!t.history||!t.history.length)return 0;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
-      // "→ clear" matcha manual ("Open → Clear") e auto
-      // "auto 811" SEM "revertido" matcha "[AUTO 811] Clear em..."
-      // NÃO matcha "Clear → Damage" nem "Revertido Clear→Open"
       if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){
         return t.history[j].ts;
       }
     }
-    // Fallback: tickets antigos sem evento no histórico — extrai data das notes
-    return _parseClearFromNotes(t);
-  }
-  function _parseClearFromNotes(t){
-    // Procura "[AUTO 811] Clear em MM/DD/YYYY" nas notes
-    var notes=(t.notes||'');
-    var m=notes.match(/\[AUTO 811\] Clear em (\d{1,2}\/\d{1,2}\/\d{4})/);
-    if(m){try{return new Date(m[1]).getTime();}catch(e){}}
     return 0;
   }
 

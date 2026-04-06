@@ -22,7 +22,7 @@ let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
-let _metricProjFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='';
+let _soonDays=10,_metricProjFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='';
 
 // Utilities
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
@@ -494,11 +494,7 @@ function renderTable(){
     return true;});
   f.sort((a,b)=>{if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}if(sortCol==='footage')return sortAsc?(a.footage||0)-(b.footage||0):(b.footage||0)-(a.footage||0);return sortAsc?String(a[sortCol]||'').localeCompare(String(b[sortCol]||'')):String(b[sortCol]||'').localeCompare(String(a[sortCol]||''));});
   document.getElementById('tbl-count').textContent=`${f.length} tickets · ${f.reduce((s,t)=>s+(t.footage||0),0).toLocaleString()} ft`;
-  // Atualiza header da tabela com coluna Risco se utilCache estiver carregado
-  const tblHead = document.getElementById('tbl-head-risk');
-  if(tblHead) tblHead.style.display = utilCacheLoaded ? '' : 'none';
-  document.getElementById('tbl-body').innerHTML=f.map(t=>{const pends=getTicketPendingUtils(String(t.ticket).trim());const pendNames=pends.map(p=>p.utility_name);const pendChips=pendNames.length?`<div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:3px">${pendNames.slice(0,3).map(n=>`<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">${n.length>20?n.substring(0,20)+'…':n}</span>`).join('')}${pendNames.length>3?`<span style="font-size:9px;color:var(--muted)">+${pendNames.length-3}</span>`:''}</div>`:'';const rs=utilCacheLoaded?riskScore(t):0;const rl=riskLabel(rs);
-    return`<tr onclick="openTicketDetail(${t.id})"><td style="font-family:var(--mono);font-weight:500">${t.ticket}</td><td style="color:var(--text2);font-size:12px">${t.client}</td><td style="color:var(--muted);font-size:12px">${t.prime||'—'}</td><td>${t.location}, ${t.state}</td><td class="tc-${(t.status||'').toLowerCase()}">${t.status}${pendChips}</td><td style="font-family:var(--mono)">${t.footage} ft</td><td style="font-family:var(--mono);font-size:12px">${t.expire||'—'}</td><td style="display:${utilCacheLoaded?'':'none'}" id="tbl-head-risk"><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:${rl.bg};color:${rl.color};border:1px solid ${rl.border};font-family:var(--mono);white-space:nowrap" title="Score de risco: ${rs}">${rl.label} ${rs}</span></td><td style="color:var(--muted)">${t.tipo||'—'}</td><td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td></tr>`;}).join('');
+  document.getElementById('tbl-body').innerHTML=f.map(t=>{const pends=getTicketPendingUtils(String(t.ticket).trim());const pendNames=pends.map(p=>p.utility_name);const pendChips=pendNames.length?`<div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:3px">${pendNames.slice(0,3).map(n=>`<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">${n.length>20?n.substring(0,20)+'…':n}</span>`).join('')}${pendNames.length>3?`<span style="font-size:9px;color:var(--muted)">+${pendNames.length-3}</span>`:''}</div>`:'';return`<tr onclick="openTicketDetail(${t.id})"><td style="font-family:var(--mono);font-weight:500">${t.ticket}</td><td style="color:var(--text2);font-size:12px">${t.client}</td><td style="color:var(--muted);font-size:12px">${t.prime||'—'}</td><td>${t.location}, ${t.state}</td><td class="tc-${(t.status||'').toLowerCase()}">${t.status}${pendChips}</td><td style="font-family:var(--mono)">${t.footage} ft</td><td style="font-family:var(--mono);font-size:12px">${t.expire||'—'}</td><td style="color:var(--muted)">${t.tipo||'—'}</td><td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td></tr>`;}).join('');
 }
 function sortBy(col){sortAsc=sortCol===col?!sortAsc:true;sortCol=col;renderTable();}
 function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
@@ -514,13 +510,20 @@ function renderDash(){
   const clearFt=fTickets.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
   const damageFt=fTickets.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
-  const _soonDays=window._soonDays||10;const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_soonDays&&t.status!=='Closed'&&t.status!=='Cancel';});
+  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_soonDays&&t.status!=='Closed'&&t.status!=='Cancel';});
   const fProjects=dsf?projects.filter(p=>p.state===dsf):projects;
   const projStats=fProjects.filter(p=>p.status!=='Completed').map(p=>{const ts=fTickets.filter(t=>t.projectId===p.id);const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);const damageFtP=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const totalFt=p.totalFeet||ticketFt||1;const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';return{name:p.name,id:p.id,count:ts.length,clearFtP,openFtP,concluidoFt,damageFt:damageFtP,ticketFt,totalFt,pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0,pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0,pctDamage:totalFt>0?Math.round(damageFtP/totalFt*100):0,hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||''};}).sort((a,b)=>b.count-a.count);
   const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,8);
   const el=document.getElementById('dash-content');if(!el)return;
-  el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div><div class="stat-grid"><div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div><div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div></div><div style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${soon.length?'8px':'0'}"><div style="font-size:13px;font-weight:600;color:${soon.length?'var(--red)':'var(--muted)'}">${soon.length?`⚠ ${soon.length} ticket(s) vencendo`:'✅ Nenhum ticket vencendo'} nos próximos ${window._soonDays||10} dias</div><div style="display:flex;gap:6px;align-items:center"><select class="fi" onchange="window._soonDays=parseInt(this.value);renderDash()" style="font-size:11px;padding:4px 7px;width:auto"><option value="3">3 dias</option><option value="5">5 dias</option><option value="10" ${!(window._soonDays&&window._soonDays!==10)?'selected':''}>10 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select>${soon.length?`<button class="btn btn-sm" onclick="exportExpiring()" style="background:var(--red);color:white;border-color:var(--red);font-size:11px">↓ Excel</button>`:''}</div></div>${soon.length?`<div class="warn-banner" style="margin-bottom:0"><div class="warn-chips">${soon.map(t=>`<span class="warn-chip" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div></div>`:''}</div>${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
-  ${renderRiskKPIs(fTickets)}${renderClearedStats(fTickets)}${renderProgressoFootage(fTickets,projStats)}${renderVelocity(fTickets,projStats)}${renderWeeklyEvolution(fTickets)}${renderClearTimeMetrics(fTickets)}${renderUtilSummaryHtml()}${renderSyncHealthCard()}`;
+  el.innerHTML=`<div class="page-title">Dashboard <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${dashStateFilter}</span></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-label">Total tickets</div><div class="stat-val">${total}</div><div class="stat-sub">${totalFt.toLocaleString()} ft</div></div>
+    <div class="stat-card" style="border-left:3px solid var(--red)"><div class="stat-label">Open</div><div class="stat-val" style="color:var(--red)">${open}</div><div class="stat-sub" style="color:var(--red)">${openFt.toLocaleString()} ft</div></div>
+    <div class="stat-card" style="border-left:3px solid var(--green)"><div class="stat-label">Clear</div><div class="stat-val" style="color:var(--green)">${clear}</div><div class="stat-sub" style="color:var(--green)">${clearFt.toLocaleString()} ft</div></div>
+    <div class="stat-card" style="border-left:3px solid var(--amber)"><div class="stat-label">Damage</div><div class="stat-val" style="color:var(--amber)">${damage}</div><div class="stat-sub" style="color:var(--amber)">${damageFt.toLocaleString()} ft</div></div>
+    <div class="stat-card" style="border-left:3px solid var(--purple)"><div class="stat-label">✏️ Sem trajeto</div><div class="stat-val" style="color:var(--purple)">${noMap.length}</div><div class="stat-sub" style="color:var(--purple)">de ${total}</div></div>
+  </div><div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${soon.length?'10px':'0'}"><div style="font-size:13px;font-weight:600;color:${soon.length?'var(--red)':'var(--green)'}">${soon.length?'⚠ '+soon.length+' ticket(s) vencendo':'✅ Nenhum ticket vencendo'} nos próximos ${_soonDays} dias</div><div style="display:flex;gap:6px;align-items:center"><select class="fi" onchange="_soonDays=parseInt(this.value);renderDash()" style="font-size:11px;padding:4px 7px;width:auto"><option value="3" ${_soonDays===3?'selected':''}>3 dias</option><option value="5" ${_soonDays===5?'selected':''}>5 dias</option><option value="10" ${_soonDays===10?'selected':''}>10 dias</option><option value="15" ${_soonDays===15?'selected':''}>15 dias</option><option value="30" ${_soonDays===30?'selected':''}>30 dias</option></select>${soon.length?`<button class="btn btn-sm" onclick="exportExpiring()" style="background:var(--red);color:white;border-color:var(--red);font-size:11px">↓ Excel</button>`:''}</div></div>${soon.length?`<div style="display:flex;flex-wrap:wrap;gap:5px">${soon.map(t=>{const diff2=Math.round((new Date(t.expire)-Date.now())/86400000);return`<span style="font-size:11px;font-family:var(--mono);padding:3px 8px;border-radius:10px;background:${diff2<=3?'var(--red-bg)':'var(--bg)'};color:${diff2<=3?'var(--red)':'var(--text2)'};border:1px solid ${diff2<=3?'var(--red-border)':'var(--border)'};cursor:pointer" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>\`;}).join('')}</div>`:''}</div>${noMap.length&&isAdmin?`<div style="background:var(--purple-bg);border:1px solid var(--purple-border);border-radius:var(--r-lg);padding:12px 16px;margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:13px;font-weight:600;color:var(--purple)">✏️ ${noMap.length} ticket(s) sem trajeto</div><button onclick="nav('map')" class="btn btn-sm" style="background:var(--purple);color:white;border-color:var(--purple)">Ir para o mapa</button></div><div style="display:flex;flex-wrap:wrap;gap:5px">${noMap.slice(0,20).map(t=>`<span style="font-size:11px;font-family:var(--mono);padding:2px 9px;border-radius:20px;background:rgba(109,40,217,.1);color:var(--purple);cursor:pointer;border:1px solid var(--purple-border)" onclick="goDrawField(${t.id})">${t.ticket}</span>`).join('')}${noMap.length>20?`<span style="font-size:11px;color:var(--muted)">+${noMap.length-20} mais</span>`:''}</div></div>`:''}
+  ${renderDashRiskSummary(fTickets)}${renderDashClearedToday(fTickets)}<div style="text-align:center;padding:20px"><button class="btn" onclick="nav('analytics')" style="font-size:13px;padding:10px 24px">📊 Ver Analytics completo →</button></div>`;
 }
 
 
@@ -628,15 +631,14 @@ async function doImport(){
 
 
 function exportExpiring(){
-  const days=window._soonDays||10;
+  const days=_soonDays||10;
   const f=tickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t);});
   if(!f.length){toast('Nenhum ticket vencendo nesse período.','warn');return;}
-  const wb=XLSX.utils.book_new();
-  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
+  const wb=XLSX.utils.book_new();const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
   for(const t of f){const proj=projects.find(p=>p.id===t.projectId)?.name||'';const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);}
   const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30}];
   XLSX.utils.book_append_sheet(wb,ws,'Vencendo');XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast(f.length+' tickets exportados — vencendo em '+days+' dias','success');
+  toast(f.length+' tickets exportados','success');
 }
 function exportFiltered(){
   const sr=(document.getElementById('tbl-srch')?.value||'').toLowerCase();
@@ -682,17 +684,121 @@ function syncProjectSelects(){
 function syncClients(){const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${c}</option>`).join('');});}
 function syncMapUtilFilter(){if(!utilCacheLoaded)return;const el=document.getElementById('map-util-filter');if(!el)return;const prev=el.value;const allU={};const openNums=new Set(tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket).trim()));for(const[tn,resps]of Object.entries(utilCache)){if(!openNums.has(tn))continue;for(const u of resps){if(u.status==='Pending'){if(!allU[u.utility_name])allU[u.utility_name]=0;allU[u.utility_name]++;}}}const sorted=Object.entries(allU).sort((a,b)=>b[1]-a[1]);el.innerHTML='<option value="">Todas utilities</option><option value="__pending__">Com pendentes</option>'+sorted.map(([n,c])=>'<option value="'+n+'">'+n+' ('+c+')</option>').join('');if(prev)el.value=prev;}
 function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
-function syncAll(){rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}const ap=document.querySelector('.page.active')?.id;if(ap==='pg-map'){renderList();renderMap();}else if(ap==='pg-tickets')renderTable();else if(ap==='pg-proj')renderProjects();else if(ap==='pg-dash')renderDash();else if(ap==='pg-contacts')renderContacts();else{renderDash();}}
+function syncAll(){rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}const ap=document.querySelector('.page.active')?.id;if(ap==='pg-map'){renderList();renderMap();}else if(ap==='pg-tickets')renderTable();else if(ap==='pg-proj')renderProjects();else if(ap==='pg-dash')renderDash();else if(ap==='pg-contacts')renderContacts();else if(ap==='pg-analytics')renderAnalytics();else{renderDash();}}
 
 
 
-function renderSyncHealthCard() {
-  // Renderiza placeholder e carrega async
-  setTimeout(() => renderSyncHealth(), 100);
+
+
+function riskScore(t){if(!utilCacheLoaded)return 0;let score=0;const now=Date.now();if(t.expire&&t.expire!=='—'){const exp=new Date(t.expire);const diff=(exp-now)/86400000;if(diff<0)score+=60;else if(diff<=2)score+=45;else if(diff<=5)score+=30;else if(diff<=10)score+=18;else if(diff<=20)score+=8;}const pends=getTicketPendingUtils(String(t.ticket).trim());score+=Math.min(pends.length*8,35);if(t.status==='Damage')score+=30;else if(t.status==='Clear')score=Math.max(score-20,0);else if(t.status==='Closed'||t.status==='Cancel')return 0;if(t.history&&t.history.length){const lastTs=t.history[t.history.length-1].ts||0;const daysSince=(now-lastTs)/86400000;if(daysSince>30)score+=15;else if(daysSince>14)score+=8;}if(!t.fieldPath||t.fieldPath.length<2)score+=3;return Math.min(score,100);}
+function riskLabel(score){if(score>=60)return{label:'CRÍTICO',color:'#dc2626',bg:'#fef2f2',border:'#fecaca'};if(score>=35)return{label:'ALTO',color:'#d97706',bg:'#fffbeb',border:'#fde68a'};if(score>=15)return{label:'MÉDIO',color:'#2563eb',bg:'#eff6ff',border:'#bfdbfe'};return{label:'BAIXO',color:'#16a34a',bg:'#f0fdf4',border:'#bbf7d0'};}
+function renderRiskKPIs(fTickets){if(!utilCacheLoaded)return'';const active=fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));const scored=active.map(t=>({t,s:riskScore(t)}));const critical=scored.filter(x=>x.s>=60);const high=scored.filter(x=>x.s>=35&&x.s<60);const medium=scored.filter(x=>x.s>=15&&x.s<35);const low=scored.filter(x=>x.s<15);const expired=active.filter(t=>{if(!t.expire||t.expire==='—'||t.status!=='Open')return false;return new Date(t.expire)<new Date();});const mkCard=(label,count,color,bg,border,onclick,sub)=>`<div style="padding:14px;background:${bg};border:1px solid ${border};border-radius:var(--r);cursor:pointer" onclick="${onclick}"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${color}">${count}</div><div style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;margin-top:2px">${label}</div>${sub?`<div style="font-size:10px;color:${color};opacity:.7;margin-top:3px">${sub}</div>`:''}</div>`;return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🎯 Score de Risco</div><button class="btn btn-sm" onclick="nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:${critical.length?'14px':'0'}">${mkCard('Crítico ≥60',critical.length,'#dc2626','#fef2f2','#fecaca',"nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)",critical.length?critical.map(x=>x.t.ticket).slice(0,2).join(', ')+(critical.length>2?'…':''):'Nenhum')}${mkCard('Alto 35–59',high.length,'#d97706','#fffbeb','#fde68a',"nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)",'')}${mkCard('Médio 15–34',medium.length,'#2563eb','#eff6ff','#bfdbfe',"nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)",'')}${mkCard('Baixo <15',low.length,'#16a34a','#f0fdf4','#bbf7d0',"nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)",'')}${mkCard('⚠ Vencidos',expired.length,'#7c3aed','#f5f3ff','#ddd6fe',"nav('tickets');setTimeout(()=>{document.getElementById('tbl-stat').value='Open';renderTable();},100)",expired.length?'ainda Open':'Nenhum')}</div>${critical.length?`<div><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Críticos agora</div><div style="display:flex;flex-wrap:wrap;gap:5px">${critical.sort((a,b)=>b.s-a.s).slice(0,15).map(({t,s})=>`<span style="font-size:11px;font-family:var(--mono);padding:3px 9px;border-radius:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;cursor:pointer" onclick="openTicketDetail(${t.id})" title="Score: ${s}">${t.ticket} · ${s}</span>`).join('')}</div></div>`:''}</div></div>`;}
+function renderSyncHealthCard(){setTimeout(()=>renderSyncHealth(),100);return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📡 Saúde do Sync</div><div id="sync-health-widget"><div style="color:var(--muted);font-size:12px">Carregando...</div></div></div></div>`;}
+async function renderSyncHealth(){try{const r=await fetch(`${SUPABASE_URL}/rest/v1/sync_811_log?select=state,status,started_at&order=started_at.desc&limit=40`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});if(!r.ok)return;const rows=await r.json();const el=document.getElementById('sync-health-widget');if(!el)return;const byState={IN:[],FL:[]};for(const row of rows){if(byState[row.state])byState[row.state].push(row);}let html='';for(const[state,logs]of Object.entries(byState)){if(!logs.length)continue;const last20=logs.slice(0,20);const successes=last20.filter(l=>l.status==='success').length;const rate=Math.round((successes/last20.length)*100);const color=rate>=90?'var(--green)':rate>=70?'var(--amber)':'var(--red)';const dots=last20.map(l=>`<span title="${l.started_at?.slice(0,16)||''}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${l.status==='success'?'var(--green)':'var(--red)'};margin:1px"></span>`).join('');html+=`<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-weight:700;font-family:var(--mono);width:24px;color:var(--text)">${state}</span><span style="font-size:16px;font-weight:700;font-family:var(--mono);color:${color};width:42px">${rate}%</span><div style="flex:1;display:flex;flex-wrap:wrap;gap:2px">${dots}</div><span style="font-size:10px;color:var(--muted)">${successes}/${last20.length}</span></div>`;}el.innerHTML=html||'<div style="color:var(--muted);font-size:12px">Sem dados</div>';}catch(e){}}
+function renderVelocity(fTickets,projStats){try{const vf=_velProjFilter||'';const week=7*86400000;const now=Date.now();const projVel=projStats.map(p=>{const ts=fTickets.filter(t=>t.projectId===p.id);const cleared4w=ts.filter(t=>{if(!t.history)return false;return t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));});});const ftPer4w=cleared4w.reduce((s,t)=>s+(t.footage||0),0);const ftPerWeek=ftPer4w/4;const remaining=p.openFtP||0;const weeksLeft=ftPerWeek>0?Math.ceil(remaining/ftPerWeek):null;return{...p,ftPerWeek:Math.round(ftPerWeek),weeksLeft};}).filter(p=>p.count>0);if(!projVel.length)return'';const projOpts='<option value="">Todos projetos</option>'+projVel.map(p=>`<option value="${p.id}"${vf===p.id?' selected':''}>${p.locs?p.locs+' ('+p.name+')':p.name}</option>`).join('');const toShow=vf?projVel.filter(p=>p.id===vf):projVel.filter(p=>p.ftPerWeek>0||p.openFtP>0).slice(0,8);const rows=toShow.map(p=>{const forecast=p.weeksLeft!==null?(p.weeksLeft<=0?'<span style="color:var(--green);font-weight:700">Concluído</span>':p.weeksLeft===1?'<span style="color:var(--amber);font-weight:700">~1 semana</span>':`<span style="color:var(--text2)">~${p.weeksLeft} sem.</span>`):'<span style="color:var(--muted)">sem dados</span>';const vel=p.ftPerWeek>0?`<span style="color:var(--green);font-family:var(--mono);font-weight:600">${p.ftPerWeek.toLocaleString()} ft/sem</span>`:'<span style="color:var(--muted);font-size:11px">parado</span>';return`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px;font-weight:600">${p.locs||p.name}</td><td style="padding:8px 6px">${vel}</td><td style="padding:8px 6px">${forecast}</td><td style="padding:8px 6px;min-width:120px"><div style="display:flex;align-items:center;gap:6px"><div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${p.pctClear}%;height:100%;background:var(--green);border-radius:3px"></div></div><span style="font-size:10px;font-family:var(--mono);color:var(--muted);width:28px">${p.pctClear}%</span></div></td><td style="padding:8px 6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${(p.openFtP||0).toLocaleString()} ft</td></tr>`;}).join('');return`<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🚀 Velocity & Previsão</div><select class="fi" onchange="_velProjFilter=this.value;renderAnalytics?renderAnalytics():renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">${projOpts}</select></div><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--border)"><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Projeto</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Velocidade</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Previsão</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Progresso</th><th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Restante</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;}catch(e){return'';}}
+/* ══════════ DASHBOARD COMPACT HELPERS ══════════ */
+function renderDashRiskSummary(fTickets) {
+  if (!utilCacheLoaded) return '';
+  const active = fTickets.filter(t => t.status !== 'Closed' && t.status !== 'Cancel' && !isSuperseded(t));
+  const scored = active.map(t => ({ t, s: riskScore(t) }));
+  const critical = scored.filter(x => x.s >= 60);
+  const high     = scored.filter(x => x.s >= 35 && x.s < 60);
+  const medium   = scored.filter(x => x.s >= 15 && x.s < 35);
+  const low      = scored.filter(x => x.s < 15);
+  const expired  = active.filter(t => t.expire && t.expire !== '—' && t.status === 'Open' && new Date(t.expire) < new Date());
+
   return `<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">
-    <div class="dash-card-title">📡 Saúde do Sync (últimas 20 execuções)</div>
-    <div id="sync-health-widget"><div style="color:var(--muted);font-size:12px">Carregando...</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="dash-card-title" style="margin:0">🎯 Score de Risco</div>
+      <button class="btn btn-sm" onclick="nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+      ${[
+        {label:'Crítico ≥60', count:critical.length, color:'#dc2626', bg:'#fef2f2', border:'#fecaca'},
+        {label:'Alto 35–59',  count:high.length,     color:'#d97706', bg:'#fffbeb', border:'#fde68a'},
+        {label:'Médio 15–34', count:medium.length,   color:'#2563eb', bg:'#eff6ff', border:'#bfdbfe'},
+        {label:'Baixo <15',   count:low.length,      color:'#16a34a', bg:'#f0fdf4', border:'#bbf7d0'},
+        {label:'⚠ Vencidos',  count:expired.length,  color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe'},
+      ].map(c => `<div style="padding:12px;background:${c.bg};border:1px solid ${c.border};border-radius:var(--r);cursor:pointer" onclick="nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)">
+        <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${c.color}">${c.count}</div>
+        <div style="font-size:9px;font-weight:700;color:${c.color};text-transform:uppercase;margin-top:2px">${c.label}</div>
+      </div>`).join('')}
+    </div>
+    ${critical.length ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px">${critical.sort((a,b)=>b.s-a.s).slice(0,10).map(({t,s})=>`<span style="font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;cursor:pointer" onclick="openTicketDetail(${t.id})">${t.ticket} · ${s}</span>`).join('')}</div>` : ''}
   </div></div>`;
+}
+
+function renderDashClearedToday(fTickets) {
+  const now = Date.now();
+  const day1 = now - 86400000;
+  const today = fTickets.filter(t => {
+    if (!t.history) return false;
+    return t.history.some(h => {
+      const a = (h.action || '').toLowerCase();
+      return h.ts >= day1 && (a.includes('→ clear') || a.includes('auto 811') || a.includes('auto-clear'));
+    });
+  });
+  const ft = today.reduce((s, t) => s + (t.footage || 0), 0);
+
+  // Tickets vencendo hoje/amanhã
+  const urgent = fTickets.filter(t => {
+    if (!t.expire || t.expire === '—' || t.status === 'Closed' || t.status === 'Cancel') return false;
+    const diff = (new Date(t.expire) - now) / 86400000;
+    return diff >= 0 && diff <= 2;
+  });
+
+  return `<div class="dash-row" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="dash-card">
+      <div class="dash-card-title">✅ Clareados hoje</div>
+      <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--green)">${today.length}</div>
+      <div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">${ft.toLocaleString()} ft</div>
+      ${today.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:3px">${today.slice(0,8).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:8px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);cursor:pointer" onclick="openTicketDetail(${t.id})">${t.ticket}</span>`).join('')}</div>` : '<div style="font-size:12px;color:var(--muted);margin-top:8px">Nenhum ainda</div>'}
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">🔥 Vencendo em 48h</div>
+      <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:${urgent.length?'var(--red)':'var(--green)'}">${urgent.length}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">${urgent.length ? 'requerem atenção imediata' : 'Nenhum urgente'}</div>
+      ${urgent.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:3px">${urgent.slice(0,8).map(t=>`<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:8px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);cursor:pointer" onclick="openTicketDetail(${t.id})">${t.ticket} · ${t.expire}</span>`).join('')}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+/* ══════════ ANALYTICS PAGE ══════════ */
+function renderAnalytics() {
+  const el = document.getElementById('analytics-content');
+  if (!el) return;
+  const states = [...new Set(tickets.map(t => t.state).filter(Boolean))].sort();
+  const dsf = dashStateVal;
+  const fTickets = dsf ? tickets.filter(t => t.state === dsf && !isSuperseded(t)) : tickets.filter(t => !isSuperseded(t));
+  const fProjects = dsf ? projects.filter(p => p.state === dsf) : projects;
+  const projStats = fProjects.filter(p => p.status !== 'Completed').map(p => {
+    const ts = fTickets.filter(t => t.projectId === p.id);
+    const clearFtP = ts.filter(t => t.status === 'Clear').reduce((s,t) => s+(t.footage||0), 0);
+    const openFtP  = ts.filter(t => t.status === 'Open').reduce((s,t)  => s+(t.footage||0), 0);
+    const concluidoFt = ts.filter(t => t.status === 'Closed').reduce((s,t) => s+(t.footage||0), 0);
+    const damageFt = ts.filter(t => t.status === 'Damage').reduce((s,t) => s+(t.footage||0), 0);
+    const ticketFt = ts.reduce((s,t) => s+(t.footage||0), 0);
+    const totalFt  = p.totalFeet || ticketFt || 1;
+    const locs = [...new Set(ts.map(t => t.location).filter(Boolean).map(l => l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ') || '';
+    return { name:p.name, id:p.id, count:ts.length, clearFtP, openFtP, concluidoFt, damageFt, ticketFt, totalFt,
+      pctClear:totalFt>0?Math.round(clearFtP/totalFt*100):0, pctOpen:totalFt>0?Math.round(openFtP/totalFt*100):0,
+      pctConcluido:totalFt>0?Math.round(concluidoFt/totalFt*100):0, pctDamage:totalFt>0?Math.round(damageFt/totalFt*100):0,
+      hasTotalFromSheet:!!p.totalFeet, locs, state:p.state||'' };
+  }).sort((a,b) => b.count-a.count);
+
+  const stateFilter = `<select class="fi" id="analytics-state-filter" onchange="dashStateVal=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>${states.map(s=>`<option value="${s}"${dsf===s?' selected':''}>${s}</option>`).join('')}</select>`;
+
+  el.innerHTML = `
+    <div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">${new Date().toLocaleDateString('pt-BR')}</span><span style="margin-left:auto">${stateFilter}</span></div>
+    ${renderRiskKPIs(fTickets)}
+    ${renderProgressoFootage(fTickets, projStats)}
+    ${renderVelocity(fTickets, projStats)}
+    ${renderClearedStats(fTickets)}
+    ${renderClearTimeMetrics(fTickets)}
+    ${renderUtilSummaryHtml()}
+    ${renderSyncHealthCard()}
+    ${renderWeeklyEvolution(fTickets)}
+  `;
 }
 
 function renderClearedStats(fTickets){
@@ -787,7 +893,7 @@ function filterByUtil(utilName){
   },100);
 }
 
-function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();}
+function nav(page){if(isSharedView)return;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.snav-item').forEach(t=>t.classList.remove('active'));document.getElementById('pg-'+page).classList.add('active');const btn=document.querySelector('.snav-item[data-page="'+page+'"]');if(btn)btn.classList.add('active');if(page==='map'){setTimeout(()=>{initMap();if(map)map.invalidateSize();},80);}if(page==='proj')renderProjects();if(page==='tickets')renderTable();if(page==='dash')renderDash();if(page==='contacts')renderContacts();if(page==='analytics')renderAnalytics();}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 let _t2;
@@ -839,219 +945,19 @@ function exportAllPending(){
 }
 
 
-/* ══════════ RISK SCORE ══════════ */
-function riskScore(t) {
-  if(!utilCacheLoaded) return 0;
-  let score = 0;
-  const now = Date.now();
-
-  // 1. Proximidade do vencimento
-  if (t.expire && t.expire !== '—') {
-    const exp = new Date(t.expire);
-    const diff = (exp - now) / 86400000; // dias
-    if (diff < 0)        score += 60; // vencido
-    else if (diff <= 2)  score += 45;
-    else if (diff <= 5)  score += 30;
-    else if (diff <= 10) score += 18;
-    else if (diff <= 20) score += 8;
-  }
-
-  // 2. Utilities pendentes
-  const pends = getTicketPendingUtils(String(t.ticket).trim());
-  score += Math.min(pends.length * 8, 35);
-
-  // 3. Status
-  if (t.status === 'Damage') score += 30;
-  else if (t.status === 'Clear') score = Math.max(score - 20, 0);
-  else if (t.status === 'Closed' || t.status === 'Cancel') return 0;
-
-  // 4. Inatividade (último evento do history)
-  if (t.history && t.history.length) {
-    const lastTs = t.history[t.history.length - 1].ts || 0;
-    const daysSince = (now - lastTs) / 86400000;
-    if (daysSince > 30) score += 15;
-    else if (daysSince > 14) score += 8;
-  }
-
-  // 5. Sem trajeto (visibilidade reduzida)
-  if (!t.fieldPath || t.fieldPath.length < 2) score += 3;
-
-  return Math.min(score, 100);
-}
-
-function riskLabel(score) {
-  if (score >= 60) return { label: 'CRÍTICO', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
-  if (score >= 35) return { label: 'ALTO',    color: '#d97706', bg: '#fffbeb', border: '#fde68a' };
-  if (score >= 15) return { label: 'MÉDIO',   color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' };
-  return               { label: 'BAIXO',   color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' };
-}
-
-function renderRiskKPIs(fTickets) {
-  if (!utilCacheLoaded) return '';
-  const active = fTickets.filter(t => t.status !== 'Closed' && t.status !== 'Cancel' && !isSuperseded(t));
-  const scored = active.map(t => ({ t, s: riskScore(t) }));
-  const critical = scored.filter(x => x.s >= 60);
-  const high     = scored.filter(x => x.s >= 35 && x.s < 60);
-  const medium   = scored.filter(x => x.s >= 15 && x.s < 35);
-  const low      = scored.filter(x => x.s < 15);
-  const expired  = active.filter(t => {
-    if (!t.expire || t.expire === '—' || t.status !== 'Open') return false;
-    return new Date(t.expire) < new Date();
-  });
-
-  const mkCard = (label, count, color, bg, border, onclick, sub) =>
-    `<div style="padding:14px;background:${bg};border:1px solid ${border};border-radius:var(--r);cursor:pointer;transition:transform .1s" onclick="${onclick}" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform=''">
-      <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${color}">${count}</div>
-      <div style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;margin-top:2px">${label}</div>
-      ${sub ? `<div style="font-size:10px;color:${color};opacity:.7;margin-top:3px">${sub}</div>` : ''}
-    </div>`;
-
-  return `<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div class="dash-card-title" style="margin:0">🎯 Score de Risco dos Tickets</div>
-      <button class="btn btn-sm" onclick="nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)" style="font-size:11px">Ver tabela ordenada por risco</button>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">
-      ${mkCard('Crítico ≥60', critical.length, '#dc2626','#fef2f2','#fecaca', "nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)", critical.length ? critical.map(x=>x.t.ticket).slice(0,2).join(', ')+(critical.length>2?'…':'') : 'Nenhum')}
-      ${mkCard('Alto 35–59',  high.length,     '#d97706','#fffbeb','#fde68a', "nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)", '')}
-      ${mkCard('Médio 15–34', medium.length,   '#2563eb','#eff6ff','#bfdbfe', "nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)", '')}
-      ${mkCard('Baixo <15',   low.length,      '#16a34a','#f0fdf4','#bbf7d0', "nav('tickets');setTimeout(()=>{sortCol='risk';sortAsc=false;renderTable();},100)", '')}
-      ${mkCard('⚠ Vencidos',  expired.length,  '#7c3aed','#f5f3ff','#ddd6fe', "nav('tickets');setTimeout(()=>{document.getElementById('tbl-stat').value='Open';renderTable();},100)", expired.length ? 'ainda Open' : 'Nenhum')}
-    </div>
-    ${critical.length ? `<div style="margin-top:4px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Críticos agora</div><div style="display:flex;flex-wrap:wrap;gap:5px">${critical.sort((a,b)=>b.s-a.s).slice(0,15).map(({t,s})=>`<span style="font-size:11px;font-family:var(--mono);padding:3px 9px;border-radius:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;cursor:pointer" onclick="openTicketDetail(${t.id})" title="Score: ${s}">${t.ticket} · ${s}</span>`).join('')}</div></div>` : ''}
-  </div></div>`;
-}
-
-/* ══════════ VELOCITY + PREVISÃO ══════════ */
-function renderVelocity(fTickets, projStats) {
-  try {
-    const vf = window._velProjFilter || '';
-    const week = 7 * 86400000;
-    const now = Date.now();
-
-    // Calcula velocity semanal por projeto (ft cleared / semana nas últimas 4 semanas)
-    const projVel = projStats.map(p => {
-      const ts = fTickets.filter(t => t.projectId === p.id);
-      const cleared4w = ts.filter(t => {
-        if (!t.history) return false;
-        return t.history.some(h => {
-          const a = (h.action || '').toLowerCase();
-          return h.ts >= now - 4 * week && (a.includes('→ clear') || a.includes('auto 811') || a.includes('auto-clear'));
-        });
-      });
-      const ftPer4w = cleared4w.reduce((s, t) => s + (t.footage || 0), 0);
-      const ftPerWeek = ftPer4w / 4;
-      const remaining = p.openFtP || 0;
-      const weeksLeft = ftPerWeek > 0 ? Math.ceil(remaining / ftPerWeek) : null;
-      return { ...p, ftPerWeek: Math.round(ftPerWeek), weeksLeft };
-    }).filter(p => p.count > 0);
-
-    if (!projVel.length) return '';
-
-    const projOpts = '<option value="">Todos projetos</option>' +
-      projVel.map(p => `<option value="${p.id}"${vf===p.id?' selected':''}>${p.locs?p.locs+' ('+p.name+')':p.name}</option>`).join('');
-
-    const sel = `<select class="fi" onchange="window._velProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">${projOpts}</select>`;
-
-    const toShow = vf ? projVel.filter(p => p.id === vf) : projVel.filter(p => p.ftPerWeek > 0 || p.openFtP > 0).slice(0, 8);
-
-    let rows = toShow.map(p => {
-      const bar = p.pctClear;
-      const forecast = p.weeksLeft !== null
-        ? (p.weeksLeft <= 0 ? '<span style="color:var(--green);font-weight:700">Concluído</span>'
-          : p.weeksLeft === 1 ? '<span style="color:var(--amber);font-weight:700">~1 semana</span>'
-          : `<span style="color:var(--text2)">~${p.weeksLeft} sem.</span>`)
-        : '<span style="color:var(--muted)">sem dados</span>';
-      const vel = p.ftPerWeek > 0
-        ? `<span style="color:var(--green);font-family:var(--mono);font-weight:600">${p.ftPerWeek.toLocaleString()} ft/sem</span>`
-        : '<span style="color:var(--muted);font-size:11px">parado</span>';
-      return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:8px 6px;font-size:12px;font-weight:600;color:var(--text)">${p.locs||p.name}</td>
-        <td style="padding:8px 6px">${vel}</td>
-        <td style="padding:8px 6px">${forecast}</td>
-        <td style="padding:8px 6px;min-width:120px">
-          <div style="display:flex;align-items:center;gap:6px">
-            <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-              <div style="width:${bar}%;height:100%;background:var(--green);border-radius:3px"></div>
-            </div>
-            <span style="font-size:10px;font-family:var(--mono);color:var(--muted);width:28px">${bar}%</span>
-          </div>
-        </td>
-        <td style="padding:8px 6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${(p.openFtP||0).toLocaleString()} ft</td>
-      </tr>`;
-    }).join('');
-
-    return `<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div class="dash-card-title" style="margin:0">🚀 Velocity de Clearance & Previsão</div>
-        ${sel}
-      </div>
-      <table style="width:100%;border-collapse:collapse">
-        <thead><tr style="border-bottom:2px solid var(--border)">
-          <th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Projeto</th>
-          <th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Velocidade</th>
-          <th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Previsão</th>
-          <th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Progresso</th>
-          <th style="padding:6px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Restante</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div></div>`;
-  } catch(e) { console.error('Velocity error:', e); return ''; }
-}
-
-/* ══════════ SYNC SUCCESS RATE ══════════ */
-async function renderSyncHealth() {
-  try {
-    const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/sync_811_log?select=state,status,started_at&order=started_at.desc&limit=40`,
-      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-    );
-    if (!r.ok) return;
-    const rows = await r.json();
-    const el = document.getElementById('sync-health-widget');
-    if (!el) return;
-
-    const byState = { IN: [], FL: [] };
-    for (const row of rows) {
-      if (byState[row.state]) byState[row.state].push(row);
-    }
-
-    let html = '';
-    for (const [state, logs] of Object.entries(byState)) {
-      if (!logs.length) continue;
-      const last20 = logs.slice(0, 20);
-      const successes = last20.filter(l => l.status === 'success').length;
-      const rate = Math.round((successes / last20.length) * 100);
-      const color = rate >= 90 ? 'var(--green)' : rate >= 70 ? 'var(--amber)' : 'var(--red)';
-      const dots = last20.map(l =>
-        `<span title="${l.started_at?.slice(0,16)||''}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${l.status==='success'?'var(--green)':'var(--red)'};margin:1px"></span>`
-      ).join('');
-      html += `<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">
-        <span style="font-weight:700;font-family:var(--mono);width:24px;color:var(--text)">${state}</span>
-        <span style="font-size:16px;font-weight:700;font-family:var(--mono);color:${color};width:42px">${rate}%</span>
-        <div style="flex:1;display:flex;flex-wrap:wrap;gap:2px">${dots}</div>
-        <span style="font-size:10px;color:var(--muted)">${successes}/${last20.length}</span>
-      </div>`;
-    }
-    el.innerHTML = html || '<div style="color:var(--muted);font-size:12px">Sem dados</div>';
-  } catch(e) { console.error('SyncHealth error:', e); }
-}
-
-
 async function loadLastSync(){
   try{
     const r=await fetch(`${SUPABASE_URL}/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,status&order=finished_at.desc&limit=20`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
-    if(!r.ok)return;
+    if(!r.ok){console.warn('[LastSync] HTTP',r.status);return;}
     const rows=await r.json();
     const byState={};
     for(const row of rows){if(!byState[row.state])byState[row.state]=row;}
     const parts=[];
     for(const state of ['IN','FL']){
-      const row=byState[state];if(!row||!row.finished_at){parts.push(`${state}: —`);continue;}
+      const row=byState[state];if(!row||!row.finished_at){parts.push(state+': —');continue;}
       const d=new Date(row.finished_at);const diffMin=Math.round((Date.now()-d.getTime())/60000);
       let ago;if(diffMin<2)ago='agora';else if(diffMin<60)ago=diffMin+'min atrás';else if(diffMin<120)ago='1h atrás';else if(diffMin<1440)ago=Math.round(diffMin/60)+'h atrás';else ago=Math.round(diffMin/1440)+'d atrás';
-      parts.push((row.status==='success'?'🟢':'🔴')+' '+state+': '+ago+' ('+(row.tickets_checked||0)+' tickets)');
+      parts.push((row.status==='success'?'🟢':'🔴')+' '+state+': '+ago+' ('+(row.tickets_checked||0)+')');
     }
     const el=document.getElementById('last-sync-status');
     if(el)el.innerHTML=parts.join('<br>');

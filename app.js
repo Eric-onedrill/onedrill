@@ -233,12 +233,98 @@ function enterSharedView(pid){
 
   renderSharedList();
   setTimeout(()=>initSharedMap(p),150);
+
+  // ── FIELD ALERTS: tickets vencendo/vencidos neste projeto ──
+  setTimeout(()=>showFieldAlerts(ts),500);
+}
+
+function showFieldAlerts(projTickets){
+  const now=new Date();
+  const active=projTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel');
+  const expired=active.filter(t=>t.expire&&t.expire!=='—'&&new Date(t.expire)<now);
+  const expiring3d=active.filter(t=>{
+    if(!t.expire||t.expire==='—')return false;
+    const d=new Date(t.expire);const diff=(d-now)/86400000;
+    return diff>=0&&diff<=3;
+  });
+  const expiring7d=active.filter(t=>{
+    if(!t.expire||t.expire==='—')return false;
+    const d=new Date(t.expire);const diff=(d-now)/86400000;
+    return diff>3&&diff<=7;
+  });
+
+  // Remove previous field alert if any
+  const prev=document.getElementById('field-alert-overlay');if(prev)prev.remove();
+  const prevBanner=document.getElementById('field-expiring-banner');if(prevBanner)prevBanner.remove();
+
+  // Fullscreen alert if there are expired or expiring-in-3d tickets
+  if(expired.length||expiring3d.length){
+    const el=document.createElement('div');
+    el.id='field-alert-overlay';
+    const hasExpired=expired.length>0;
+    const bgColor=hasExpired?'rgba(220,38,38,.92)':'rgba(217,119,6,.92)';
+    const icon=hasExpired?'⛔':'⚠️';
+    const title=hasExpired?'ATENÇÃO — TICKETS VENCIDOS':'ATENÇÃO — TICKETS VENCENDO';
+    const subtitle=hasExpired
+      ?expired.length+' ticket'+(expired.length>1?'s':'')+' vencido'+(expired.length>1?'s':'')+' — NÃO TRABALHAR'
+      :expiring3d.length+' ticket'+(expiring3d.length>1?'s':'')+' vence'+(expiring3d.length>1?'m':'')+' em até 3 dias';
+
+    let listHtml='';
+    if(expired.length){
+      listHtml+='<div style="margin-bottom:12px"><div style="font-size:12px;color:rgba(255,255,255,.7);text-transform:uppercase;margin-bottom:6px;font-weight:600">Vencidos — ligar ao office</div>';
+      listHtml+=expired.slice(0,6).map(t=>'<div style="font-family:var(--mono);font-size:14px;color:white;padding:4px 12px;background:rgba(0,0,0,.25);border-radius:8px;margin:3px 0">'+t.ticket+' · '+t.expire+'</div>').join('');
+      if(expired.length>6)listHtml+='<div style="font-size:12px;color:rgba(255,255,255,.6)">+'+(expired.length-6)+' mais</div>';
+      listHtml+='</div>';
+    }
+    if(expiring3d.length){
+      listHtml+='<div><div style="font-size:12px;color:rgba(255,255,255,.7);text-transform:uppercase;margin-bottom:6px;font-weight:600">Vencem em ≤3 dias</div>';
+      listHtml+=expiring3d.slice(0,6).map(t=>{const d=Math.round((new Date(t.expire)-now)/86400000);return'<div style="font-family:var(--mono);font-size:14px;color:white;padding:4px 12px;background:rgba(0,0,0,.2);border-radius:8px;margin:3px 0">'+t.ticket+' · '+t.expire+' ('+d+'d)</div>';}).join('');
+      listHtml+='</div>';
+    }
+
+    el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:20px;text-align:center;overflow-y:auto">'
+    +'<div style="font-size:50px;margin-bottom:12px">'+icon+'</div>'
+    +'<div style="font-size:24px;font-weight:700;color:white;margin-bottom:6px;text-shadow:0 2px 8px rgba(0,0,0,.3)">'+title+'</div>'
+    +'<div style="font-size:16px;color:rgba(255,255,255,.9);margin-bottom:16px">'+subtitle+'</div>'
+    +(hasExpired?'<div style="background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.5);border-radius:12px;padding:12px 24px;margin-bottom:16px"><div style="font-size:18px;font-weight:700;color:white">📞 LIGAR AO OFFICE</div><div style="font-size:13px;color:rgba(255,255,255,.8)">Call the office before any work</div></div>':'')
+    +'<div style="max-width:320px;width:100%">'+listHtml+'</div>'
+    +'<div style="font-size:13px;color:rgba(255,255,255,.5);margin-top:16px">Toque para fechar</div>'
+    +'</div>';
+    Object.assign(el.style,{position:'fixed',top:'0',left:'0',width:'100%',height:'100%',background:bgColor,zIndex:'99999',cursor:'pointer',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',animation:'expFadeIn .3s ease'});
+    el.onclick=()=>{el.style.animation='expFadeOut .3s ease';setTimeout(()=>el.remove(),280);};
+    document.body.appendChild(el);
+    setTimeout(()=>{const e=document.getElementById('field-alert-overlay');if(e){e.style.animation='expFadeOut .3s ease';setTimeout(()=>{if(e.parentNode)e.remove();},280);}},hasExpired?6000:4000);
+  }
+
+  // Sticky banner at top of shared view (always visible while there are expiring tickets)
+  const allUrgent=[...expired,...expiring3d,...expiring7d];
+  if(allUrgent.length){
+    const banner=document.createElement('div');
+    banner.id='field-expiring-banner';
+    const bannerColor=expired.length?'#dc2626':expiring3d.length?'#d97706':'#2563eb';
+    const bannerBg=expired.length?'#fef2f2':expiring3d.length?'#fffbeb':'#eff6ff';
+    const bannerBorder=expired.length?'#fecaca':expiring3d.length?'#fde68a':'#bfdbfe';
+    let parts=[];
+    if(expired.length)parts.push('⛔ '+expired.length+' vencido'+(expired.length>1?'s':''));
+    if(expiring3d.length)parts.push('⚠ '+expiring3d.length+' vence'+(expiring3d.length>1?'m':'')+' em 3d');
+    if(expiring7d.length)parts.push(expiring7d.length+' vence'+(expiring7d.length>1?'m':'')+' em 7d');
+
+    banner.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">'
+    +'<span style="font-weight:700;font-size:12px">'+parts.join(' · ')+'</span>'
+    +'<span style="font-size:10px;font-family:var(--mono)">'+allUrgent.slice(0,4).map(t=>t.ticket).join(', ')+(allUrgent.length>4?' +':'')+'</span>'
+    +'</div>';
+    Object.assign(banner.style,{position:'fixed',top:'0',left:'0',width:'100%',padding:'8px 14px',background:bannerBg,color:bannerColor,borderBottom:'2px solid '+bannerBorder,zIndex:'9998',fontSize:'12px',boxSizing:'border-box',animation:'expFadeIn .3s ease'});
+    document.body.appendChild(banner);
+  }
 }
 
 function exitSharedView(){
   isSharedView=false;
   document.getElementById('pg-shared').classList.remove('active');
   history.replaceState(null,'',window.location.pathname);
+  // Remove field alert banner
+  const fb=document.getElementById('field-expiring-banner');if(fb)fb.remove();
+  const fa=document.getElementById('field-alert-overlay');if(fa)fa.remove();
   document.getElementById('login-screen').style.display='flex';
 }
 
@@ -469,15 +555,19 @@ function showExpiredAlert(t){
   +'<div style="font-size:28px;font-weight:700;color:white;margin-bottom:8px;text-shadow:0 2px 8px rgba(0,0,0,.3)">NÃO TRABALHAR</div>'
   +'<div style="font-size:20px;color:rgba(255,255,255,.9);margin-bottom:16px">TICKET VENCIDO</div>'
   +'<div style="font-family:var(--mono);font-size:24px;color:white;padding:8px 20px;background:rgba(0,0,0,.3);border-radius:12px;margin-bottom:8px">'+t.ticket+'</div>'
-  +'<div style="font-size:16px;color:rgba(255,255,255,.8)">Expirou em '+t.expire+'</div>'
-  +'<div style="font-size:13px;color:rgba(255,255,255,.5);margin-top:20px">Toque para fechar</div>'
+  +'<div style="font-size:16px;color:rgba(255,255,255,.8);margin-bottom:20px">Expirou em '+t.expire+'</div>'
+  +'<div style="background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.5);border-radius:12px;padding:14px 28px;margin-bottom:16px">'
+  +'<div style="font-size:20px;font-weight:700;color:white">📞 LIGAR AO OFFICE</div>'
+  +'<div style="font-size:14px;color:rgba(255,255,255,.8);margin-top:4px">Call the office before any work</div>'
+  +'</div>'
+  +'<div style="font-size:13px;color:rgba(255,255,255,.5)">Toque para fechar</div>'
   +'</div>';
   Object.assign(el.style,{position:'fixed',top:'0',left:'0',width:'100%',height:'100%',background:'rgba(220,38,38,.92)',zIndex:'99999',cursor:'pointer',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',animation:'expFadeIn .3s ease'});
   el.onclick=()=>{el.style.animation='expFadeOut .3s ease';setTimeout(()=>{el.remove();_expAlertEl=null;},280);};
   document.body.appendChild(el);
   _expAlertEl=el;
-  // Auto-dismiss after 4 seconds
-  setTimeout(()=>{if(_expAlertEl===el){el.style.animation='expFadeOut .3s ease';setTimeout(()=>{el.remove();if(_expAlertEl===el)_expAlertEl=null;},280);}},4000);
+  // Auto-dismiss after 5 seconds (longer for field workers to read)
+  setTimeout(()=>{if(_expAlertEl===el){el.style.animation='expFadeOut .3s ease';setTimeout(()=>{el.remove();if(_expAlertEl===el)_expAlertEl=null;},280);}},5000);
 }
 
 // Inject CSS animations for expired alert (once)
@@ -1042,7 +1132,7 @@ function renderVelocity(fT,ps){
     const pv=ps.filter(p=>p.count>0);
     if(!pv.length)return'';
     const opts='<option value="">Todos projetos</option>'+pv.map(p=>'<option value="'+p.id+'"'+(vf===p.id?' selected':'')+'>'+(p.locs?p.locs+' ('+p.name+')':p.name)+'</option>').join('');
-    const sh=vf?pv.filter(p=>p.id===vf):pv.filter(p=>(p.ftPerWeek||0)>0||p.openFtP>0).slice(0,8);
+    const sh=vf?pv.filter(p=>p.id===vf):pv;
     if(!sh.length)return'';
     const rows=sh.map(p=>{
       const ft=p.ftPerWeek||0;const wl=p.weeksLeft;

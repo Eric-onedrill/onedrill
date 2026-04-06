@@ -108,7 +108,7 @@
   </div>
   <div class="snav-footer">
     <div class="snav-sync"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
-    <div id="last-sync-status" title="Última atualização dos portais 811" style="font-size:10px;color:var(--muted);line-height:1.8;padding:3px 0 4px;font-family:var(--mono)">🟡 IN: —<br>🟡 FL: —</div>
+    <div id="last-sync-status" style="font-size:10px;color:var(--muted);line-height:1.8;padding:3px 0 4px;font-family:var(--mono)">🟡 IN: —<br>🟡 FL: —</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span class="role-badge" id="role-badge">VIEWER</span>
       <div style="display:flex;gap:6px;align-items:center">
@@ -232,6 +232,7 @@
         <th onclick="sortBy('status')">Status</th>
         <th onclick="sortBy('footage')">Footage</th>
         <th onclick="sortBy('expire')">Expira</th>
+        <th id="tbl-head-risk" onclick="sortBy('risk')" style="cursor:pointer" title="Ordenar por risco">⚠ Risco</th>
         <th onclick="sortBy('tipo')">Tipo</th>
         <th>Ações</th>
       </tr></thead>
@@ -256,10 +257,7 @@
   </div>
 </div>
 
-<div class="page" id="pg-analytics">
-  <div class="dash-inner" id="analytics-content"></div>
-</div>
-
+<div class="page" id="pg-analytics"><div class="dash-inner" id="analytics-content"></div></div>
 </div><!-- /main-area -->
 </div><!-- /app-shell -->
 

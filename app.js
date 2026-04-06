@@ -654,7 +654,7 @@ function renderDash(){
   +'</div>'
 
   // ── 3-COLUMN GRID ────────────────────────────────────────────────────────
-  +'<div style="display:grid;grid-template-columns:210px 1.3fr 1fr;gap:12px;align-items:start">'
+  +'<div style="display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:12px;align-items:start">'
 
   // ── COL 1: SCORE + UTILITIES ──────────────────────────────────────────
   +'<div style="display:flex;flex-direction:column;gap:10px">'

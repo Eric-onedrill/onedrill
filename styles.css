@@ -115,6 +115,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 /* ── Dashboard ── */
 #pg-dash{flex-direction:column;overflow-y:auto;background:var(--bg)}
+#pg-analytics{flex-direction:column;overflow-y:auto;background:var(--bg)}
 .dash-inner{padding:28px;max-width:1280px;width:100%;margin:0 auto}
 .page-title{font-size:20px;font-weight:700;color:var(--text);margin-bottom:20px;letter-spacing:-.3px;display:flex;align-items:center;gap:12px}
 .stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:24px}

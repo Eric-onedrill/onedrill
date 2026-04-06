@@ -9,6 +9,7 @@
 
 const SUPABASE_URL='https://ofbqtaulvzeltfpqcjhh.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE';
+const ADMIN_EMAILS=['engineering@onedrill.us','carlos@onedrill.us'];
 
 let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoords={};
 let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
@@ -153,14 +154,12 @@ async function tryLogin(){
       if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
       else if(roleErr){
         // RLS bloqueando app_roles — fallback por email
-        const admins=['engineering@onedrill.us','carlos@onedrill.us'];
-        isAdmin=admins.includes((data.user.email||'').toLowerCase());
+        isAdmin=ADMIN_EMAILS.includes((data.user.email||'').toLowerCase());
         role=isAdmin?'admin':'viewer';
         console.warn('[Auth] app_roles inacessivel ('+roleErr.code+'), fallback email:',data.user.email,'->',role);
       }else{isAdmin=false;role='viewer';}
     }catch(e){
-      const admins=['engineering@onedrill.us','carlos@onedrill.us'];
-      isAdmin=admins.includes((data.user.email||'').toLowerCase());
+      isAdmin=ADMIN_EMAILS.includes((data.user.email||'').toLowerCase());
       role=isAdmin?'admin':'viewer';
     }
     document.getElementById('login-screen').style.display='none';
@@ -771,6 +770,13 @@ function renderDash(){
   +'<div style="font-size:9px;color:var(--muted)">'+ago(h.ts||0)+'</div>'
   +'</div></div>').join('')
   +'</div>'
+
+  // Health / Sync Status card
+  +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
+  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Saúde do Sync</div>'
+  +'<div id="health-card"><div style="color:var(--muted);font-size:12px">Carregando...</div></div>'
+  +'</div>'
+
   +'</div>' // end col2
 
   +'</div>' // end 3-col grid
@@ -996,7 +1002,7 @@ function renderRiskAnalytics(fT){
 
 async function loadLastSync(){
   try{
-    const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,status&finished_at=not.is.null&order=finished_at.desc&limit=20',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
+    const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,finished_at,started_at,tickets_checked,tickets_updated,status,error_msg&finished_at=not.is.null&order=finished_at.desc&limit=20',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
     if(!r.ok){console.warn('[LastSync] HTTP',r.status);return;}
     const rows=await r.json();
     if(!rows||!rows.length){console.warn('[LastSync] Nenhum registro em sync_811_log');return;}
@@ -1009,6 +1015,11 @@ async function loadLastSync(){
       parts.push((row.status==='success'?'🟢':'🔴')+' '+st+': '+ago+' ('+(row.tickets_checked||0)+')');
     }
     const el=document.getElementById('last-sync-status');if(el)el.innerHTML=parts.join('<br>');
+
+    // Store health data for dashboard card
+    window._syncHealth={states:by,recentErrors:rows.filter(x=>x.status==='error').slice(0,5),allRecent:rows};
+    renderHealthCard();
+
     // Use most recent sync from any state
     const allFinished=Object.values(by).filter(x=>x&&x.finished_at).sort((a,b)=>new Date(b.finished_at)-new Date(a.finished_at));
     const latest=allFinished[0];
@@ -1022,6 +1033,46 @@ async function loadLastSync(){
       updateSyncTimer();
     }
   }catch(e){console.error('[LastSync]',e);}
+}
+
+function renderHealthCard(){
+  const el=document.getElementById('health-card');if(!el)return;
+  const h=window._syncHealth;if(!h){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Carregando...</div>';return;}
+
+  let html='';
+  for(const st of ['IN','FL']){
+    const row=h.states[st];
+    if(!row){html+='<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:600">'+st+'</span> <span style="color:var(--muted)">— sem dados</span></div>';continue;}
+    const d=new Date(row.finished_at);
+    const dm=Math.round((Date.now()-d.getTime())/60000);
+    let ago;if(dm<2)ago='agora';else if(dm<60)ago=dm+'min';else if(dm<1440)ago=Math.round(dm/60)+'h';else ago=Math.round(dm/1440)+'d';
+    const isOk=row.status==='success';
+    const isStale=dm>180; // >3h sem sync
+    const dot=isOk&&!isStale?'🟢':isOk&&isStale?'🟡':'🔴';
+    const statusLabel=isOk?(isStale?'atrasado':'ok'):'erro';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">'
+      +'<div><span style="font-size:12px;font-weight:600">'+dot+' '+st+'</span>'
+      +'<span style="font-size:10px;color:var(--muted);margin-left:6px">'+ago+'</span></div>'
+      +'<div style="text-align:right"><span style="font-size:11px;font-family:var(--mono);color:'+(isOk?'var(--green)':'var(--red)')+'">'+statusLabel+'</span>'
+      +'<span style="font-size:10px;color:var(--muted);margin-left:6px">'+(row.tickets_checked||0)+' tickets · '+(row.tickets_updated||0)+' respostas</span></div>'
+      +'</div>';
+  }
+
+  // Recent errors
+  if(h.recentErrors.length){
+    html+='<div style="margin-top:6px;font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em">Erros recentes</div>';
+    for(const e of h.recentErrors.slice(0,3)){
+      const ed=new Date(e.finished_at||e.started_at);
+      const edm=Math.round((Date.now()-ed.getTime())/60000);
+      let eAgo;if(edm<60)eAgo=edm+'min';else if(edm<1440)eAgo=Math.round(edm/60)+'h';else eAgo=Math.round(edm/1440)+'d';
+      html+='<div style="font-size:10px;color:var(--red);padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        +'<span style="color:var(--muted)">'+e.state+' '+eAgo+'</span> '+(e.error_msg||'sem detalhes').substring(0,60)+'</div>';
+    }
+  }else{
+    html+='<div style="margin-top:6px;font-size:10px;color:var(--green)">Sem erros recentes</div>';
+  }
+
+  el.innerHTML=html;
 }
 
 function riskScore(t){if(!utilCacheLoaded)return 0;let s=0;const now=Date.now();if(t.expire&&t.expire!=='—'){const diff=(new Date(t.expire)-now)/86400000;if(diff<0)s+=60;else if(diff<=2)s+=45;else if(diff<=5)s+=30;else if(diff<=10)s+=18;else if(diff<=20)s+=8;}const pends=getTicketPendingUtils(String(t.ticket).trim());s+=Math.min(pends.length*8,35);if(t.status==='Damage')s+=30;else if(t.status==='Clear')s=Math.max(s-20,0);else if(t.status==='Closed'||t.status==='Cancel')return 0;if(t.history&&t.history.length){const ds=(now-(t.history[t.history.length-1].ts||0))/86400000;if(ds>30)s+=15;else if(ds>14)s+=8;}return Math.min(s,100);}
@@ -1367,7 +1418,22 @@ function toggleMobNav(){
 /* ══════════ CONTACTS ══════════ */
 let utilContacts=[],editingContactId=null;
 async function loadContacts(){
-  try{const r=await fetch(SUPABASE_URL+'/rest/v1/utility_contacts?select=*&order=utility_name',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});if(r.ok)utilContacts=await r.json();else utilContacts=[];console.log('[Contacts]',utilContacts.length,'utilities com contatos');}catch(e){console.error('Contacts load error:',e);utilContacts=[];}
+  try{
+    let allData=[];
+    let offset=0;
+    const pageSize=1000;
+    while(true){
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/utility_contacts?select=*&order=utility_name&offset=${offset}&limit=${pageSize}`,{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
+      if(!r.ok){console.error('Contacts load error:',r.status);break;}
+      const data=await r.json();
+      if(!data||!data.length)break;
+      allData=allData.concat(data);
+      if(data.length<pageSize)break;
+      offset+=pageSize;
+    }
+    utilContacts=allData;
+    console.log('[Contacts]',utilContacts.length,'contatos carregados'+(offset>0?' (paginado)':''));
+  }catch(e){console.error('Contacts load error:',e);utilContacts=[];}
 }
 function renderContacts(){
   const grid=document.getElementById('contacts-grid');if(!grid)return;
@@ -1430,9 +1496,9 @@ window.addEventListener('load',async()=>{
       try{
         const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
         if(roleData&&roleData.role==='admin'){isAdmin=true;}
-        else if(roleErr){const admins=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=admins.includes((session.user.email||'').toLowerCase());}
+        else if(roleErr){isAdmin=ADMIN_EMAILS.includes((session.user.email||'').toLowerCase());}
         else{isAdmin=false;}
-      }catch(e){const admins=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=admins.includes((session.user.email||'').toLowerCase());}
+      }catch(e){isAdmin=ADMIN_EMAILS.includes((session.user.email||'').toLowerCase());}
       role=isAdmin?'admin':'viewer';
       enterApp();
       return;

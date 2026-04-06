@@ -959,6 +959,28 @@ function syncMapUtilFilter(){if(!utilCacheLoaded)return;const el=document.getEle
 function syncLocations(){const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();const el=document.getElementById('floc');if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${l}</option>`).join('');}
 function syncAll(){rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}const ap=document.querySelector('.page.active')?.id;if(ap==='pg-map'){renderList();renderMap();}else if(ap==='pg-tickets')renderTable();else if(ap==='pg-proj')renderProjects();else if(ap==='pg-dash')renderDash();else if(ap==='pg-contacts')renderContacts();else if(ap==='pg-analytics')renderAnalytics();else{renderDash();}}
 
+async function manualRefresh(){
+  setSyncStatus(true,'Atualizando...');
+  try{
+    const{data:p}=await sb.from('projects').select('*').order('name');
+    const{data:t}=await sb.from('tickets').select('*').order('ticket');
+    if(p)projects=p.map(dbToProject);
+    if(t)tickets=t.map(dbToTicket);
+    rebuildSupersededSet();
+    await loadUtilCache();
+    await loadLastSync();
+    await loadContacts();
+    syncAll();
+    buildNotifications();
+    setSyncStatus(true,'Atualizado ✓');
+    toast('Dados atualizados!','success');
+  }catch(e){
+    console.error('[ManualRefresh]',e);
+    setSyncStatus(false,'Erro');
+    toast('Erro ao atualizar: '+e.message,'danger');
+  }
+}
+
 
 
 function renderRiskAnalytics(fT){
@@ -974,10 +996,11 @@ function renderRiskAnalytics(fT){
 
 async function loadLastSync(){
   try{
-    const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,status&order=finished_at.desc&limit=20',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
-    if(!r.ok)return;
+    const r=await fetch(SUPABASE_URL+'/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,status&finished_at=not.is.null&order=finished_at.desc&limit=20',{headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
+    if(!r.ok){console.warn('[LastSync] HTTP',r.status);return;}
     const rows=await r.json();
-    const by={};for(const row of rows){if(!by[row.state])by[row.state]=row;}
+    if(!rows||!rows.length){console.warn('[LastSync] Nenhum registro em sync_811_log');return;}
+    const by={};for(const row of rows){if(row.finished_at&&!by[row.state])by[row.state]=row;}
     const parts=[];
     for(const st of ['IN','FL']){
       const row=by[st];if(!row||!row.finished_at){parts.push(st+': —');continue;}
@@ -987,7 +1010,7 @@ async function loadLastSync(){
     }
     const el=document.getElementById('last-sync-status');if(el)el.innerHTML=parts.join('<br>');
     // Use most recent sync from any state
-    const allFinished=Object.values(by).filter(r=>r&&r.finished_at).sort((a,b)=>new Date(b.finished_at)-new Date(a.finished_at));
+    const allFinished=Object.values(by).filter(x=>x&&x.finished_at).sort((a,b)=>new Date(b.finished_at)-new Date(a.finished_at));
     const latest=allFinished[0];
     if(latest&&latest.finished_at){
       window._lastSyncTime=new Date(latest.finished_at).getTime();
@@ -1042,7 +1065,7 @@ function renderAnalytics(){
     +renderClearTimeMetrics(fT)
     +renderUtilSummaryHtml()
     +renderSyncHealthCard();
-  loadLastSync().then(function(){var p2=document.getElementById('analytics-sync-pill');if(p2&&window._lastSyncTime){var d2=new Date(window._lastSyncTime);var hm2=d2.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});var diff2=Math.round((Date.now()-window._lastSyncTime)/60000);var ago3;if(diff2<2)ago3='agora';else if(diff2<60)ago3=diff2+'min atrás';else if(diff2<120)ago3='1h atrás';else ago3=Math.round(diff2/60)+'h atrás';p2.style.background='var(--green-bg)';p2.style.color='var(--green)';p2.style.borderColor='var(--green-border)';p2.textContent='● Último sync '+hm2+' ('+ago3+')';}});
+  loadLastSync();
 }
 
 function renderVelocity(fT,ps){

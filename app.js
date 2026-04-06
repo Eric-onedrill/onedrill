@@ -706,31 +706,41 @@ function renderClearedStats(fTickets){
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
-  // Gráfico diário usa responded_at das utilities (mais preciso que history)
-  // Fallback para history se utilCache não tiver dados
+  // Gráfico diário: usa a data da ÚLTIMA utility a responder por ticket
+  // (= momento em que o ticket efetivamente ficou Clear)
+  // Fallback para history se utilCache não tiver responded_at
   var daily=[];
+  // Pré-calcula: para cada ticket, qual foi o responded_at da última utility Clear
+  var ticketLastClearDate={};
+  if(utilCacheLoaded){
+    for(var k=0;k<ft2.length;k++){
+      var tkey=String(ft2[k].ticket||'').trim();
+      var utils=getTicketUtils(tkey);
+      var allClear=utils.length>0&&utils.every(function(u){return u.status==='Clear';});
+      if(!allClear)continue; // só conta se todas estão Clear
+      var maxTs=0;
+      for(var j=0;j<utils.length;j++){
+        if(utils[j].responded_at){
+          var rts=new Date(utils[j].responded_at).getTime();
+          if(rts>maxTs)maxTs=rts;
+        }
+      }
+      if(maxTs>0)ticketLastClearDate[tkey]=maxTs;
+    }
+  }
   for(var i=6;i>=0;i--){
     var ds=now-(i+1)*864e5,de=now-i*864e5;
     var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});
     var cnt=0,dft=0;
-    var seenInDay=new Set();
-    // Prioridade 1: responded_at do utilCache
-    if(utilCacheLoaded){
+    // Prioridade 1: data da última utility Clear
+    if(utilCacheLoaded&&Object.keys(ticketLastClearDate).length>0){
       for(var k=0;k<ft2.length;k++){
         var tkey=String(ft2[k].ticket||'').trim();
-        var utils=getTicketUtils(tkey);
-        for(var j=0;j<utils.length;j++){
-          if(utils[j].status==='Clear'&&utils[j].responded_at){
-            var rts=new Date(utils[j].responded_at).getTime();
-            if(rts>=ds&&rts<de&&!seenInDay.has(tkey)){
-              seenInDay.add(tkey);cnt++;dft+=(ft2[k].footage||0);
-            }
-          }
-        }
+        var lts=ticketLastClearDate[tkey];
+        if(lts&&lts>=ds&&lts<de){cnt++;dft+=(ft2[k].footage||0);}
       }
-    }
-    // Fallback: history se não encontrou via utilCache
-    if(cnt===0){
+    } else {
+      // Fallback: history
       for(var k=0;k<ft2.length;k++){
         var evts=getClearEvts(ft2[k]);
         for(var j=0;j<evts.length;j++){

@@ -634,6 +634,9 @@ function renderDash(){
   // ── CLEARED STATS (movido do Analytics) ────────────────────────────────
   +renderClearedStats(fTickets)
 
+  // ── PRIVATE LOCATOR ALERT ─────────────────────────────────────────────
+  +renderPrivateLocatorAlert(fTickets)
+
   // ── SYNC TIMER ──────────────────────────────────────────────────────────
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';
 
@@ -1034,6 +1037,75 @@ async function renderSyncHealth(){
     }
     el.innerHTML=h||'<div style="color:var(--muted);font-size:12px">Sem dados</div>';
   }catch(e){console.error('SyncHealth:',e);}
+}
+
+function renderPrivateLocatorAlert(fTickets){
+  if(!utilCacheLoaded)return'';
+  // Detecta tickets que precisam de private locator via:
+  // 1. Campo pending contendo "PRIVATE LOCATOR"
+  // 2. Respostas 811 contendo "3H" ou "privately owned"
+  const pvtTickets=[];
+  const active=fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));
+  for(const t of active){
+    const tkey=String(t.ticket).trim();
+    const pending=(t.pending||'').toLowerCase();
+    const utils=getTicketUtils(tkey);
+    const pvtUtils=[];
+    // Check responses
+    for(const u of utils){
+      const rt=(u.response_text||'').toLowerCase();
+      if(rt.includes('3h')||rt.includes('privately owned')||rt.includes('private facility owner')){
+        pvtUtils.push(u.utility_name);
+      }
+    }
+    // Check pending field
+    if(pending.includes('private locator')&&!pvtUtils.length){
+      pvtUtils.push('(ver pending)');
+    }
+    if(pvtUtils.length){
+      pvtTickets.push({t,utils:pvtUtils});
+    }
+  }
+  if(!pvtTickets.length)return'';
+  return'<div style="background:#faf5ff;border:1px solid #d8b4fe;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:14px">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+  +'<span style="font-size:12px;font-weight:700;color:#7c3aed">🔒 Private Locator Necessário ('+pvtTickets.length+' ticket'+(pvtTickets.length>1?'s':'')+')</span>'
+  +'<button class="btn btn-sm" onclick="exportPrivateLocator()" style="font-size:10px;background:#7c3aed;color:white;border-color:#7c3aed">↓ Excel</button>'
+  +'</div>'
+  +'<div style="font-size:10px;color:#6b21a8;margin-bottom:8px">Estes tickets têm utilities com instalações privadas (3H) que precisam de locator privado contratado separadamente.</div>'
+  +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+  +pvtTickets.map(({t,utils})=>{
+    const loc=(t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim();
+    return'<div style="background:white;border:1px solid #d8b4fe;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center">'
+    +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+t.ticket+'</span>'
+    +'<span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+t.status+'</span></div>'
+    +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+t.state+'</div>'
+    +'<div style="font-size:9px;color:#7c3aed;margin-top:3px;font-weight:600">'+utils.join(', ')+'</div>'
+    +'</div>';
+  }).join('')
+  +'</div></div>';
+}
+
+function exportPrivateLocator(){
+  if(!utilCacheLoaded){toast('Aguarde carregar dados','warn');return;}
+  const active=tickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));
+  const rows=[['Ticket','Status','Local','Estado','Utility','Resposta','Expira']];
+  for(const t of active){
+    const tkey=String(t.ticket).trim();
+    const utils=getTicketUtils(tkey);
+    for(const u of utils){
+      const rt=(u.response_text||'').toLowerCase();
+      if(rt.includes('3h')||rt.includes('privately owned')||rt.includes('private facility owner')){
+        rows.push([t.ticket,t.status,t.location,t.state,u.utility_name,u.response_text||'',t.expire||'']);
+      }
+    }
+  }
+  if(rows.length<=1){toast('Nenhum ticket com private locator','info');return;}
+  const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,ws,'Private Locator');
+  XLSX.writeFile(wb,'OneDrill_PrivateLocator_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Exportado '+( rows.length-1)+' registros','success');
 }
 
 function renderClearedStats(fTickets){

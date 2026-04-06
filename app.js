@@ -22,6 +22,7 @@ let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
+let _metricProjFilter='',_clearProjFilter='',_progProjFilter='';
 
 // Utilities
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
@@ -147,7 +148,12 @@ async function tryLogin(){
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
     if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
-    try{const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}else if(roleErr){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(data.user.email);role=isAdmin?'admin':'viewer';}else{isAdmin=false;role='viewer';}}catch(e){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(data.user.email);role=isAdmin?'admin':'viewer';}
+    try{
+      const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
+      if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
+      else{isAdmin=false;role='viewer';}
+      if(roleErr) console.warn('[Auth] app_roles error:',roleErr.message);
+    }catch(e){isAdmin=false;role='viewer';console.warn('[Auth] Erro ao verificar role:',e.message);}
     document.getElementById('login-screen').style.display='none';
     enterApp();
   }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
@@ -176,7 +182,8 @@ function enterApp(){
   syncAll();renderDash();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
   loadContacts().then(()=>renderContacts());
-  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
+  loadLastSync();
+  setInterval(async()=>{if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}try{const{data:p}=await sb.from('projects').select('*').order('name');const{data:t}=await sb.from('tickets').select('*').order('ticket');if(p)projects=p.map(dbToProject);if(t)tickets=t.map(dbToTicket);rebuildSupersededSet();await loadUtilCache();await loadLastSync();syncAll();setSyncStatus(true,'Atualizado');console.log('[AutoRefresh] OK');}catch(e){console.error('[AutoRefresh]',e);}},300000);
 }
 
 /* ========== SHARED PROJECT VIEW ========== */
@@ -624,26 +631,15 @@ async function doImport(){
 
 function exportExpiring(){
   const days=window._soonDays||10;
-  const f=tickets.filter(t=>{
-    if(!t.expire||t.expire==='—')return false;
-    const d=new Date(t.expire);const diff=(d-Date.now())/86400000;
-    return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t);
-  });
+  const f=tickets.filter(t=>{if(!t.expire||t.expire==='—')return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t);});
   if(!f.length){toast('Nenhum ticket vencendo nesse período.','warn');return;}
   const wb=XLSX.utils.book_new();
   const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
-  for(const t of f){
-    const proj=projects.find(p=>p.id===t.projectId)?.name||'';
-    const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
-    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);
-  }
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30}];
-  XLSX.utils.book_append_sheet(wb,ws,'Vencendo');
-  XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  for(const t of f){const proj=projects.find(p=>p.id===t.projectId)?.name||'';const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);}
+  const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,ws,'Vencendo');XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(f.length+' tickets exportados — vencendo em '+days+' dias','success');
 }
-
 function exportFiltered(){
   const sr=(document.getElementById('tbl-srch')?.value||'').toLowerCase();
   const st=document.getElementById('tbl-stat')?.value||'';
@@ -693,7 +689,7 @@ function syncAll(){rebuildSupersededSet();syncProjectSelects();syncClients();syn
 
 function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
-  var cpf=window._clearProjFilter||'';
+  var cpf=_clearProjFilter||'';
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
   function getClearEvts(t){
     if(!t.history||!t.history.length)return[];
@@ -706,55 +702,19 @@ function renderClearedStats(fTickets){
   for(var i=0;i<c24.length;i++)ft24+=(c24[i].footage||0);
   for(var i=0;i<c7.length;i++)ft7+=(c7[i].footage||0);
   for(var i=0;i<c30.length;i++)ft30+=(c30[i].footage||0);
-  // Gráfico diário: usa a data da ÚLTIMA utility a responder por ticket
-  // (= momento em que o ticket efetivamente ficou Clear)
-  // Fallback para history se utilCache não tiver responded_at
-  var daily=[];
-  // Pré-calcula: para cada ticket, qual foi o responded_at da última utility Clear
+  // Gráfico: usa data da ÚLTIMA utility Clear por ticket (momento real do clear)
   var ticketLastClearDate={};
-  if(utilCacheLoaded){
-    for(var k=0;k<ft2.length;k++){
-      var tkey=String(ft2[k].ticket||'').trim();
-      var utils=getTicketUtils(tkey);
-      var allClear=utils.length>0&&utils.every(function(u){return u.status==='Clear';});
-      if(!allClear)continue; // só conta se todas estão Clear
-      var maxTs=0;
-      for(var j=0;j<utils.length;j++){
-        if(utils[j].responded_at){
-          var rts=new Date(utils[j].responded_at).getTime();
-          if(rts>maxTs)maxTs=rts;
-        }
-      }
-      if(maxTs>0)ticketLastClearDate[tkey]=maxTs;
-    }
-  }
-  for(var i=6;i>=0;i--){
-    var ds=now-(i+1)*864e5,de=now-i*864e5;
-    var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});
-    var cnt=0,dft=0;
-    // Prioridade 1: data da última utility Clear
-    if(utilCacheLoaded&&Object.keys(ticketLastClearDate).length>0){
-      for(var k=0;k<ft2.length;k++){
-        var tkey=String(ft2[k].ticket||'').trim();
-        var lts=ticketLastClearDate[tkey];
-        if(lts&&lts>=ds&&lts<de){cnt++;dft+=(ft2[k].footage||0);}
-      }
-    } else {
-      // Fallback: history
-      for(var k=0;k<ft2.length;k++){
-        var evts=getClearEvts(ft2[k]);
-        for(var j=0;j<evts.length;j++){
-          if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft2[k].footage||0);}
-        }
-      }
-    }
-    daily.push({l:lb,c:cnt,f:dft});
-  }
+  if(utilCacheLoaded){for(var k=0;k<ft2.length;k++){var tkey=String(ft2[k].ticket||'').trim();var utils=getTicketUtils(tkey);var allClear=utils.length>0&&utils.every(function(u){return u.status==='Clear';});if(!allClear)continue;var maxTs=0;for(var j=0;j<utils.length;j++){if(utils[j].responded_at){var rts=new Date(utils[j].responded_at).getTime();if(rts>maxTs)maxTs=rts;}}if(maxTs>0)ticketLastClearDate[tkey]=maxTs;}}
+  var daily=[];
+  for(var i=6;i>=0;i--){var ds=now-(i+1)*864e5,de=now-i*864e5;var lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit'});var cnt=0,dft=0;
+    if(utilCacheLoaded&&Object.keys(ticketLastClearDate).length>0){for(var k=0;k<ft2.length;k++){var tkey=String(ft2[k].ticket||'').trim();var lts=ticketLastClearDate[tkey];if(lts&&lts>=ds&&lts<de){cnt++;dft+=(ft2[k].footage||0);}}}
+    else{for(var k=0;k<ft2.length;k++){var evts=getClearEvts(ft2[k]);for(var j=0;j<evts.length;j++){if(evts[j].ts>=ds&&evts[j].ts<de){cnt++;dft+=(ft2[k].footage||0);}}}}
+    daily.push({l:lb,c:cnt,f:dft});}
   var mx=1;for(var i=0;i<daily.length;i++)if(daily[i].c>mx)mx=daily[i].c;
   var su7=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
   if(!c30.length)return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Tickets Clareados</div><div style="color:var(--muted);font-size:13px">Nenhum ticket clareado nos ultimos 30 dias.</div></div></div>';
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">\u2705 Tickets Clareados</div><select class="fi" onchange="window._clearProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px"><option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=="Completed";}).map(function(p){return'<option value="'+p.id+'"'+(cpf===p.id?" selected":"")+'>'+projDropLabel(p)+'</option>';}).join("")+'</select></div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin-bottom:0">\u2705 Tickets Clareados</div><select class="fi" onchange="_clearProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px"><option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=="Completed";}).map(function(p){return'<option value="'+p.id+'"'+(cpf===p.id?" selected":"")+'>'+projDropLabel(p)+'</option>';}).join("")+'</select></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">';
   h+='<div style="padding:14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c24.length+'</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-top:2px">Ultimas 24h</div><div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">'+ft24.toLocaleString()+' ft</div></div>';
   h+='<div style="padding:14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;margin-top:2px">Ultimos 7 dias</div><div style="font-size:12px;color:var(--green);font-family:var(--mono);margin-top:4px">'+ft7.toLocaleString()+' ft</div></div>';
@@ -797,7 +757,7 @@ function renderUtilSummaryHtml(){
 
 function renderClearTimeMetrics(fTickets){
   if(!utilCacheLoaded)return'';
-  var mpf=window._metricProjFilter||'';
+  var mpf=_metricProjFilter||'';
   var ft3=mpf?fTickets.filter(function(t){return t.projectId===mpf;}):fTickets;
   var utilTimes={};
   for(var i=0;i<ft3.length;i++){var t=ft3[i];if(!t.history||!t.history.length)continue;var createdTs=t.history[0].ts;if(!createdTs)continue;var utils=getTicketUtils(String(t.ticket).trim());for(var j=0;j<utils.length;j++){var u=utils[j];if(u.status!=='Clear'||!u.responded_at)continue;var respTs=new Date(u.responded_at).getTime();if(isNaN(respTs)||respTs<createdTs)continue;var days=(respTs-createdTs)/86400000;if(days>90)continue;var name=u.utility_name;if(!utilTimes[name])utilTimes[name]={total:0,count:0};utilTimes[name].total+=days;utilTimes[name].count++;}}
@@ -805,7 +765,7 @@ function renderClearTimeMetrics(fTickets){
   utilAvg.sort(function(a,b){return b.avg-a.avg;});
   if(!utilAvg.length)return'';
   var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=='Completed';}).map(function(p){return'<option value="'+p.id+'"'+(mpf===p.id?' selected':'')+'>'+projDropLabel(p)+'</option>';}).join('');
-  var projSel='<select class="fi" onchange="window._metricProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+  var projSel='<select class="fi" onchange="_metricProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
   var globalAvg=utilAvg.reduce(function(s,u){return s+u.avg*u.count;},0)/utilAvg.reduce(function(s,u){return s+u.count;},0);
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear</div><div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px;font-weight:700;font-family:var(--mono);color:'+(globalAvg<=3?'var(--green)':globalAvg<=6?'var(--amber)':'var(--red)')+'">'+globalAvg.toFixed(1)+' dias</span>'+projSel+'</div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">';
@@ -876,6 +836,26 @@ function exportAllPending(){
   toast(rows.length+' pendências exportadas','success');
 }
 
+
+async function loadLastSync(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sync_811_log?select=state,finished_at,tickets_checked,tickets_updated,status&order=finished_at.desc&limit=20`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}` }});
+    if(!r.ok)return;
+    const rows=await r.json();
+    const byState={};
+    for(const row of rows){if(!byState[row.state])byState[row.state]=row;}
+    const parts=[];
+    for(const state of ['IN','FL']){
+      const row=byState[state];
+      if(!row||!row.finished_at){parts.push(`${state}: —`);continue;}
+      const d=new Date(row.finished_at);const now=Date.now();const diffMin=Math.round((now-d.getTime())/60000);
+      let ago;if(diffMin<2)ago='agora';else if(diffMin<60)ago=`${diffMin}min atrás`;else if(diffMin<120)ago='1h atrás';else if(diffMin<1440)ago=`${Math.round(diffMin/60)}h atrás`;else ago=`${Math.round(diffMin/1440)}d atrás`;
+      const ok=row.status==='success';parts.push(`${ok?'🟢':'🔴'} ${state}: ${ago}`);
+    }
+    const el=document.getElementById('last-sync-status');
+    if(el)el.innerHTML=parts.join('<br>');
+  }catch(e){console.error('[LastSync]',e);}
+}
 /* ══════════ WEEKLY EVOLUTION (4 weeks) ══════════ */
 function renderWeeklyEvolution(fTickets){
   try{
@@ -904,9 +884,9 @@ function renderWeeklyEvolution(fTickets){
 /* ══════════ PROGRESSO FOOTAGE (aggregated + filter) ══════════ */
 function renderProgressoFootage(fTickets,projStats){
   try{
-  const pf=window._progProjFilter||'';
+  const pf=_progProjFilter||'';
   const projOpts='<option value="">Todos (agrupado)</option>'+projStats.map(p=>'<option value="'+p.id+'"'+(pf===p.id?' selected':'')+'>'+(p.locs?p.locs+' ('+p.name+')':p.name)+'</option>').join('');
-  const projSel='<select class="fi" onchange="window._progProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+  const projSel='<select class="fi" onchange="_progProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
   function mkGrid(d){return'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.totalFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">'+d.clearFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+d.pctClear+'%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">'+d.openFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto '+d.pctOpen+'%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+d.damageFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+d.pctDamage+'%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.concluidoFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+d.pctConcluido+'%</div></div></div><div class="prog-bar"><div style="width:'+d.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(d.pctOpen,100-d.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(d.pctDamage,100-d.pctClear-d.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(d.pctConcluido,100-d.pctClear-d.pctOpen-d.pctDamage)+'%;background:var(--text)"></div></div>';}
   let content='';
   if(!pf){
@@ -1050,7 +1030,7 @@ window.addEventListener('load',async()=>{
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
-      try{const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();if(roleData&&roleData.role==='admin'){isAdmin=true;}else if(roleErr){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(session.user.email);}else{isAdmin=false;}}catch(e){const ae=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=ae.includes(session.user.email);}
+      try{const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();isAdmin=!!(roleData&&roleData.role==='admin');}catch(e){isAdmin=false;console.warn('[Auth] Session role check failed:',e.message);}
       role=isAdmin?'admin':'viewer';
       enterApp();
       return;

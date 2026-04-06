@@ -107,12 +107,12 @@
   </div>
   <div class="snav-footer">
     <div class="snav-sync"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span></div>
-    <div id="last-sync-status" title="Última atualização dos portais 811" style="font-size:10px;color:var(--muted);line-height:1.7;padding:4px 0 2px;font-family:var(--mono)">🟡 IN: carregando...<br>🟡 FL: carregando...</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span class="role-badge" id="role-badge">VIEWER</span>
-      <div style="display:flex;gap:6px">
+      <div style="display:flex;gap:6px;align-items:center">
         <button class="snav-notif-btn" onclick="toggleNotifPanel()">🔔<span class="notif-badge" id="notif-badge" style="display:none">0</span></button>
         <button class="snav-notif-btn" onclick="toggleInfoPanel()">ℹ️</button>
+        <button id="btn-logout" onclick="doLogout()" title="Sair" style="background:none;border:1px solid var(--border);border-radius:var(--r);padding:4px 7px;cursor:pointer;font-size:13px;color:var(--muted)" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">⏻</button>
       </div>
     </div>
     <div class="notif-panel" id="notif-panel"></div>

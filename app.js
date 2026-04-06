@@ -543,7 +543,7 @@ function renderDash(){
   // Utilities pending
   const utilP={};
   if(utilCacheLoaded){const an=new Set(fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel').map(t=>String(t.ticket).trim()));for(const[tn,rs]of Object.entries(utilCache)){if(!an.has(tn))continue;for(const u of rs){if(u.status==='Pending'){if(!utilP[u.utility_name])utilP[u.utility_name]=0;utilP[u.utility_name]++;}}}}
-  const topUtils=Object.entries(utilP).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const topUtils=Object.entries(utilP).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const maxU=topUtils.length?topUtils[0][1]:1;
   const totPend=Object.values(utilP).reduce((s,v)=>s+v,0);
   const ticksWithPend=utilCacheLoaded?new Set(fTickets.filter(t=>getTicketPendingUtils(String(t.ticket).trim()).length>0).map(t=>t.ticket)).size:0;
@@ -640,7 +640,7 @@ function renderDash(){
   +'</div>'
 
   // ── 3-COLUMN GRID ────────────────────────────────────────────────────────
-  +'<div style="display:grid;grid-template-columns:220px 1fr 260px;gap:12px;align-items:start">'
+  +'<div style="display:grid;grid-template-columns:220px 1fr 290px;gap:12px;align-items:start">'
 
   // ── COL 1: SCORE + UTILITIES ──────────────────────────────────────────
   +'<div style="display:flex;flex-direction:column;gap:10px">'
@@ -678,8 +678,51 @@ function renderDash(){
   +'</div>'
   +'</div>' // end col1
 
-  // ── COL 2: PROJETOS + ATIVIDADE ──────────────────────────────────────
-  +'<div style="display:flex;flex-direction:column;gap:10px">'
+  // ── COL 2: TICKETS CLAREADOS (centro — destaque) ─────────────────────────────────────────
+  +'<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r-lg);padding:14px">'
+  +'<div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Tickets Clareados</div>'
+
+  // 3 numbers
+  +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
+  +'<div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedToday.length+'</div>'
+  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">hoje</div></div>'
+  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
+  +'<div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedWeek.length+'</div>'
+  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">esta semana</div></div>'
+  +'</div>'
+  +'<div style="text-align:center;padding:10px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
+  +'<div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--green)">'+ftClearedWk.toLocaleString()+' ft</div>'
+  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">ft clareados (7d)</div></div>'
+
+  // Mini bar chart
+  +'<div style="display:flex;align-items:flex-end;gap:3px;height:60px;margin-bottom:4px">'
+  +dailyClear.map(d=>'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px">'
+  +'<div style="width:100%;background:'+(d.cnt?'var(--green)':'rgba(22,163,74,.15)')+';border-radius:2px 2px 0 0;height:'+Math.max(d.cnt/maxDC*52,2)+'px"></div>'
+  +'</div>').join('')
+  +'</div>'
+  +'<div style="display:flex;justify-content:space-between;margin-bottom:12px">'
+  +dailyClear.map(d=>'<div style="flex:1;text-align:center;font-size:8px;color:var(--green);opacity:.7">'+d.lb+'</div>').join('')
+  +'</div>'
+
+  // Recent cleared list
+  +recentCleared.map(t=>{
+    const clearH=t.history.filter(h=>{const a=(h.action||'').toLowerCase();return a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear');}).pop();
+    const utils=utilCacheLoaded?getTicketUtils(String(t.ticket).trim()).filter(u=>u.status==='Clear').map(u=>u.utility_name.split(' ')[0]).slice(0,2).join(' + '):'';
+    return'<div style="padding:5px 0;border-bottom:1px solid var(--green-border);cursor:pointer;font-size:10px" onclick="openTicketDetail('+t.id+')">'
+    +'<div style="display:flex;justify-content:space-between">'
+    +'<span style="font-family:var(--mono);font-weight:700;color:var(--text)">'+t.ticket+'</span>'
+    +'<span style="color:var(--muted)">'+(t.footage||0)+' ft</span></div>'
+    +(utils?'<div style="color:var(--green);opacity:.8">'+utils+'</div>':'')
+    +'<div style="color:var(--muted)">'+ago(clearH?.ts||0)+' AUTO</div>'
+    +'</div>';
+  }).join('')
+
+  +'<button class="btn btn-sm" onclick="nav(\'analytics\')" style="font-size:10px;width:100%;margin-top:10px;background:white;border-color:var(--green-border)">ver todos os clareados →</button>'
+  +'</div>' // end col3
+
+  // ── COL 3: PROJETOS + ATIVIDADE (direita) ──────────────────────────────────────
+  +'<div style="display:flex;flex-direction:column;gap:10px;min-width:0">'
 
   // Projetos
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
@@ -714,49 +757,6 @@ function renderDash(){
   +'</div></div>').join('')
   +'</div>'
   +'</div>' // end col2
-
-  // ── COL 3: TICKETS CLAREADOS ─────────────────────────────────────────
-  +'<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r-lg);padding:14px">'
-  +'<div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Tickets Clareados</div>'
-
-  // 3 numbers
-  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
-  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
-  +'<div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedToday.length+'</div>'
-  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">hoje</div></div>'
-  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
-  +'<div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedWeek.length+'</div>'
-  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">esta semana</div></div>'
-  +'</div>'
-  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r);margin-bottom:12px">'
-  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green)">'+ftClearedWk.toLocaleString()+' ft</div>'
-  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">ft clareados (7d)</div></div>'
-
-  // Mini bar chart
-  +'<div style="display:flex;align-items:flex-end;gap:3px;height:40px;margin-bottom:4px">'
-  +dailyClear.map(d=>'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px">'
-  +'<div style="width:100%;background:'+(d.cnt?'var(--green)':'rgba(22,163,74,.15)')+';border-radius:2px 2px 0 0;height:'+Math.max(d.cnt/maxDC*32,2)+'px"></div>'
-  +'</div>').join('')
-  +'</div>'
-  +'<div style="display:flex;justify-content:space-between;margin-bottom:12px">'
-  +dailyClear.map(d=>'<div style="flex:1;text-align:center;font-size:8px;color:var(--green);opacity:.7">'+d.lb+'</div>').join('')
-  +'</div>'
-
-  // Recent cleared list
-  +recentCleared.map(t=>{
-    const clearH=t.history.filter(h=>{const a=(h.action||'').toLowerCase();return a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear');}).pop();
-    const utils=utilCacheLoaded?getTicketUtils(String(t.ticket).trim()).filter(u=>u.status==='Clear').map(u=>u.utility_name.split(' ')[0]).slice(0,2).join(' + '):'';
-    return'<div style="padding:5px 0;border-bottom:1px solid var(--green-border);cursor:pointer;font-size:10px" onclick="openTicketDetail('+t.id+')">'
-    +'<div style="display:flex;justify-content:space-between">'
-    +'<span style="font-family:var(--mono);font-weight:700;color:var(--text)">'+t.ticket+'</span>'
-    +'<span style="color:var(--muted)">'+(t.footage||0)+' ft</span></div>'
-    +(utils?'<div style="color:var(--green);opacity:.8">'+utils+'</div>':'')
-    +'<div style="color:var(--muted)">'+ago(clearH?.ts||0)+' AUTO</div>'
-    +'</div>';
-  }).join('')
-
-  +'<button class="btn btn-sm" onclick="nav(\'analytics\')" style="font-size:10px;width:100%;margin-top:10px;background:white;border-color:var(--green-border)">ver todos os clareados →</button>'
-  +'</div>' // end col3
 
   +'</div>' // end 3-col grid
 

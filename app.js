@@ -132,7 +132,19 @@ async function saveTicketToDb(t){
   const data=ticketToDb(t);let res;
   if(typeof t.id==='number'&&t.id>0){res=await sb.from('tickets').update(data).eq('id',t.id);}
   else{res=await sb.from('tickets').insert(data).select().single();if(res.data)t.id=res.data.id;}
-  if(res.error){setSyncStatus(false,'Erro ao salvar');toast(res.error.code==='42501'?'Sem permissão — faça login como Admin':'Erro: '+res.error.message,'danger');return false;}
+  if(res.error){
+    setSyncStatus(false,'Erro ao salvar');
+    const msg=res.error.message||'';
+    if(msg.includes('infinite recursion')||msg.includes('app_roles')){
+      toast('Erro RLS no Supabase — rode o script fix_rls_app_roles.sql no SQL Editor do Supabase','danger');
+      console.error('[SaveTicket] RLS recursion fix needed. Error:',res.error);
+    }else if(res.error.code==='42501'){
+      toast('Sem permissão — faça login como Admin','danger');
+    }else{
+      toast('Erro: '+msg,'danger');
+    }
+    return false;
+  }
   setSyncStatus(true,'Salvo ✓');return true;
 }
 async function saveProjectToDb(p){if(!await requireAuth())return false;const data=projectToDb(p);const res=await sb.from('projects').upsert(data,{onConflict:'id'});if(res.error){toast(res.error.code==='42501'?'Sem permissão — faça login como Admin':'Erro: '+res.error.message,'danger');return false;}return true;}
@@ -455,7 +467,7 @@ async function quickEditFootage(id){
   if(ok){toast('Footage atualizado: '+num+' ft','success');openTicketDetail(id);syncAll();}
 }
 
-async function setManualStatus(newStatus){const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;const old=t.status;t.status=newStatus;t.status_locked=true;t.history=t.history||[];t.history.push({ts:Date.now(),action:`Status manual: ${old} → ${newStatus} 🔒`,color:scol(newStatus)});const ok=await saveTicketToDb(t);if(ok){toast(`✅ Status: ${old} → ${newStatus} (travado)`,'success');openTicketDetail(currentDetailId);syncAll();}}
+async function setManualStatus(newStatus){const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;const old=t.status;const wasLocked=t.status_locked;t.status=newStatus;t.status_locked=true;t.history=t.history||[];t.history.push({ts:Date.now(),action:`Status manual: ${old} → ${newStatus} 🔒`,color:scol(newStatus)});const ok=await saveTicketToDb(t);if(ok){toast(`✅ Status: ${old} → ${newStatus} (travado)`,'success');openTicketDetail(currentDetailId);syncAll();}else{t.status=old;t.status_locked=wasLocked;t.history.pop();toast(`Erro ao salvar — status revertido para ${old}`,'danger');}}
 async function unlockStatus(id){const t=tickets.find(x=>x.id===id);if(!t)return;t.status_locked=false;const ok=await saveTicketToDb(t);if(ok){toast('🔓 Status desbloqueado','success');openTicketDetail(id);}}
 
 let miniMap=null;
@@ -539,7 +551,7 @@ function renderDash(){
   const clearWk=wCount('Clear',now-week,now), clearPrev=wCount('Clear',now-2*week,now-week);
   function trend(curr,prev,greenUp){const d=curr-prev;if(!d)return '<span style="font-size:10px;color:var(--muted)">sem mudança</span>';const up=d>0;const c=(up===greenUp)?'var(--green)':'var(--red)';return'<span style="font-size:10px;font-weight:700;color:'+c+'">'+(up?'▲':'▼')+Math.abs(d)+' vs semana passada</span>';}
 
-  // Projects with velocity
+  // Projects with velocity — FIXED: usa data do clear, não da abertura
   const fProjects=dsf?projects.filter(p=>p.state===dsf):projects;
   const projVel=fProjects.filter(p=>p.status!=='Completed').map(p=>{
     const ts=fTickets.filter(t=>t.projectId===p.id);
@@ -547,8 +559,26 @@ function renderDash(){
     const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
     const tf=ts.reduce((s,t)=>s+(t.footage||0),0); const tot=p.totalFeet||tf||1;
     const pct=Math.round(cf/tot*100);
-    const c4w=ts.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
-    const fpw=c4w.reduce((s,t)=>s+(t.footage||0),0)/4;
+    // Velocity baseada na DATA DO CLEAR (não abertura): footage por semana nas últimas 4 semanas
+    let fpw=0;
+    const weekBins=[0,0,0,0]; // [semana atual, -1, -2, -3]
+    for(const t of ts){
+      if(!t.history)continue;
+      const clearEvt=t.history.filter(h=>{const a=(h.action||'').toLowerCase();return a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear');}).pop();
+      if(!clearEvt||!clearEvt.ts)continue;
+      const weeksAgo=Math.floor((now-clearEvt.ts)/week);
+      if(weeksAgo>=0&&weeksAgo<4)weekBins[weeksAgo]+=(t.footage||0);
+    }
+    // Média ponderada: semanas recentes pesam mais (3,2,1,0.5)
+    const weights=[3,2,1,0.5];
+    const wSum=weekBins.reduce((s,v,i)=>s+v*weights[i],0);
+    const wTotal=weights.reduce((s,w,i)=>s+(weekBins[i]>0?w:0),0);
+    fpw=wTotal>0?wSum/wTotal/1:0; // ft/week ponderado
+    // Fallback: se nenhuma semana teve clear, usa média simples
+    if(fpw===0){
+      const totalCleared4w=weekBins.reduce((s,v)=>s+v,0);
+      fpw=totalCleared4w/4;
+    }
     const wl=fpw>0?Math.ceil(of2/fpw):null;
     const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||p.state||'';
     return{id:p.id,name:p.name,locs,pct,cf,of2,tot,fpw:Math.round(fpw),wl,count:ts.length};
@@ -564,26 +594,6 @@ function renderDash(){
 
   // Critical tickets
   const crits=utilCacheLoaded?fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t)).map(t=>({t,s:riskScore(t)})).filter(x=>x.s>=35).sort((a,b)=>b.s-a.s).slice(0,6):[];
-
-  // Cleared today & this week
-  const day1=now-86400000;
-  const clearedToday=fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=day1&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
-  const clearedWeek=fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
-  const ftClearedWk=clearedWeek.reduce((s,t)=>s+(t.footage||0),0);
-
-  // Mini 7-day cleared chart
-  const dailyClear=[];
-  for(let i=6;i>=0;i--){const ds=now-(i+1)*day1/1,de=now-i*day1/1;const lb=new Date(de).toLocaleDateString('pt-BR',{weekday:'short'}).slice(0,3);let cnt=0;if(utilCacheLoaded){const tld={};for(const t of fTickets){const k=String(t.ticket).trim();const us=getTicketUtils(k);if(!us.every(u=>u.status==='Clear'))continue;let mx=0;for(const u of us){if(u.responded_at){const r=new Date(u.responded_at).getTime();if(r>mx)mx=r;}}if(mx>=ds&&mx<de){tld[k]=1;}}cnt=Object.keys(tld).length;}else{cnt=fTickets.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=ds&&h.ts<de&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));})).length;}dailyClear.push({lb,cnt});}
-  const maxDC=Math.max(...dailyClear.map(d=>d.cnt),1);
-
-  // Recent cleared (for right column)
-  const recentCleared=[...fTickets].filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-7*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));})).sort((a,b)=>{const la=a.history.filter(h=>{const x=(h.action||'').toLowerCase();return x.includes('→ clear')||x.includes('auto 811')||x.includes('auto-clear');}).pop();const lb2=b.history.filter(h=>{const x=(h.action||'').toLowerCase();return x.includes('→ clear')||x.includes('auto 811')||x.includes('auto-clear');}).pop();return(lb2?.ts||0)-(la?.ts||0);}).slice(0,5);
-
-  // Recent activity
-  const acts=[];for(const t of fTickets){if(!t.history)continue;for(const h of [...t.history].reverse()){acts.push({t,h});if(acts.length>=40)break;}}
-  acts.sort((a,b)=>(b.h.ts||0)-(a.h.ts||0));
-  const recentActs=acts.slice(0,6);
-  function ago(ts){const m=Math.round((now-ts)/60000);if(m<2)return'agora';if(m<60)return m+'min';if(m<120)return'1h';if(m<1440)return Math.round(m/60)+'h';if(m<2880)return'ontem '+new Date(ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});return Math.round(m/1440)+'d';}
 
   // State filter
   const sf='<select class="fi" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+s+'"'+(dsf===s?' selected':'')+'>'+s+'</option>').join('')+'</select>';
@@ -639,7 +649,7 @@ function renderDash(){
   +'<div style="font-size:10px;color:var(--purple);margin-top:3px">'+Math.round(noMap.length/Math.max(total,1)*100)+'% descobertos</div></div>'
   +'</div>'
 
-  // ── TICKETS VENCENDO ────────────────────────────────────────────────────
+  // ── TICKETS VENCENDO (formato compacto) ──────────────────────────────────
   +'<div style="background:var(--white);border:1px solid '+(soon.length?'var(--red-border)':'var(--border)')+';border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
   +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(soon.length?'8px':'0')+'">'
   +'<span style="font-size:12px;font-weight:600;color:'+(soon.length?'var(--red)':'var(--green)')+'">'+( soon.length?'⚠ '+soon.length+' ticket(s) vencendo':'✅ Nenhum ticket vencendo')+' nos próximos '+_sd+' dias</span>'
@@ -650,18 +660,46 @@ function renderDash(){
   +'<option value="30"'+(_sd===30?' selected':'')+'>30d</option></select>'
   +(soon.length?'<button class="btn btn-sm" onclick="exportExpiring()" style="background:var(--red);color:white;border-color:var(--red);font-size:11px">↓ Excel</button>':'')
   +'</div></div>'
-  +(soon.length?'<div style="display:flex;flex-wrap:wrap;gap:4px">'+soon.map(t=>{const d2=Math.round((new Date(t.expire)-now)/86400000);return'<span style="font-size:11px;font-family:var(--mono);padding:2px 8px;border-radius:10px;cursor:pointer;background:'+(d2<=3?'var(--red-bg)':'var(--bg)')+';color:'+(d2<=3?'var(--red)':'var(--text2)')+';border:1px solid '+(d2<=3?'var(--red-border)':'var(--border)')+'" onclick="openTicketDetail('+t.id+')">'+t.ticket+' · '+t.expire+'</span>';}).join('')+'</div>':'')
+  +(soon.length?'<div style="max-height:200px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px;font-weight:600">Ticket</th><th style="padding:4px 6px;font-weight:600">Dias</th><th style="padding:4px 6px;font-weight:600">Local</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600">Expira</th></tr></thead><tbody>'
+  +soon.sort((a,b)=>{const da=Math.round((new Date(a.expire)-now)/86400000);const db=Math.round((new Date(b.expire)-now)/86400000);return da-db;}).map(t=>{
+    const d2=Math.round((new Date(t.expire)-now)/86400000);
+    const urgColor=d2<=2?'var(--red)':d2<=5?'var(--amber)':'var(--text2)';
+    const urgBg=d2<=2?'var(--red-bg)':d2<=5?'#fffbeb':'transparent';
+    const loc=(t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim();
+    return'<tr style="border-bottom:1px solid var(--border);cursor:pointer;background:'+urgBg+'" onclick="openTicketDetail('+t.id+')">'
+    +'<td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+t.ticket+'</td>'
+    +'<td style="padding:4px 6px;font-weight:700;color:'+urgColor+'">'+d2+'d</td>'
+    +'<td style="padding:4px 6px;color:var(--text2)">'+loc+', '+t.state+'</td>'
+    +'<td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+t.status+'</span></td>'
+    +'<td style="padding:4px 6px;font-family:var(--mono);color:var(--muted)">'+t.expire+'</td>'
+    +'</tr>';}).join('')+'</tbody></table></div>':'')
   +'</div>'
 
-  // ── 3-COLUMN GRID ────────────────────────────────────────────────────────
-  +'<div style="display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:12px;align-items:start">'
+  // ── CLEARED STATS (movido do Analytics) ────────────────────────────────
+  +renderClearedStats(fTickets)
 
-  // ── COL 1: SCORE + UTILITIES ──────────────────────────────────────────
+  // ── 2-COLUMN GRID ────────────────────────────────────────────────────────
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">'
+
+  // ── COL 1: SCORE + RISK LEGEND + UTILITIES ────────────────────────────
   +'<div style="display:flex;flex-direction:column;gap:10px">'
 
-  // Score card
+  // Score card + risk legend
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px">'
-  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Score de Risco</div>'
+  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Score de Risco</div>'
+  +'<div style="font-size:9px;color:var(--muted);cursor:help" title="Score 0-100 baseado em: vencimento (+60 vencido, +45 ≤2d, +30 ≤5d, +18 ≤10d), utilities pendentes (+8/each, max 35), Damage (+30), inatividade >30d (+15)">ⓘ Como funciona</div>'
+  +'</div>'
+  // Risk legend
+  +'<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">'
+  +'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;font-weight:600">≥60 CRÍTICO</span>'
+  +'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:600">35-59 ALTO</span>'
+  +'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;font-weight:600">15-34 MÉDIO</span>'
+  +'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;font-weight:600">&lt;15 BAIXO</span>'
+  +'</div>'
+  +'<div style="font-size:9px;color:var(--muted);margin-bottom:8px;padding:6px 8px;background:var(--bg);border-radius:var(--r);line-height:1.5">'
+  +'<strong>Regras:</strong> Vencimento (+60 vencido, +45 ≤2d, +30 ≤5d, +18 ≤10d) · Utilities pendentes (+8 cada, máx 35) · Status Damage (+30) · Sem atividade >30d (+15) · Clear reduz -20'
+  +'</div>'
   +(crits.length?crits.map(({t,s})=>{
     const exp=t.expire&&t.expire!=='—'?Math.round((new Date(t.expire)-now)/86400000):null;
     const badge=exp===null?'':exp<0?'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);font-weight:700">vencido</span>':exp<=2?'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);font-weight:700">'+exp+'d</span>':exp<=5?'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700">'+exp+'d</span>':'<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;font-weight:700">'+exp+'d</span>';
@@ -692,50 +730,7 @@ function renderDash(){
   +'</div>'
   +'</div>' // end col1
 
-  // ── COL 2: TICKETS CLAREADOS (centro — destaque) ─────────────────────────────────────────
-  +'<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r-lg);padding:14px">'
-  +'<div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Tickets Clareados</div>'
-
-  // 3 numbers
-  +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
-  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
-  +'<div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedToday.length+'</div>'
-  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">hoje</div></div>'
-  +'<div style="text-align:center;padding:8px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
-  +'<div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clearedWeek.length+'</div>'
-  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">esta semana</div></div>'
-  +'</div>'
-  +'<div style="text-align:center;padding:10px;background:rgba(255,255,255,.6);border-radius:var(--r)">'
-  +'<div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--green)">'+ftClearedWk.toLocaleString()+' ft</div>'
-  +'<div style="font-size:9px;color:var(--green);text-transform:uppercase">ft clareados (7d)</div></div>'
-
-  // Mini bar chart
-  +'<div style="display:flex;align-items:flex-end;gap:3px;height:60px;margin-bottom:4px">'
-  +dailyClear.map(d=>'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px">'
-  +'<div style="width:100%;background:'+(d.cnt?'var(--green)':'rgba(22,163,74,.15)')+';border-radius:2px 2px 0 0;height:'+Math.max(d.cnt/maxDC*52,2)+'px"></div>'
-  +'</div>').join('')
-  +'</div>'
-  +'<div style="display:flex;justify-content:space-between;margin-bottom:12px">'
-  +dailyClear.map(d=>'<div style="flex:1;text-align:center;font-size:8px;color:var(--green);opacity:.7">'+d.lb+'</div>').join('')
-  +'</div>'
-
-  // Recent cleared list
-  +recentCleared.map(t=>{
-    const clearH=t.history.filter(h=>{const a=(h.action||'').toLowerCase();return a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear');}).pop();
-    const utils=utilCacheLoaded?getTicketUtils(String(t.ticket).trim()).filter(u=>u.status==='Clear').map(u=>u.utility_name.split(' ')[0]).slice(0,2).join(' + '):'';
-    return'<div style="padding:5px 0;border-bottom:1px solid var(--green-border);cursor:pointer;font-size:10px" onclick="openTicketDetail('+t.id+')">'
-    +'<div style="display:flex;justify-content:space-between">'
-    +'<span style="font-family:var(--mono);font-weight:700;color:var(--text)">'+t.ticket+'</span>'
-    +'<span style="color:var(--muted)">'+(t.footage||0)+' ft</span></div>'
-    +(utils?'<div style="color:var(--green);opacity:.8">'+utils+'</div>':'')
-    +'<div style="color:var(--muted)">'+ago(clearH?.ts||0)+' AUTO</div>'
-    +'</div>';
-  }).join('')
-
-  +'<button class="btn btn-sm" onclick="nav(\'analytics\')" style="font-size:10px;width:100%;margin-top:10px;background:white;border-color:var(--green-border)">ver todos os clareados →</button>'
-  +'</div>' // end col3
-
-  // ── COL 3: PROJETOS + ATIVIDADE (direita) ──────────────────────────────────────
+  // ── COL 2: PROJETOS + HEALTH (sem Atividade Recente) ─────────────────
   +'<div style="display:flex;flex-direction:column;gap:10px;min-width:0">'
 
   // Projetos
@@ -753,22 +748,10 @@ function renderDash(){
     +'<span style="font-size:12px;font-weight:700;font-family:var(--mono);color:'+bc+'">'+p.pct+'%</span></div>'
     +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:3px">'
     +'<div style="width:'+p.pct+'%;height:100%;background:'+bc+'"></div></div>'
-    +'<div style="font-size:10px;color:var(--muted)">'+p.cf.toLocaleString()+' / '+p.tot.toLocaleString()+' ft — <span style="color:'+fc_c+'">'+fc+'</span></div>'
+    +'<div style="font-size:10px;color:var(--muted)">'+p.cf.toLocaleString()+' / '+p.tot.toLocaleString()+' ft · '+p.fpw+' ft/sem — <span style="color:'+fc_c+'">'+fc+'</span></div>'
     +'</div>';
   }).join('')
   +'<div style="font-size:10px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px;margin-top:4px">'+projVel.length+' projeto(s) ativo(s)</div>'
-  +'</div>'
-
-  // Atividade recente
-  +'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px">'
-  +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Atividade Recente</div>'
-  +recentActs.map(({t,h})=>'<div style="display:flex;gap:7px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')">'
-  +'<div style="width:7px;height:7px;border-radius:50%;background:'+(h.color||'#9a9888')+';margin-top:4px;flex-shrink:0"></div>'
-  +'<div style="flex:1;min-width:0">'
-  +'<span style="font-size:10px;font-family:var(--mono);font-weight:700">'+t.ticket+'</span>'
-  +' <span style="font-size:10px;color:var(--text2)">— '+(h.action||'').substring(0,45)+(( h.action||'').length>45?'…':'')+'</span>'
-  +'<div style="font-size:9px;color:var(--muted)">'+ago(h.ts||0)+'</div>'
-  +'</div></div>').join('')
   +'</div>'
 
   // Health / Sync Status card
@@ -779,7 +762,7 @@ function renderDash(){
 
   +'</div>' // end col2
 
-  +'</div>' // end 3-col grid
+  +'</div>' // end 2-col grid
 
   // ── SYNC TIMER ──────────────────────────────────────────────────────────
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';
@@ -1095,13 +1078,24 @@ function renderAnalytics(){
     const df=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const tf=ts.reduce((s,t)=>s+(t.footage||0),0);const tot=p.totalFeet||tf||1;
     const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>l.replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()))].join(', ')||'';
-    const c4w=ts.filter(t=>t.history&&t.history.some(h=>{const a=(h.action||'').toLowerCase();return h.ts>=now-4*week&&(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear'));}));
-    const fpw=c4w.reduce((s,t)=>s+(t.footage||0),0)/4;
+    const c4w_bins=[0,0,0,0];
+    for(const t2 of ts){
+      if(!t2.history)continue;
+      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return a2.includes('→ clear')||a2.includes('auto 811')||a2.includes('auto-clear');}).pop();
+      if(!clearEvt||!clearEvt.ts)continue;
+      const wAgo=Math.floor((now-clearEvt.ts)/week);
+      if(wAgo>=0&&wAgo<4)c4w_bins[wAgo]+=(t2.footage||0);
+    }
+    const wgts=[3,2,1,0.5];
+    const wSum2=c4w_bins.reduce((s2,v,i2)=>s2+v*wgts[i2],0);
+    const wTot2=wgts.reduce((s2,w2,i2)=>s2+(c4w_bins[i2]>0?w2:0),0);
+    let fpw2=wTot2>0?wSum2/wTot2:0;
+    if(fpw2===0)fpw2=c4w_bins.reduce((s2,v)=>s2+v,0)/4;
     return{id:p.id,name:p.name,locs,clearFtP:cf,openFtP:of2,concluidoFt:con,damageFt:df,ticketFt:tf,totalFt:tot,
       pctClear:tot>0?Math.round(cf/tot*100):0,pctOpen:tot>0?Math.round(of2/tot*100):0,
       pctConcluido:tot>0?Math.round(con/tot*100):0,pctDamage:tot>0?Math.round(df/tot*100):0,
-      hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||'',ftPerWeek:Math.round(fpw),
-      weeksLeft:fpw>0?Math.ceil(of2/fpw):null,count:ts.length};
+      hasTotalFromSheet:!!p.totalFeet,locs,state:p.state||'',ftPerWeek:Math.round(fpw2),
+      weeksLeft:fpw2>0?Math.ceil(of2/fpw2):null,count:ts.length};
   }).sort((a,b)=>b.count-a.count);
 
   // Order: 1.Clareados 2.Evolução 3.Progresso 4.Score 5.Velocity 6.TempMédio 7.Utilities 8.Sync
@@ -1109,6 +1103,7 @@ function renderAnalytics(){
   el.innerHTML=
     '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span>'+syncPill+'<span style="margin-left:auto">'+sf+'</span></div>'
     +renderClearedStats(fT)
+    +renderRecentActivity(fT)
     +renderWeeklyEvolution(fT)
     +renderProgressoFootage(fT,ps)
     +renderRiskAnalytics(fT)
@@ -1202,6 +1197,32 @@ function renderClearedStats(fTickets){
   return h;
 }
 
+function renderRecentActivity(fTickets){
+  const now=Date.now();
+  function ago(ts){const m=Math.round((now-ts)/60000);if(m<2)return'agora';if(m<60)return m+'min';if(m<120)return'1h';if(m<1440)return Math.round(m/60)+'h';if(m<2880)return'ontem '+new Date(ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});return Math.round(m/1440)+'d';}
+  const acts=[];for(const t of fTickets){if(!t.history)continue;for(const h of [...t.history].reverse().slice(0,3)){acts.push({t,h});if(acts.length>=80)break;}}
+  acts.sort((a,b)=>(b.h.ts||0)-(a.h.ts||0));
+  const recent=acts.slice(0,15);
+  if(!recent.length)return'';
+  let h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">';
+  h+='<div class="dash-card-title">Atividade Recente</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px">';
+  for(const{t,h:ev}of recent){
+    const loc=(t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim();
+    h+='<div style="display:flex;gap:8px;padding:8px 10px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')">'
+    +'<div style="width:8px;height:8px;border-radius:50%;background:'+(ev.color||'#9a9888')+';margin-top:4px;flex-shrink:0"></div>'
+    +'<div style="flex:1;min-width:0">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center">'
+    +'<span style="font-size:11px;font-family:var(--mono);font-weight:700">'+t.ticket+'</span>'
+    +'<span style="font-size:9px;color:var(--muted)">'+ago(ev.ts||0)+'</span></div>'
+    +'<div style="font-size:10px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(ev.action||'').substring(0,60)+'</div>'
+    +'<div style="font-size:9px;color:var(--muted)">'+loc+' · '+t.state+' · <span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:8px">'+t.status+'</span></div>'
+    +'</div></div>';
+  }
+  h+='</div></div></div>';
+  return h;
+}
+
 function renderUtilSummaryHtml(){
   if(!utilCacheLoaded)return'<div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">Utilities 811 — Pendentes</div><div style="color:var(--muted);font-size:12px">Carregando dados de utilities...</div></div>';
   const utilCount={};const utilTickets={};
@@ -1228,7 +1249,16 @@ function renderClearTimeMetrics(fTickets){
   var mpf=_metricProjFilter||'';
   var ft3=mpf?fTickets.filter(function(t){return t.projectId===mpf;}):fTickets;
   var utilTimes={};
-  for(var i=0;i<ft3.length;i++){var t=ft3[i];if(!t.history||!t.history.length)continue;var createdTs=t.history[0].ts;if(!createdTs)continue;var utils=getTicketUtils(String(t.ticket).trim());for(var j=0;j<utils.length;j++){var u=utils[j];if(u.status!=='Clear'||!u.responded_at)continue;var respTs=new Date(u.responded_at).getTime();if(isNaN(respTs)||respTs<createdTs)continue;var days=(respTs-createdTs)/86400000;if(days>90)continue;var name=u.utility_name;if(!utilTimes[name])utilTimes[name]={total:0,count:0};utilTimes[name].total+=days;utilTimes[name].count++;}}
+  for(var i=0;i<ft3.length;i++){var t=ft3[i];if(!t.history||!t.history.length)continue;
+    // Usa data do evento de CLEAR do ticket (não data de abertura)
+    var clearEvt=null;
+    for(var k=t.history.length-1;k>=0;k--){var a=(t.history[k].action||'').toLowerCase();if(a.indexOf('→ clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0){clearEvt=t.history[k];break;}}
+    if(!clearEvt||!clearEvt.ts)continue;
+    var clearTs=clearEvt.ts;
+    var utils=getTicketUtils(String(t.ticket).trim());for(var j=0;j<utils.length;j++){var u=utils[j];if(u.status!=='Clear'||!u.responded_at)continue;var respTs=new Date(u.responded_at).getTime();if(isNaN(respTs))continue;
+    // Mede tempo da resposta da utility até o clear do ticket (pode ser negativo se utility respondeu antes)
+    var days=Math.abs(clearTs-respTs)/86400000;
+    if(days>90)continue;var name=u.utility_name;if(!utilTimes[name])utilTimes[name]={total:0,count:0};utilTimes[name].total+=days;utilTimes[name].count++;}}
   var utilAvg=[];for(var name in utilTimes){if(utilTimes[name].count>=2){utilAvg.push({name:name,avg:Math.round(utilTimes[name].total/utilTimes[name].count*10)/10,count:utilTimes[name].count});}}
   utilAvg.sort(function(a,b){return b.avg-a.avg;});
   if(!utilAvg.length)return'';

@@ -1242,40 +1242,27 @@ function renderClearedStats(fTickets){
   var cpf=_clearProjFilter||'';
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
 
-  // Detecta data de clear de cada ticket usando DUAS fontes:
-  // 1. Eventos de histórico ("→ clear", "auto-clear") — PRIORIDADE (data confiável)
-  // 2. Data da ÚLTIMA resposta de utility — FALLBACK (pode ser sobrescrita pelo sync)
+  // Detecta data de clear usando histórico + fallback por notes
   function getTicketClearDate(t){
-    var clearTs=0;
-    // Fonte 1: histórico (prioridade — data mais confiável)
-    if(t.history&&t.history.length){
-      for(var j=t.history.length-1;j>=0;j--){
-        var a=(t.history[j].action||'').toLowerCase();
-        if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||(a.indexOf('status manual')>=0&&a.indexOf('clear')>=0)){
-          clearTs=t.history[j].ts;
-          break;
-        }
+    if(!t.history||!t.history.length)return _parseClearFromNotes(t);
+    for(var j=t.history.length-1;j>=0;j--){
+      var a=(t.history[j].action||'').toLowerCase();
+      // "→ clear" matcha manual ("Open → Clear") e auto
+      // "auto 811" SEM "revertido" matcha "[AUTO 811] Clear em..."
+      // NÃO matcha "Clear → Damage" nem "Revertido Clear→Open"
+      if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){
+        return t.history[j].ts;
       }
     }
-    // Se já tem data do histórico, usa ela (mais confiável que responded_at)
-    if(clearTs>0)return clearTs;
-    // Fonte 2: fallback — respostas de utilities (só se NÃO tem evento no histórico)
-    if(utilCacheLoaded){
-      var tkey=String(t.ticket||'').trim();
-      var utils=getTicketUtils(tkey);
-      if(utils.length>0){
-        var allClear=true;var latestResp=0;
-        for(var j=0;j<utils.length;j++){
-          if(utils[j].status!=='Clear'){allClear=false;break;}
-          if(utils[j].responded_at){
-            var rts=new Date(utils[j].responded_at).getTime();
-            if(!isNaN(rts)&&rts>latestResp)latestResp=rts;
-          }
-        }
-        if(allClear&&latestResp)clearTs=latestResp;
-      }
-    }
-    return clearTs;
+    // Fallback: tickets antigos sem evento no histórico — extrai data das notes
+    return _parseClearFromNotes(t);
+  }
+  function _parseClearFromNotes(t){
+    // Procura "[AUTO 811] Clear em MM/DD/YYYY" nas notes
+    var notes=(t.notes||'');
+    var m=notes.match(/\[AUTO 811\] Clear em (\d{1,2}\/\d{1,2}\/\d{4})/);
+    if(m){try{return new Date(m[1]).getTime();}catch(e){}}
+    return 0;
   }
 
   var c24=[],c7=[],c30=[],byU7={};

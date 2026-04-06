@@ -1243,21 +1243,23 @@ function renderClearedStats(fTickets){
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
 
   // Detecta data de clear de cada ticket usando DUAS fontes:
-  // 1. Eventos de histórico ("→ clear", "auto-clear", "auto 811")
-  // 2. Data da ÚLTIMA resposta de utility (quando TODAS são Clear)
+  // 1. Eventos de histórico ("→ clear", "auto-clear") — PRIORIDADE (data confiável)
+  // 2. Data da ÚLTIMA resposta de utility — FALLBACK (pode ser sobrescrita pelo sync)
   function getTicketClearDate(t){
     var clearTs=0;
-    // Fonte 1: histórico
+    // Fonte 1: histórico (prioridade — data mais confiável)
     if(t.history&&t.history.length){
       for(var j=t.history.length-1;j>=0;j--){
         var a=(t.history[j].action||'').toLowerCase();
-        if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||a.indexOf('status manual')>=0&&a.indexOf('clear')>=0){
-          if(t.history[j].ts>clearTs)clearTs=t.history[j].ts;
+        if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||a.indexOf('auto 811')>=0||(a.indexOf('status manual')>=0&&a.indexOf('clear')>=0)){
+          clearTs=t.history[j].ts;
           break;
         }
       }
     }
-    // Fonte 2: respostas de utilities (usa data da última resposta quando TODAS são Clear)
+    // Se já tem data do histórico, usa ela (mais confiável que responded_at)
+    if(clearTs>0)return clearTs;
+    // Fonte 2: fallback — respostas de utilities (só se NÃO tem evento no histórico)
     if(utilCacheLoaded){
       var tkey=String(t.ticket||'').trim();
       var utils=getTicketUtils(tkey);
@@ -1270,7 +1272,7 @@ function renderClearedStats(fTickets){
             if(!isNaN(rts)&&rts>latestResp)latestResp=rts;
           }
         }
-        if(allClear&&latestResp>clearTs)clearTs=latestResp;
+        if(allClear&&latestResp)clearTs=latestResp;
       }
     }
     return clearTs;

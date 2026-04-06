@@ -148,7 +148,21 @@ async function tryLogin(){
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
     if(error){errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;errEl.style.display='block';document.querySelector('.login-admin-btn').disabled=false;document.querySelector('.login-admin-btn').textContent='Entrar como Admin';return;}
-    try{const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}else{isAdmin=false;role='viewer';}}catch(e){isAdmin=false;role='viewer';}
+    try{
+      const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',data.user.id).single();
+      if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
+      else if(roleErr){
+        // RLS bloqueando app_roles — fallback por email
+        const admins=['engineering@onedrill.us','carlos@onedrill.us'];
+        isAdmin=admins.includes((data.user.email||'').toLowerCase());
+        role=isAdmin?'admin':'viewer';
+        console.warn('[Auth] app_roles inacessivel ('+roleErr.code+'), fallback email:',data.user.email,'->',role);
+      }else{isAdmin=false;role='viewer';}
+    }catch(e){
+      const admins=['engineering@onedrill.us','carlos@onedrill.us'];
+      isAdmin=admins.includes((data.user.email||'').toLowerCase());
+      role=isAdmin?'admin':'viewer';
+    }
     document.getElementById('login-screen').style.display='none';
     enterApp();
   }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
@@ -640,7 +654,7 @@ function renderDash(){
   +'</div>'
 
   // ── 3-COLUMN GRID ────────────────────────────────────────────────────────
-  +'<div style="display:grid;grid-template-columns:220px 1fr 290px;gap:12px;align-items:start">'
+  +'<div style="display:grid;grid-template-columns:210px 1.3fr 1fr;gap:12px;align-items:start">'
 
   // ── COL 1: SCORE + UTILITIES ──────────────────────────────────────────
   +'<div style="display:flex;flex-direction:column;gap:10px">'
@@ -1382,7 +1396,12 @@ window.addEventListener('load',async()=>{
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
-      try{const{data:roleData}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();isAdmin=!!(roleData&&roleData.role==='admin');}catch(e){isAdmin=false;}
+      try{
+        const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',session.user.id).single();
+        if(roleData&&roleData.role==='admin'){isAdmin=true;}
+        else if(roleErr){const admins=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=admins.includes((session.user.email||'').toLowerCase());}
+        else{isAdmin=false;}
+      }catch(e){const admins=['engineering@onedrill.us','carlos@onedrill.us'];isAdmin=admins.includes((session.user.email||'').toLowerCase());}
       role=isAdmin?'admin':'viewer';
       enterApp();
       return;

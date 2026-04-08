@@ -1134,9 +1134,22 @@ async function renewTicket(){
   const newNum=prompt('Número do ticket NOVO (renovação de '+t.ticket+'):');
   if(!newNum||!newNum.trim())return;
   const newTicket=newNum.trim();
-  // Verifica se já existe
-  if(tickets.find(x=>x.ticket===newTicket&&x.id!==t.id)){toast('Ticket '+newTicket+' já existe no sistema.','danger');return;}
-  if(!confirm('Renovar ticket?\n\nANTIGO: '+t.ticket+' (expira '+t.expire+')\nNOVO: '+newTicket+'\n\nO ticket manterá status Clear até o vencimento do antigo.\nApós vencer, precisará de novas liberações.'))return;
+  // Verifica se já existe como registro separado
+  const dup=tickets.find(x=>x.ticket===newTicket&&x.id!==t.id);
+  if(dup){
+    if(!confirm('Ticket '+newTicket+' já existe no sistema (importado pelo scraper).\n\nDeseja MESCLAR?\n• O trajeto e dados do ticket atual serão mantidos\n• O registro duplicado ('+newTicket+') será removido\n• O número será atualizado para '+newTicket))return;
+    // Copia expire do duplicado se disponível
+    if(dup.expire&&dup.expire!=='—'&&(!t.expire||t.expire==='—'||new Date(dup.expire)>new Date(t.expire))){
+      t.expire=dup.expire;
+    }
+    // Deleta o duplicado
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/tickets?id=eq.'+dup.id,{method:'DELETE',headers:SB_H});
+      if(r.ok){tickets.splice(tickets.indexOf(dup),1);toast('Registro duplicado removido.','success');}
+    }catch(e){console.error('Erro ao deletar duplicado:',e);}
+  }else{
+    if(!confirm('Renovar ticket?\n\nANTIGO: '+t.ticket+' (expira '+t.expire+')\nNOVO: '+newTicket+'\n\nO ticket manterá status até o vencimento do antigo.\nApós vencer, precisará de novas liberações.'))return;
+  }
   const oldNum=t.ticket;
   const oldExpire=t.expire;
   const oldStatus=t.status;
@@ -1152,16 +1165,14 @@ async function renewTicket(){
   t.statusOld=oldStatus;
   // Atualiza para novo ticket
   t.ticket=newTicket;
-  // Mantém status Clear durante período de graça
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+' (graça até '+oldExpire+')',color:'#7c3aed'});
+  t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(dup?' (mesclado)':'')+' (graça até '+oldExpire+')',color:'#7c3aed'});
   const ok=await saveTicketToDb(t);
   if(ok){
     toast('✅ Ticket renovado: '+oldNum+' → '+newTicket,'success');
     closeModal('ov-detail');syncAll();
     setTimeout(()=>openTicketDetail(t.id),300);
   }else{
-    // Reverte
     t.ticket=oldNum;t.old_ticket2=prevChain;t.oldTicket2=prevChain;t.expire_old='';t.expireOld='';t.status_old='';t.statusOld='';
     t.history.pop();
     toast('Erro ao salvar renovação.','danger');

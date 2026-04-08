@@ -2337,10 +2337,70 @@ function renderClearedStats(fTickets){
   var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p2){return p2.status!=='Completed';}).map(function(p2){return'<option value="'+p2.id+'"'+(cpf===p2.id?' selected':'')+'>'+esc(projDropLabel(p2))+'</option>';}).join('');
   var projSel='<select class="fi" onchange="_clearProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
 
-  var topUtils=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,5);
-  var utilChips=topUtils.length?'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">'+topUtils.map(function(u){return'<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);cursor:pointer" onclick="filterByUtil(\''+esc(u[0])+'\')" title="'+u[1]+' respostas">'+esc(u[0])+' '+u[1]+'</span>';}).join('')+'</div>':'';
+  var topUtils=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,12);
 
-  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="dash-card-title" style="margin-bottom:0">✅ Tickets Clareados</div>'+projSel+'</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"><div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c24.length+'</div><div style="font-size:10px;color:var(--green)">últimas 24h</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft24.toLocaleString()+' ft</div></div><div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green)">últimos 7 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft7.toLocaleString()+' ft</div></div><div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">'+c30.length+'</div><div style="font-size:10px;color:var(--muted)">últimos 30 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft30.toLocaleString()+' ft</div></div></div>'+utilChips+'</div></div>';
+  // ── Bar chart: clareados por dia (últimos 7 dias) ──
+  var dayBuckets={};
+  var dayLabels=[];
+  var dayNow=new Date();
+  for(var d=6;d>=0;d--){
+    var dd=new Date(dayNow);dd.setDate(dd.getDate()-d);
+    var dk=dd.toISOString().slice(0,10);
+    dayBuckets[dk]=0;
+    var dias=['dom','seg','ter','qua','qui','sex','sáb'];
+    dayLabels.push({key:dk,label:dias[dd.getDay()]+', '+String(dd.getDate()).padStart(2,'0')});
+  }
+  for(var ib=0;ib<c7.length;ib++){
+    var cdt=getTicketClearDate(c7[ib]);
+    if(!cdt)continue;
+    var cdd=new Date(cdt).toISOString().slice(0,10);
+    if(dayBuckets[cdd]!==undefined)dayBuckets[cdd]++;
+  }
+  var maxBar=Math.max.apply(null,dayLabels.map(function(d2){return dayBuckets[d2.key]||0;}))||1;
+  var barHtml='<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding-top:20px">';
+  for(var ib2=0;ib2<dayLabels.length;ib2++){
+    var dv=dayBuckets[dayLabels[ib2].key]||0;
+    var bh=Math.max(dv/maxBar*100,2);
+    barHtml+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">'
+      +'<div style="font-size:10px;font-weight:700;color:var(--green)">'+( dv||'')+'</div>'
+      +'<div style="width:100%;height:'+bh+'px;background:var(--green);border-radius:3px 3px 0 0;min-height:2px"></div>'
+      +'<div style="font-size:9px;color:var(--muted);white-space:nowrap">'+dayLabels[ib2].label+'</div></div>';
+  }
+  barHtml+='</div>';
+
+  // ── Utility list (vertical) ──
+  var utilListHtml='';
+  if(topUtils.length){
+    utilListHtml='<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Utilities que responderam (7D)</div>';
+    for(var iu=0;iu<topUtils.length;iu++){
+      utilListHtml+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">'
+        +'<span style="color:var(--text)">'+esc(topUtils[iu][0])+'</span>'
+        +'<span style="font-weight:700;color:var(--green);font-family:var(--mono)">'+topUtils[iu][1]+'</span></div>';
+    }
+  }
+
+  // ── Clareados hoje ──
+  var todayHtml='';
+  if(c24.length){
+    todayHtml='<div style="margin-top:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Clareados hoje ('+c24.length+')</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    for(var it=0;it<c24.length;it++){
+      todayHtml+='<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);cursor:pointer;font-family:var(--mono)" onclick="openTicketDetail('+c24[it].id+')">'+esc(c24[it].ticket)+'</span>';
+    }
+    todayHtml+='</div></div>';
+  }
+
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="dash-card-title" style="margin-bottom:0">✅ Tickets Clareados</div>'+projSel+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'
+    +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c24.length+'</div><div style="font-size:10px;color:var(--green)">últimas 24h</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft24.toLocaleString()+' ft</div></div>'
+    +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green)">últimos 7 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft7.toLocaleString()+' ft</div></div>'
+    +'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">'+c30.length+'</div><div style="font-size:10px;color:var(--muted)">últimos 30 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft30.toLocaleString()+' ft</div></div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Clareados por dia (últimos 7 dias)</div>'+barHtml+todayHtml+'</div>'
+    +'<div>'+utilListHtml+'</div>'
+    +'</div>'
+    +'</div></div>';
 }
 
 function renderPrivateLocatorAlert(fTickets){

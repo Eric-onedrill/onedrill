@@ -136,6 +136,14 @@
       </button>
     </nav>
 
+    <div id="completed-proj-section" class="snav-completed" style="display:none;margin:8px 12px;border-top:1px solid rgba(255,255,255,.1);padding-top:8px">
+      <button onclick="toggleCompletedList()" style="display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;cursor:pointer;padding:6px 8px;border-radius:6px;color:rgba(255,255,255,.5);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='none'">
+        <span id="completed-arrow" style="transition:transform .2s">▶</span>
+        📁 Concluídos (<span id="completed-count">0</span>)
+      </button>
+      <div id="completed-list" style="display:none;max-height:200px;overflow-y:auto;margin-top:4px"></div>
+    </div>
+
     <div class="snav-actions">
       <button class="btn snav-action-btn" data-action="export-excel">↓ Excel</button>
       <button class="btn snav-action-btn hidden" id="btn-import" data-action="open-import">↑ Importar</button>

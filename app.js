@@ -688,6 +688,7 @@ function nav(page){
   if(page==='dash')renderDash();
   if(page==='contacts')renderContacts();
   if(page==='analytics')renderAnalytics();
+  if(page==='completed')renderCompletedPage();
 }
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
@@ -1558,72 +1559,121 @@ function renderProjects(){
     return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">📍 ${esc(locStr)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">${esc(p.name)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
-  g.innerHTML=(active.length?active.map(renderCard).join(''):'')
-    +(completed.length?`<div style="grid-column:1/-1;margin-top:24px;padding-top:20px;border-top:2px solid var(--border)"><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">✅ Projetos Concluídos (${completed.length})</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">${completed.map(renderCard).join('')}</div></div>`:'');
+  g.innerHTML=active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>';
 }
 
 function openProjectMap(pid){nav('map');setTimeout(()=>{document.getElementById('proj-filter').value=pid;onProjFilter();},200);}
 
-// ── COMPLETED PROJECTS SIDEBAR ──
+// ── COMPLETED PROJECTS ──
 function updateCompletedSidebar(){
   const completed=projects.filter(p=>p.status==='Completed');
-  const section=document.getElementById('completed-proj-section');
-  const countEl=document.getElementById('completed-count');
-  const listEl=document.getElementById('completed-list');
-  if(!section)return;
-  if(!completed.length){section.style.display='none';return;}
-  section.style.display='';
-  countEl.textContent=completed.length;
-  listEl.innerHTML=completed.map(p=>{
-    const ts=tickets.filter(t=>t.projectId===p.id&&!isSuperseded(t));
-    const clearC=ts.filter(t=>t.status==='Clear').length;
-    const ft=ts.reduce((s,t)=>s+(t.footage||0),0);
-    return'<div onclick="openCompletedProject(\''+p.id+'\')" style="padding:6px 8px;border-radius:6px;cursor:pointer;margin-bottom:2px;transition:background .15s" onmouseover="this.style.background=\'rgba(255,255,255,.08)\'" onmouseout="this.style.background=\'none\'">'
-      +'<div style="font-size:11px;color:rgba(255,255,255,.85);font-weight:600">'+esc(p.name)+'</div>'
-      +'<div style="font-size:9px;color:rgba(255,255,255,.4);font-family:var(--mono)">'+ts.length+' tickets · '+clearC+' clear · '+ft.toLocaleString()+' ft</div>'
-      +'</div>';
-  }).join('');
+  const navBtn=document.getElementById('nav-completed');
+  const countEl=document.getElementById('nav-completed-count');
+  if(!navBtn)return;
+  if(!completed.length){navBtn.style.display='none';return;}
+  navBtn.style.display='';
+  if(countEl)countEl.textContent='('+completed.length+')';
 }
-function toggleCompletedList(){
-  const list=document.getElementById('completed-list');
-  const arrow=document.getElementById('completed-arrow');
-  if(list.style.display==='none'){list.style.display='';arrow.style.transform='rotate(90deg)';}
-  else{list.style.display='none';arrow.style.transform='';}
+
+function renderCompletedPage(){
+  const el=document.getElementById('completed-content');if(!el)return;
+  const completed=projects.filter(p=>p.status==='Completed');
+  if(!completed.length){
+    el.innerHTML='<div class="page-title">📂 Histórico</div><div style="text-align:center;padding:40px;color:var(--muted)">Nenhum projeto finalizado</div>';
+    return;
+  }
+  // Build tree: Ano → Cliente → Localização → Projeto
+  const tree={};
+  for(const p of completed){
+    const ts=tickets.filter(t=>t.projectId===p.id);
+    // Year: from first ticket created_at or fallback to current year
+    const firstTs=ts.length?Math.min(...ts.map(t=>t.created_at?new Date(t.created_at).getTime():Date.now())):Date.now();
+    const year=new Date(firstTs).getFullYear();
+    const client=p.client||'Sem cliente';
+    const locs=[...new Set(ts.map(t=>(t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim()).filter(Boolean))];
+    const loc=locs.length?locs.join(', '):(p.state||'—');
+    if(!tree[year])tree[year]={};
+    if(!tree[year][client])tree[year][client]={};
+    if(!tree[year][client][loc])tree[year][client][loc]=[];
+    tree[year][client][loc].push(p);
+  }
+  let html='<div class="page-title">📂 Histórico <span style="font-size:13px;font-weight:400;color:var(--muted)">'+completed.length+' projeto'+(completed.length>1?'s':'')+'</span></div>';
+  // Render tree
+  const years=Object.keys(tree).sort((a,b)=>b-a);
+  for(const year of years){
+    html+='<div style="margin-bottom:16px">'
+      +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\' none\';this.querySelector(\'.yr-arrow\').textContent=this.nextElementSibling.style.display===\'none\'?\'▶\':\'▼\'" style="cursor:pointer;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);display:flex;align-items:center;gap:8px">'
+      +'<span class="yr-arrow" style="font-size:10px;color:var(--muted)">▼</span>'
+      +'<span style="font-size:14px;font-weight:700;font-family:var(--mono)">'+year+'</span>'
+      +'</div>'
+      +'<div style="margin-left:16px;margin-top:4px">';
+    const clients=Object.keys(tree[year]).sort();
+    for(const client of clients){
+      html+='<div style="margin-bottom:8px">'
+        +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\' none\';this.querySelector(\'.cl-arrow\').textContent=this.nextElementSibling.style.display===\'none\'?\'▶\':\'▼\'" style="cursor:pointer;padding:6px 10px;display:flex;align-items:center;gap:8px">'
+        +'<span class="cl-arrow" style="font-size:9px;color:var(--muted)">▼</span>'
+        +'<span style="font-size:12px;font-weight:600;color:var(--text)">🏢 '+esc(client)+'</span>'
+        +'</div>'
+        +'<div style="margin-left:20px">';
+      const locs=Object.keys(tree[year][client]).sort();
+      for(const loc of locs){
+        const projs=tree[year][client][loc];
+        html+='<div style="margin-bottom:4px">'
+          +'<div style="padding:4px 8px;font-size:11px;color:var(--muted);font-weight:600">📍 '+esc(loc)+'</div>'
+          +'<div style="margin-left:16px">';
+        for(const p of projs){
+          const tCount=tickets.filter(t=>t.projectId===p.id&&!isSuperseded(t)).length;
+          html+='<div onclick="openCompletedProjectDetail(\''+p.id+'\')" style="padding:6px 10px;border-radius:var(--r);cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'none\'">'
+            +'<div style="display:flex;align-items:center;gap:8px">'
+            +'<span style="font-size:12px">📋</span>'
+            +'<span style="font-size:12px;font-weight:500;color:var(--text)">'+esc(p.name)+'</span>'
+            +'</div>'
+            +'<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">'+tCount+' tickets</span>'
+            +'</div>';
+        }
+        html+='</div></div>';
+      }
+      html+='</div></div>';
+    }
+    html+='</div></div>';
+  }
+  el.innerHTML=html;
 }
-function openCompletedProject(pid){
+
+function openCompletedProjectDetail(pid){
   const p=projects.find(x=>x.id===pid);if(!p)return;
   const ts=tickets.filter(t=>t.projectId===pid&&!isSuperseded(t));
   const clearC=ts.filter(t=>t.status==='Clear').length;
   const openC=ts.filter(t=>t.status==='Open').length;
-  const dmgC=ts.filter(t=>t.status==='Damage').length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
-  const clearFt=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-  // Build summary
+  // Summary cards
   const summary='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">'
     +'<div style="text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+ts.length+'</div><div style="font-size:10px;color:var(--muted)">Total</div></div>'
     +'<div style="text-align:center;padding:10px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;color:var(--green);font-family:var(--mono)">'+clearC+'</div><div style="font-size:10px;color:var(--green)">Clear</div></div>'
     +'<div style="text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;color:var(--red);font-family:var(--mono)">'+openC+'</div><div style="font-size:10px;color:var(--muted)">Open</div></div>'
     +'<div style="text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+totalFt.toLocaleString()+'</div><div style="font-size:10px;color:var(--muted)">Footage</div></div>'
     +'</div>';
-  // Ticket list
-  const tblHtml='<div style="max-height:250px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px">Ticket</th><th style="padding:4px 6px">Local</th><th style="padding:4px 6px">Status</th><th style="padding:4px 6px">Footage</th></tr></thead><tbody>'
-    +ts.map(t=>'<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td><td style="padding:4px 6px">'+esc((t.location||'').split(',')[0])+', '+esc(t.state)+'</td><td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'">'+esc(t.status)+'</span></td><td style="padding:4px 6px;font-family:var(--mono)">'+t.footage+'</td></tr>').join('')
+  // Ticket table
+  const tblHtml='<div style="max-height:300px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px">Ticket</th><th style="padding:4px 6px">Local</th><th style="padding:4px 6px">Status</th><th style="padding:4px 6px">Footage</th><th style="padding:4px 6px">Expira</th></tr></thead><tbody>'
+    +ts.map(t=>'<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td><td style="padding:4px 6px">'+esc((t.location||'').split(',')[0])+', '+esc(t.state)+'</td><td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'">'+esc(t.status)+'</span></td><td style="padding:4px 6px;font-family:var(--mono)">'+t.footage+'</td><td style="padding:4px 6px">'+esc(t.expire||'—')+'</td></tr>').join('')
     +'</tbody></table></div>';
-  // Map button
-  const mapBtn='<div style="margin-top:10px;display:flex;gap:6px"><button class="btn btn-sm" onclick="closeModal(\'ov-completed-proj\');openProjectMap(\''+pid+'\')" style="background:var(--accent);color:white;border-color:var(--accent)">🗺️ Ver no mapa</button>'
+  // Buttons
+  const btns='<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">'
+    +'<button class="btn btn-sm" onclick="closeModal(\'ov-completed-proj\');nav(\'map\');setTimeout(()=>{document.getElementById(\'proj-filter\').value=\''+pid+'\';onProjFilter();},200)" style="background:var(--accent);color:white;border-color:var(--accent)">🗺️ Ver no mapa</button>'
     +(isAdmin?'<button class="btn btn-sm" onclick="reopenProject(\''+pid+'\')">🔓 Reabrir projeto</button>':'')
     +'</div>';
-  // Show modal
+  // Modal
   let ov=document.getElementById('ov-completed-proj');
   if(!ov){
     ov=document.createElement('div');ov.id='ov-completed-proj';ov.className='overlay';
     ov.innerHTML='<div class="modal" style="max-width:700px"><div class="modal-header"><h3 id="cp-title"></h3><button class="modal-close" onclick="closeModal(\'ov-completed-proj\')">×</button></div><div id="cp-body" style="padding:16px"></div></div>';
     document.body.appendChild(ov);
   }
-  document.getElementById('cp-title').textContent='📁 '+p.name+' (Concluído)';
-  document.getElementById('cp-body').innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:10px">'+esc(p.client)+' · '+esc(p.state)+(p.totalFeet?' · Meta: '+p.totalFeet.toLocaleString()+' ft':'')+'</div>'+summary+tblHtml+mapBtn;
+  document.getElementById('cp-title').textContent='📁 '+p.name;
+  document.getElementById('cp-body').innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:10px">'+esc(p.client)+' · '+esc(p.state)+(p.totalFeet?' · Meta: '+p.totalFeet.toLocaleString()+' ft':'')+'</div>'+summary+tblHtml+btns;
   openModal('ov-completed-proj');
 }
+
 function reopenProject(pid){
   const p=projects.find(x=>x.id===pid);if(!p)return;
   if(!confirm('Reabrir projeto "'+p.name+'"?'))return;
@@ -2819,6 +2869,7 @@ function syncAll(){
   else if(ap==='pg-dash')renderDash();
   else if(ap==='pg-contacts')renderContacts();
   else if(ap==='pg-analytics')renderAnalytics();
+  else if(ap==='pg-completed')renderCompletedPage();
   else renderDash();
 }
 

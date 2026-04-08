@@ -1255,15 +1255,30 @@ async function renderUtils(t){
   if(!el)return;
   el.innerHTML='<div style="color:var(--muted);font-size:12px">Carregando...</div>';
   try{
+    // Durante período de graça, mostra utilities do ticket ANTIGO
+    const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+    const oldTicketNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]:'';
+    const queryTicket=inGrace&&oldTicketNum?oldTicketNum:t.ticket;
+
     const{data,error}=await sb
       .from('ticket_811_responses')
       .select('utility_name,status,response_text,responded_at')
-      .eq('ticket_num',t.ticket)
+      .eq('ticket_num',queryTicket)
       .order('utility_name');
 
     if(error)throw error;
+
+    // Banner de graça
+    let graceBanner='';
+    if(inGrace){
+      graceBanner='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:8px 12px;margin-bottom:8px">'
+        +'<div style="font-size:11px;font-weight:700;color:#16a34a">✅ LIBERADO — Utilities do ticket antigo ('+esc(oldTicketNum)+')</div>'
+        +'<div style="font-size:10px;color:#15803d;margin-top:2px">Válido até '+(t.expireOld||t.expire_old)+'. Após essa data, novas liberações serão necessárias do ticket '+esc(t.ticket)+'.</div>'
+        +'</div>';
+    }
+
     if(!data||!data.length){
-      el.innerHTML='<div style="color:var(--muted);font-size:12px">Sem dados de utilities</div>';
+      el.innerHTML=graceBanner+'<div style="color:var(--muted);font-size:12px">Sem dados de utilities</div>';
       if(sm)sm.textContent='';
       return;
     }
@@ -1272,6 +1287,7 @@ async function renderUtils(t){
     const marked=data.filter(u=>u.status==='Marked');
     if(sm){
       const parts=[];
+      if(inGrace)parts.push('<span style="color:#7c3aed">🔄 graça</span>');
       if(pending.length)parts.push(`<span style="color:var(--red)">${pending.length} pendente${pending.length>1?'s':''}</span>`);
       if(marked.length)parts.push(`<span style="color:var(--amber)">${marked.length} marcada${marked.length>1?'s':''}</span>`);
       if(cleared.length)parts.push(`<span style="color:var(--green)">${cleared.length} clear</span>`);
@@ -1281,7 +1297,7 @@ async function renderUtils(t){
     const label={Pending:'Pendente',Clear:'Clear',Marked:'Marcado',Private:'Privado',Unmarked:'Desmarcado'};
     const order={Pending:0,Marked:1,Private:2,Clear:3,Unmarked:4};
     data.sort((a,b)=>(order[a.status]||9)-(order[b.status]||9));
-    el.innerHTML=data.map(u=>{
+    el.innerHTML=graceBanner+data.map(u=>{
       const resp=(u.response_text||'').trim();
       let detail='';
       if(resp && u.status==='Clear'){

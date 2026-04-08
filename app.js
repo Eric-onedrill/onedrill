@@ -61,7 +61,7 @@ let clusterGroup=null;
 let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
-let _soonDays=10,_metricProjFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='';
+let _soonDays=10,_metricProjFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='',_analyticsScope='all';
 let utilContacts=[],editingContactId=null;
 let supersededSet=new Set();
 let miniMap=null;
@@ -2344,11 +2344,18 @@ function renderAnalytics(){
   const el=document.getElementById('analytics-content');if(!el)return;
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
+  const scope=_analyticsScope||'all';
   const sf='<select class="fi" onchange="dashStateVal=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+esc(s)+'"'+(dsf===s?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select>';
-  const fT=filterTickets({state:dsf});
-  const fP=dsf?projects.filter(p=>p.state===dsf):projects;
+  const scopeSel='<select class="fi" onchange="_analyticsScope=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px">'
+    +'<option value="all"'+(scope==='all'?' selected':'')+'>📊 Todos projetos</option>'
+    +'<option value="active"'+(scope==='active'?' selected':'')+'>🟢 Só ativos</option>'
+    +'<option value="completed"'+(scope==='completed'?' selected':'')+'>📁 Só concluídos</option>'
+    +'</select>';
+  const fT=filterTickets({state:dsf,excludeCompleted:false});
+  const allProjs=dsf?projects.filter(p=>p.state===dsf):projects;
+  const fP=scope==='active'?allProjs.filter(p=>p.status!=='Completed'):scope==='completed'?allProjs.filter(p=>p.status==='Completed'):allProjs;
   const now=Date.now();const week=7*86400000;
-  const ps=fP.filter(p=>p.status!=='Completed').map(p=>{
+  const ps=fP.map(p=>{
     const ts=fT.filter(t=>t.projectId===p.id);
     const cf=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
     const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
@@ -2379,7 +2386,7 @@ function renderAnalytics(){
   const syncPill=window._lastSyncTime?(function(){var d=new Date(window._lastSyncTime);var hm=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});var diff=Math.round((Date.now()-window._lastSyncTime)/60000);var ago2;if(diff<2)ago2='agora';else if(diff<60)ago2=diff+'min atrás';else if(diff<120)ago2='1h atrás';else ago2=Math.round(diff/60)+'h atrás';return'<span id="analytics-sync-pill" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);margin-left:8px;white-space:nowrap">● Último sync '+hm+' ('+ago2+')</span>';})():'<span id="analytics-sync-pill" style="font-size:11px;padding:3px 10px;border-radius:20px;background:var(--bg);color:var(--muted);border:1px solid var(--border);margin-left:8px;white-space:nowrap">⏳ Carregando sync...</span>';
 
   el.innerHTML=
-    '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span>'+syncPill+'<span style="margin-left:auto">'+sf+'</span></div>'
+    '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span>'+syncPill+'<span style="margin-left:auto;display:flex;gap:6px">'+scopeSel+sf+'</span></div>'
     +renderClearedStats(fT)
     +renderWeeklyEvolution(fT)
     +renderProgressoFootage(fT,ps)

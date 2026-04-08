@@ -106,13 +106,20 @@ function filterTickets(opts={}){
     state='',
     utility='',
     excludeSuperseded=true,
+    excludeCompleted=true,
     statusFilter=null,
     mapUtilFilter=''
   }=opts;
 
+  // Pre-compute completed project IDs for fast lookup
+  const completedProjIds=excludeCompleted?new Set(projects.filter(p=>p.status==='Completed').map(p=>p.id)):null;
+
   const sr=search.toLowerCase();
 
   return tickets.filter(t=>{
+    // Exclude tickets from completed projects
+    if(completedProjIds&&t.projectId&&completedProjIds.has(t.projectId)) return false;
+
     // Superseded
     if(excludeSuperseded && isSuperseded(t)) return false;
 
@@ -762,11 +769,13 @@ function mapFiltered(){
   const cl=document.getElementById('fcli')?.value||'';
   const lc=document.getElementById('floc')?.value||'';
   const muf=document.getElementById('map-util-filter')?.value||'';
+  const isCompletedProj=pf&&projects.find(p=>p.id===pf&&p.status==='Completed');
   return filterTickets({
     projectId:pf,
     search:sr,
     client:cl,
     excludeSuperseded:true,
+    excludeCompleted:!isCompletedProj,
     statusFilter:mf,
     mapUtilFilter:muf
   }).filter(t=>{
@@ -1342,7 +1351,8 @@ function renderTable(){
   const cl=document.getElementById('tbl-cli').value;
   const ut=document.getElementById('tbl-util')?.value||'';
 
-  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut});
+  const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
+  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,excludeCompleted:!isCompletedProj});
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}
@@ -1553,6 +1563,75 @@ function renderProjects(){
 }
 
 function openProjectMap(pid){nav('map');setTimeout(()=>{document.getElementById('proj-filter').value=pid;onProjFilter();},200);}
+
+// ── COMPLETED PROJECTS SIDEBAR ──
+function updateCompletedSidebar(){
+  const completed=projects.filter(p=>p.status==='Completed');
+  const section=document.getElementById('completed-proj-section');
+  const countEl=document.getElementById('completed-count');
+  const listEl=document.getElementById('completed-list');
+  if(!section)return;
+  if(!completed.length){section.style.display='none';return;}
+  section.style.display='';
+  countEl.textContent=completed.length;
+  listEl.innerHTML=completed.map(p=>{
+    const ts=tickets.filter(t=>t.projectId===p.id&&!isSuperseded(t));
+    const clearC=ts.filter(t=>t.status==='Clear').length;
+    const ft=ts.reduce((s,t)=>s+(t.footage||0),0);
+    return'<div onclick="openCompletedProject(\''+p.id+'\')" style="padding:6px 8px;border-radius:6px;cursor:pointer;margin-bottom:2px;transition:background .15s" onmouseover="this.style.background=\'rgba(255,255,255,.08)\'" onmouseout="this.style.background=\'none\'">'
+      +'<div style="font-size:11px;color:rgba(255,255,255,.85);font-weight:600">'+esc(p.name)+'</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.4);font-family:var(--mono)">'+ts.length+' tickets · '+clearC+' clear · '+ft.toLocaleString()+' ft</div>'
+      +'</div>';
+  }).join('');
+}
+function toggleCompletedList(){
+  const list=document.getElementById('completed-list');
+  const arrow=document.getElementById('completed-arrow');
+  if(list.style.display==='none'){list.style.display='';arrow.style.transform='rotate(90deg)';}
+  else{list.style.display='none';arrow.style.transform='';}
+}
+function openCompletedProject(pid){
+  const p=projects.find(x=>x.id===pid);if(!p)return;
+  const ts=tickets.filter(t=>t.projectId===pid&&!isSuperseded(t));
+  const clearC=ts.filter(t=>t.status==='Clear').length;
+  const openC=ts.filter(t=>t.status==='Open').length;
+  const dmgC=ts.filter(t=>t.status==='Damage').length;
+  const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
+  const clearFt=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+  // Build summary
+  const summary='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">'
+    +'<div style="text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+ts.length+'</div><div style="font-size:10px;color:var(--muted)">Total</div></div>'
+    +'<div style="text-align:center;padding:10px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;color:var(--green);font-family:var(--mono)">'+clearC+'</div><div style="font-size:10px;color:var(--green)">Clear</div></div>'
+    +'<div style="text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;color:var(--red);font-family:var(--mono)">'+openC+'</div><div style="font-size:10px;color:var(--muted)">Open</div></div>'
+    +'<div style="text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)"><div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+totalFt.toLocaleString()+'</div><div style="font-size:10px;color:var(--muted)">Footage</div></div>'
+    +'</div>';
+  // Ticket list
+  const tblHtml='<div style="max-height:250px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px">Ticket</th><th style="padding:4px 6px">Local</th><th style="padding:4px 6px">Status</th><th style="padding:4px 6px">Footage</th></tr></thead><tbody>'
+    +ts.map(t=>'<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td><td style="padding:4px 6px">'+esc((t.location||'').split(',')[0])+', '+esc(t.state)+'</td><td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'">'+esc(t.status)+'</span></td><td style="padding:4px 6px;font-family:var(--mono)">'+t.footage+'</td></tr>').join('')
+    +'</tbody></table></div>';
+  // Map button
+  const mapBtn='<div style="margin-top:10px;display:flex;gap:6px"><button class="btn btn-sm" onclick="closeModal(\'ov-completed-proj\');openProjectMap(\''+pid+'\')" style="background:var(--accent);color:white;border-color:var(--accent)">🗺️ Ver no mapa</button>'
+    +(isAdmin?'<button class="btn btn-sm" onclick="reopenProject(\''+pid+'\')">🔓 Reabrir projeto</button>':'')
+    +'</div>';
+  // Show modal
+  let ov=document.getElementById('ov-completed-proj');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ov-completed-proj';ov.className='overlay';
+    ov.innerHTML='<div class="modal" style="max-width:700px"><div class="modal-header"><h3 id="cp-title"></h3><button class="modal-close" onclick="closeModal(\'ov-completed-proj\')">×</button></div><div id="cp-body" style="padding:16px"></div></div>';
+    document.body.appendChild(ov);
+  }
+  document.getElementById('cp-title').textContent='📁 '+p.name+' (Concluído)';
+  document.getElementById('cp-body').innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:10px">'+esc(p.client)+' · '+esc(p.state)+(p.totalFeet?' · Meta: '+p.totalFeet.toLocaleString()+' ft':'')+'</div>'+summary+tblHtml+mapBtn;
+  openModal('ov-completed-proj');
+}
+function reopenProject(pid){
+  const p=projects.find(x=>x.id===pid);if(!p)return;
+  if(!confirm('Reabrir projeto "'+p.name+'"?'))return;
+  p.status='Active';
+  saveProjectToDb(p).then(ok=>{
+    if(ok){toast('Projeto reaberto!','success');closeModal('ov-completed-proj');updateCompletedSidebar();syncAll();}
+  });
+}
 
 function openNewProject(){
   editingProjectId=null;
@@ -2691,7 +2770,11 @@ function filterByUtil(utilName){nav('tickets');setTimeout(()=>{const sel=documen
 
 /* ═══════════ 27. SYNC HELPERS ═══════════ */
 function syncProjectSelects(){
-  const mkOpts=(label)=>'<option value="">'+label+'</option>'+projects.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');
+  const active=projects.filter(p=>p.status!=='Completed');
+  const completed=projects.filter(p=>p.status==='Completed');
+  const mkOpts=(label)=>'<option value="">'+label+'</option>'
+    +active.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('')
+    +(completed.length?'<optgroup label="── Concluídos ──">'+completed.map(p=>`<option value="${p.id}">📁 ${esc(projDropLabel(p))}</option>`).join('')+'</optgroup>':'');
   const pf=document.getElementById('proj-filter');if(pf)pf.innerHTML=mkOpts('Todos os projetos');
   const tp=document.getElementById('tbl-proj');if(tp)tp.innerHTML=mkOpts('Todos projetos');
   const tm=document.getElementById('tm-proj');if(tm)tm.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');
@@ -2720,7 +2803,7 @@ function syncLocations(){
   if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${esc(l)}</option>`).join('');
 }
 function syncAll(){
-  rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();
+  rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();updateCompletedSidebar();
   if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}
   const ap=document.querySelector('.page.active')?.id;
   if(ap==='pg-map'){renderList();renderMap();}

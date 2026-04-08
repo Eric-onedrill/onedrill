@@ -1,3162 +1,767 @@
-#!/usr/bin/env python3
-"""
-OneDrill - 811 Automation Script
-Indiana 811 + Sunshine 811
-
-Melhorias v2:
-  - Retry genérico em TODAS as operações Supabase
-  - Lock file pra evitar execuções simultâneas
-  - Resumo de sync estruturado (cleared, reverted, private_locator)
-  - Dedup e truncamento de notas automáticas
-  - COMPANY_PHONE movido pro .env
-  - Validação no parser de contatos
-  - Scheduler com stagger e melhor controle de concorrência
-  - Context manager pra Playwright (evita Chrome órfão)
-  - Logs mais claros e consistentes
-"""
-
-import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse
-from datetime import datetime, timezone, timedelta
-from contextlib import asynccontextmanager
-from dotenv import load_dotenv
-import requests, schedule
-from playwright.async_api import async_playwright
-import json as _json
-
-# ── DEBUG MODE ────────────────────────────────────────────────────────────────
-DEBUG_MODE = os.environ.get("ONEDRILL_DEBUG", "").lower() in ("1", "true", "yes")
-
-load_dotenv()
-
-# ── CONFIGURAÇÃO ──────────────────────────────────────────────────────────────
-SB_URL        = os.getenv("SB_URL",  "https://ofbqtaulvzeltfpqcjhh.supabase.co")
-SB_KEY        = os.getenv("SB_KEY",  "")
-IN_USER       = os.getenv("IN_USER", "")
-IN_PASS       = os.getenv("IN_PASS", "")
-FL_USER       = os.getenv("FL_USER", "")
-FL_PASS       = os.getenv("FL_PASS", "")
-GMAIL_USER    = os.getenv("GMAIL_USER",  "")
-GMAIL_PASS    = os.getenv("GMAIL_PASS",  "")
-ALERT_EMAIL   = os.getenv("ALERT_EMAIL", "")
-COMPANY_PHONE = os.getenv("COMPANY_PHONE", "3219473131")
-
-# Validação de configuração crítica
-if not SB_KEY:
-    print("⚠ AVISO: SB_KEY não definida no .env — operações Supabase vão falhar", file=sys.stderr)
-
-PORTALS = {
-    "IN": {
-        "url":       "https://811.indiana811.org/login?returnUrl=%2Fhome",
-        "home":      "https://811.indiana811.org/home",
-        "dashboard": "https://811.indiana811.org/tickets/dashboard",
-        "user":      lambda: IN_USER,
-        "pass":      lambda: IN_PASS,
-    },
-    "FL": {
-        "url":       "https://exactix.sunshine811.com/login",
-        "home":      "https://exactix.sunshine811.com/home",
-        "dashboard": "https://exactix.sunshine811.com/tickets/dashboard",
-        "user":      lambda: FL_USER,
-        "pass":      lambda: FL_PASS,
-    },
-}
-
-SB_H = {
-    "apikey":        SB_KEY,
-    "Authorization": f"Bearer {SB_KEY}",
-    "Content-Type":  "application/json",
-    "Prefer":        "return=representation"
-}
-
-# ── LOGGING ───────────────────────────────────────────────────────────────────
-_log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "811_sync.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.handlers.RotatingFileHandler(
-            _log_file, maxBytes=5*1024*1024, backupCount=3, encoding="utf-8"
-        ),
-        logging.StreamHandler(
-            stream=open(sys.stdout.fileno(), mode='w', encoding='utf-8', closefd=False)
-        )
-    ]
-)
-log = logging.getLogger(__name__)
-
-# ── CONSTANTES ────────────────────────────────────────────────────────────────
-W_SAFETY           = 300      # fallback ms quando não há seletor confiável
-NUM_TABS           = 3        # abas paralelas para scraping
-CLEAR_CACHE_HOURS  = 24       # re-verifica Clear tickets 1x por dia
-MAX_AUTO_NOTES     = 10       # máximo de notas automáticas por ticket
-BATCH_SIZE         = 200      # tamanho do lote para bulk upsert
-MAX_IMPORT_PAGES   = 5        # com 100/pagina, 5 paginas = 500 tickets
-LOCK_FILE          = os.path.join(os.path.dirname(os.path.abspath(__file__)), "811_sync.lock")
-
-# ── LOCK FILE (evita execuções simultâneas) ──────────────────────────────────
-class ProcessLock:
-    """Lock file simples pra evitar múltiplas instâncias do script."""
-
-    def __init__(self, path=LOCK_FILE):
-        self.path = path
-        self.acquired = False
-
-    def acquire(self):
-        """Tenta adquirir o lock. Retorna True se conseguiu."""
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, "r") as f:
-                    data = _json.load(f)
-                pid = data.get("pid", 0)
-                started = data.get("started", "")
-                # Se o processo ainda existe, lock ativo
-                try:
-                    os.kill(pid, 0)  # Só checa se existe (não mata)
-                    log.warning(f"Lock ativo — PID {pid} iniciado em {started}")
-                    return False
-                except (OSError, ProcessLookupError):
-                    # Processo morreu sem limpar o lock — stale lock
-                    log.warning(f"Lock stale detectado (PID {pid}) — removendo")
-                    self.release()
-            except Exception:
-                # Lock corrompido — remove
-                self.release()
-
-        try:
-            with open(self.path, "w") as f:
-                _json.dump({
-                    "pid": os.getpid(),
-                    "started": datetime.now().isoformat()
-                }, f)
-            self.acquired = True
-            return True
-        except Exception as e:
-            log.error(f"Erro ao criar lock file: {e}")
-            return False
-
-    def release(self):
-        """Libera o lock."""
-        try:
-            if os.path.exists(self.path):
-                os.remove(self.path)
-        except Exception as e:
-            log.warning(f"Erro ao remover lock file: {e}")
-        self.acquired = False
-
-    def __enter__(self):
-        if not self.acquire():
-            raise RuntimeError("Outra instância já está rodando (lock file ativo)")
-        return self
-
-    def __exit__(self, *args):
-        self.release()
-
-
-# ── CACHE DE TICKETS CANCELADOS ──────────────────────────────────────────────
-_CANCELED_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "canceled_cache.json")
-_canceled_cache_mem = None
-
-
-def load_canceled_cache():
-    """Carrega set de tickets cancelados do disco (com cache em memória)."""
-    global _canceled_cache_mem
-    if _canceled_cache_mem is not None:
-        return _canceled_cache_mem
-    try:
-        if os.path.exists(_CANCELED_CACHE_FILE):
-            with open(_CANCELED_CACHE_FILE, "r") as f:
-                data = _json.load(f)
-            _canceled_cache_mem = {state: set(nums) for state, nums in data.items()}
-            return _canceled_cache_mem
-    except Exception as e:
-        log.warning(f"Erro ao carregar cache de cancelados: {e}")
-    _canceled_cache_mem = {}
-    return _canceled_cache_mem
-
-
-def save_canceled_cache(cache=None):
-    """Salva cache de cancelados no disco."""
-    global _canceled_cache_mem
-    if cache is None:
-        cache = _canceled_cache_mem or {}
-    try:
-        data = {state: sorted(nums) for state, nums in cache.items()}
-        with open(_CANCELED_CACHE_FILE, "w") as f:
-            _json.dump(data, f, indent=2)
-    except Exception as e:
-        log.warning(f"Erro ao salvar cache de cancelados: {e}")
-
-
-def add_to_canceled_cache(state, ticket_num):
-    """Adiciona ticket ao cache de cancelados (salva imediatamente)."""
-    cache = load_canceled_cache()
-    if state not in cache:
-        cache[state] = set()
-    cache[state].add(ticket_num)
-    save_canceled_cache(cache)
-
-
-def get_canceled_set(state):
-    """Retorna set de tickets cancelados para um estado."""
-    return load_canceled_cache().get(state, set())
-
-
-# ── SMART WAIT HELPERS ────────────────────────────────────────────────────────
-async def wait_stable(page, timeout=3000):
-    """Espera a página estabilizar (rede ociosa). Fallback silencioso."""
-    try:
-        await page.wait_for_load_state("networkidle", timeout=timeout)
-    except Exception:
-        await page.wait_for_timeout(W_SAFETY)
-
-
-async def wait_for(page, selector, timeout=5000, state="visible"):
-    """Espera seletor aparecer. Retorna True se encontrou."""
-    try:
-        await page.wait_for_selector(selector, timeout=timeout, state=state)
-        return True
-    except Exception:
-        return False
-
-
-async def wait_nav(page, timeout=5000):
-    """Espera após navegação: load completo + rede ociosa."""
-    try:
-        await page.wait_for_load_state("domcontentloaded", timeout=timeout)
-        await page.wait_for_load_state("networkidle", timeout=timeout)
-    except Exception:
-        await page.wait_for_timeout(W_SAFETY)
-
-
-async def wait_tab_content(page, timeout=3000):
-    """Espera conteúdo de aba carregar."""
-    try:
-        await page.wait_for_load_state("networkidle", timeout=timeout)
-    except Exception:
-        await page.wait_for_timeout(W_SAFETY)
-
-
-async def wait_filter_results(page, timeout=3000):
-    """Espera resultados do filtro carregarem."""
-    try:
-        await page.wait_for_load_state("networkidle", timeout=timeout)
-    except Exception:
-        await page.wait_for_timeout(W_SAFETY)
-
-
-async def click_and_wait(page, locator, wait_type="stable", timeout=8000):
-    """Clica num elemento e espera o resultado."""
-    await locator.click()
-    if wait_type == "nav":
-        await wait_nav(page, timeout)
-    elif wait_type == "tab":
-        await wait_tab_content(page, timeout)
-    elif wait_type == "filter":
-        await wait_filter_results(page, timeout)
-    else:
-        await wait_stable(page, timeout)
-
-
-# ── PLAYWRIGHT CONTEXT MANAGER (evita Chrome órfão) ──────────────────────────
-@asynccontextmanager
-async def playwright_context(state, headless=True):
-    """Context manager que garante fechamento do browser mesmo com crash.
-
-    Uso:
-        async with playwright_context("FL") as (p, ctx, page):
-            ...
-    """
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-    p = ctx = page = None
-    try:
-        p = await async_playwright().start()
-        ctx = await p.chromium.launch_persistent_context(
-            perfil, headless=headless, args=["--no-sandbox"]
-        )
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-        yield p, ctx, page
-    finally:
-        if ctx:
-            try:
-                await ctx.close()
-            except Exception:
-                pass
-        if p:
-            try:
-                await p.stop()
-            except Exception:
-                pass
-
-
-# ── EMAIL DE ALERTA ───────────────────────────────────────────────────────────
-def send_alert(subject, body):
-    if not GMAIL_USER or not GMAIL_PASS or not ALERT_EMAIL:
-        log.warning("Email de alerta não configurado — verifique .env")
-        return
-    try:
-        import smtplib
-        from email.mime.text import MIMEText
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["Subject"] = f"[OneDrill 811] {subject}"
-        msg["From"]    = GMAIL_USER
-        msg["To"]      = ALERT_EMAIL
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(GMAIL_USER, GMAIL_PASS)
-            smtp.send_message(msg)
-        log.info(f"Email de alerta enviado: {subject}")
-    except Exception as e:
-        log.error(f"Erro ao enviar email: {e}")
-
-
-# ── SUPABASE (com retry genérico) ────────────────────────────────────────────
-def _sb_request(method, url, retries=3, **kwargs):
-    """Wrapper genérico com retry e backoff exponencial pra TODAS as operações Supabase."""
-    kwargs.setdefault("timeout", 20)
-    for attempt in range(retries):
-        try:
-            r = method(url, **kwargs)
-            r.raise_for_status()
-            return r
-        except requests.exceptions.HTTPError as e:
-            status_code = e.response.status_code if e.response is not None else 0
-            # 4xx (exceto 429) = erro do cliente, não adianta retry
-            if 400 <= status_code < 500 and status_code != 429:
-                log.error(f"[Supabase] {status_code} — {e}")
-                raise
-            if attempt < retries - 1:
-                wait = 2 ** (attempt + 1)
-                log.warning(f"[Supabase] Retry {attempt+1}/{retries} em {wait}s: {e}")
-                time.sleep(wait)
-            else:
-                log.error(f"[Supabase] Falha após {retries} tentativas: {e}")
-                raise
-        except Exception as e:
-            if attempt < retries - 1:
-                wait = 2 ** (attempt + 1)
-                log.warning(f"[Supabase] Retry {attempt+1}/{retries} em {wait}s: {e}")
-                time.sleep(wait)
-            else:
-                log.error(f"[Supabase] Falha após {retries} tentativas: {e}")
-                raise
-
-
-def sb_get(table, qs=""):
-    r = _sb_request(requests.get, f"{SB_URL}/rest/v1/{table}?select=*{qs}", headers=SB_H)
-    return r.json()
-
-
-def sb_upsert(table, data, on_conflict="ticket_num,utility_name,state"):
-    """Upsert com retry. Suporta dict único ou lista."""
-    h = {**SB_H, "Prefer": "resolution=merge-duplicates,return=minimal"}
-    _sb_request(requests.post, f"{SB_URL}/rest/v1/{table}?on_conflict={on_conflict}",
-                headers=h, json=data, timeout=30)
-
-
-def sb_insert(table, data):
-    r = _sb_request(requests.post, f"{SB_URL}/rest/v1/{table}", headers=SB_H, json=data)
-    return r.json()
-
-
-def sb_patch(table, id_val, data):
-    h = {**SB_H, "Prefer": "return=minimal"}
-    _sb_request(requests.patch, f"{SB_URL}/rest/v1/{table}?id=eq.{id_val}", headers=h, json=data)
-
-
-def sb_delete(table, qs):
-    h = {**SB_H, "Prefer": "return=minimal"}
-    _sb_request(requests.delete, f"{SB_URL}/rest/v1/{table}?{qs}", headers=h)
-
-
-def log_start(state, by="manual"):
-    res = sb_insert("sync_811_log", {"state": state, "status": "running", "triggered_by": by})
-    return res[0]["id"] if res else None
-
-
-def log_finish(lid, checked, updated, status="success", error=None):
-    if not lid:
-        return
-    sb_patch("sync_811_log", lid, {
-        "finished_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        "tickets_checked": checked, "tickets_updated": updated,
-        "status": status, "error_msg": error
-    })
-
-
-# ── NOTAS AUTOMÁTICAS (dedup + truncamento) ──────────────────────────────────
-def append_auto_note(existing_notes, new_note, max_notes=MAX_AUTO_NOTES):
-    """Adiciona nota automática ao campo notes com dedup e truncamento.
-
-    - Não adiciona se a nota exata já existir
-    - Remove notas auto mais antigas se ultrapassar max_notes
-    - Retorna o campo notes atualizado
-    """
-    existing = (existing_notes or "").strip()
-    lines = existing.split("\n") if existing else []
-
-    # Dedup: se a nota exata já existe, não adiciona
-    if new_note.strip() in [l.strip() for l in lines]:
-        return existing
-
-    lines.append(new_note.strip())
-
-    # Separa notas automáticas das manuais
-    auto_lines = [l for l in lines if l.strip().startswith("[AUTO 811]")]
-    manual_lines = [l for l in lines if not l.strip().startswith("[AUTO 811]")]
-
-    # Trunca auto-notas se exceder limite (mantém as mais recentes)
-    if len(auto_lines) > max_notes:
-        auto_lines = auto_lines[-max_notes:]
-
-    # Reconstrói: manuais primeiro, depois auto
-    result = "\n".join(manual_lines + auto_lines).strip()
-    return result
-
-
-# ── CLASSIFY STATUS ───────────────────────────────────────────────────────────
-def classify(status_text, response_text=""):
-    s = (status_text or "").strip().lower()
-    r = (response_text or "").strip().lower()
-    full = (s + " " + r).lower()
-
-    # ── RESPOSTAS ESPECÍFICAS (verificar ANTES dos bloqueadores genéricos) ──
-    if "3u" in full or "not service provider" in full:
-        return "Clear"
-    if "3h" in full or "privately owned" in full or "private facility owner" in full:
-        return "Clear"
-
-    BLOCKED = [
-        "no response", "no access", "unmarked", "unmark", "marking delay",
-        "incorrect address", "unclear instruction", "do not excavate",
-        "ongoing job", "scheduled marking"
-    ]
-    for b in BLOCKED:
-        if b in full:
-            return "Pending"
-
-    CLEARED = [
-        "1 - marked", "1: marked", "marked with exception", "2 - clear",
-        "2e - marked", "4 - clear", "5 - no conflict", "no conflict", "no facilit"
-    ]
-    for c in CLEARED:
-        if c in full:
-            return "Clear"
-
-    if "marked" in full:
-        return "Clear"
-    if "clear" in full:
-        return "Clear"
-    if s == "clear":
-        return "Clear"
-
-    if "positive response" in s or s == "current":
-        if "3u" in r or "not service provider" in r:
-            return "Clear"
-        if "3h" in r or "privately owned" in r:
-            return "Clear"
-        for b in BLOCKED:
-            if b in r:
-                return "Pending"
-        if "marked" in r or "clear" in r or "no conflict" in r or "no facilit" in r:
-            return "Clear"
-        return "Pending"
-
-    return "Pending"
-
-
-def needs_private_locator(response_text):
-    """Detecta se a resposta indica necessidade de private locator (3H)."""
-    r = (response_text or "").strip().lower()
-    return "3h" in r or "privately owned" in r or "private facility owner" in r
-
-
-# ── EXTRAIR LOCATION TEXT DO BODY (IN + FL) ───────────────────────────────────
-def extract_location_text(body, state=""):
-    """Extrai campo de localização do body do ticket."""
-    if not body:
-        return ""
-
-    body_norm = re.sub(r'Locat\s*:', 'Locat:', body, flags=re.IGNORECASE)
-
-    loc_idx = -1
-    loc_offset = 0
-    for loc_label in ["Locat:", "Location:"]:
-        idx = body_norm.find(loc_label)
-        if idx >= 0:
-            loc_idx = idx
-            loc_offset = len(loc_label)
-            break
-
-    if loc_idx < 0:
-        return ""
-
-    raw = body_norm[loc_idx + loc_offset:loc_idx + 2000]
-
-    stop_pat = (
-        r"(.*?)"
-        r"(?:"
-        r"\n\s*\n"
-        r"|\nGrids|\nBoundary|\nService"
-        r"|\*\*\*"
-        r"|\nBoring|\nRemarks"
-        r"|\nWork\s*[Dd]ate|\nDue\s*[Dd]ate|\nWork\s*[Tt]ype"
-        r"|\nDone\s*[Ff]or|\nCompany|\nCategory"
-        r"|\nHrs\s*notc|\nWhite-lined|\nUg/Oh|\nDepth"
-        r"|\n\s*:\s*\n"
-        r"|\nType\s*[Oo]f\s*[Ww]ork"
-        r"|\nDuration|\nDig\s*[Ss]ite|\nStart\s*[Dd]ate"
-        r"|\nExpir|\nTicket\s*#|\nFunction"
-        r"|\n[A-Z][A-Za-z ]{2,25}:"
-        r")"
-    )
-    m = re.search(stop_pat, raw, re.DOTALL)
-    if m:
-        return " ".join(m.group(1).split()).strip()
-    return " ".join(raw[:800].split()).strip()
-
-
-# ── EXTRAIR DATA DE VENCIMENTO DO BODY ────────────────────────────────────────
-def extract_expire_date(body):
-    def _extract(pattern, text):
-        m = re.search(pattern, text, re.IGNORECASE)
-        return m.group(1).strip() if m else ""
-
-    expire_raw = ""
-    patterns = [
-        r"Expires?\s*(?:on)?\s*:\s*([^\n]+)",
-        r"Due\s*Date\s*:\s*([^\n]+)",
-        r"Expiration\s*(?:Date)?\s*:\s*([^\n]+)",
-        r"Work\s*[Dd]ate\s*:\s*([^\n]+)",
-        r"Legal\s*Date\s*:\s*([^\n]+)",
-        r"Response\s*Due\s*:\s*([^\n]+)",
-    ]
-    for pat in patterns:
-        expire_raw = _extract(pat, body)
-        if expire_raw:
-            break
-    if not expire_raw:
-        return ""
-
-    expire_clean = " ".join(expire_raw.strip().split()[:3])
-    formats = [
-        "%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%m/%d/%y",
-        "%b %d, %Y", "%B %d, %Y", "%m/%d/%Y %H:%M",
-        "%m/%d/%Y %I:%M %p", "%m/%d/%Y %I:%M:%S %p",
-    ]
-    for fmt in formats:
-        try:
-            return datetime.strptime(expire_clean, fmt).strftime("%m/%d/%Y")
-        except ValueError:
-            continue
-    return expire_raw.strip()[:20]
-
-
-# ── DETECTAR CANCELAMENTO ─────────────────────────────────────────────────────
-def is_ticket_canceled(body):
-    if not body:
-        return False
-    first_line = body.strip().split("\n")[0].strip().upper()
-    body_upper = body.upper()
-    return (
-        first_line.startswith("CANCEL")
-        or "FUNCTION: CANCEL" in body_upper
-        or "FUNCTION:\nCANCEL" in body_upper
-        or ("CANCELED" in body_upper and "REPLACED BY TICKET NUMBER" in body_upper)
-        or "DUE TO TICKET BEING CANCELED" in body_upper
-    )
-
-
-# ── AJUSTE DE POSIÇÃO PELO TEXTO 811 ─────────────────────────────────────────
-def adjust_coords_by_location(lat, lon, location_text, tipo_out=None):
-    if not lat or not lon or not location_text:
-        return lat, lon, tipo_out or "Main line"
-
-    text = location_text.upper()
-    OFFSET = 0.00012
-
-    is_service = any(w in text for w in ["LATERAL", " REAR ", "REAR OF", "FRONT OF", " FRONT "])
-    if is_service:
-        tipo = "Service"
-        if "NORTH" in text or " N " in text:
-            return round(lat + OFFSET, 6), lon, tipo
-        if "SOUTH" in text or " S " in text:
-            return round(lat - OFFSET, 6), lon, tipo
-        if "EAST" in text or " E " in text:
-            return lat, round(lon + OFFSET, 6), tipo
-        if "WEST" in text or " W " in text:
-            return lat, round(lon - OFFSET, 6), tipo
-        return round(lat + OFFSET * 0.5, 6), lon, tipo
-
-    if "R/O/W" in text or "ROW TO ROW" in text or "R.O.W" in text:
-        return lat, lon, "Main line"
-
-    tipo = "Main line"
-    if any(p in text for p in ["NORTH SIDE", "N SIDE", "NORTHSIDE", "ON NORTH", "ALONG NORTH"]):
-        return round(lat + OFFSET, 6), lon, tipo
-    if any(p in text for p in ["SOUTH SIDE", "S SIDE", "SOUTHSIDE", "ON SOUTH", "ALONG SOUTH"]):
-        return round(lat - OFFSET, 6), lon, tipo
-    if any(p in text for p in ["EAST SIDE", "E SIDE", "EASTSIDE", "ON EAST", "ALONG EAST"]):
-        return lat, round(lon + OFFSET, 6), tipo
-    if any(p in text for p in ["WEST SIDE", "W SIDE", "WESTSIDE", "ON WEST", "ALONG WEST"]):
-        return lat, round(lon - OFFSET, 6), tipo
-    return lat, lon, tipo
-
-
-# ── GEOCODING ─────────────────────────────────────────────────────────────────
-async def geocode_address(street, city, state_code):
-    import aiohttp
-    STATE_BOUNDS = {
-        "IN": {"lat": (37.77, 41.76), "lon": (-88.10, -84.79)},
-        "FL": {"lat": (24.39, 31.00), "lon": (-87.63, -79.97)},
-    }
-    query = f"{street}, {city}, {state_code}, USA"
-    try:
-        await asyncio.sleep(0.3)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": query, "format": "json", "limit": 5, "countrycodes": "us"},
-                headers={"User-Agent": "OneDrill-811-Sync/2.0"},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as r:
-                results = await r.json()
-
-        bounds = STATE_BOUNDS.get(state_code, {})
-        lat_range = bounds.get("lat", (-90, 90))
-        lon_range = bounds.get("lon", (-180, 180))
-
-        for item in results:
-            lat, lon = float(item["lat"]), float(item["lon"])
-            if lat_range[0] <= lat <= lat_range[1] and lon_range[0] <= lon <= lon_range[1]:
-                return lat, lon
-        if city:
-            return await geocode_address(street, "", state_code)
-    except Exception as e:
-        log.debug(f"Geocoding error for '{query}': {e}")
-    return None, None
-
-
-# ── KEEP ALIVE ────────────────────────────────────────────────────────────────
-async def keep_alive(state):
-    portal_home = PORTALS[state]["home"]
-    try:
-        async with playwright_context(state, headless=True) as (p, ctx, page):
-            await page.goto(portal_home, wait_until="domcontentloaded")
-            await wait_stable(page)
-            if "login" in page.url.lower() or "google.com" in page.url.lower():
-                log.warning(f"[{state}] Keep-alive: SESSÃO EXPIRADA!")
-                send_alert(
-                    f"Sessão {state} expirada — ação necessária",
-                    f"A sessão do {state} expirou.\n\nPara renovar, clique duas vezes em:\n"
-                    f"  renovar_{state}.bat\n\n-- OneDrill 811 Sync"
-                )
-            else:
-                log.info(f"[{state}] Keep-alive OK: {page.url}")
-    except Exception as e:
-        log.error(f"[{state}] Keep-alive erro: {e}")
-
-
-# ── AUTO-LOGIN ────────────────────────────────────────────────────────────────
-async def auto_login(state):
-    log.warning(f"[{state}] Sessão expirada — abrindo janela para renovação rápida...")
-    send_alert(
-        f"[{state}] Renovar sessão agora",
-        f"A sessão do {state} expirou.\nFaça o login com Google.\n-- OneDrill 811 Sync"
-    )
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-    try:
-        async with async_playwright() as p:
-            ctx2 = await p.chromium.launch_persistent_context(
-                perfil, headless=False, args=["--no-sandbox", "--start-maximized"], viewport=None
-            )
-            page2 = ctx2.pages[0] if ctx2.pages else await ctx2.new_page()
-            page2.set_default_timeout(60000)
-            await page2.goto(PORTALS[state]["url"], wait_until="domcontentloaded")
-            await wait_stable(page2)
-            log.info(f"[{state}] Aguardando login manual (max 3 minutos)...")
-
-            for i in range(60):
-                await page2.wait_for_timeout(3000)
-                url_now = page2.url.lower()
-                login_keywords = ["login", "google", "cognito", "accounts", "signin"]
-                if not any(kw in url_now for kw in login_keywords) and "811" in url_now:
-                    log.info(f"[{state}] Login detectado! URL: {page2.url}")
-                    try:
-                        await page2.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-                        await wait_stable(page2)
-                        await page2.goto(PORTALS[state]["dashboard"], wait_until="domcontentloaded")
-                        await wait_stable(page2)
-                        log.info(f"[{state}] Cookies persistidos — URL final: {page2.url}")
-                    except Exception as e:
-                        log.debug(f"[{state}] Navegação pós-login: {e}")
-                    await page2.wait_for_timeout(4000)
-                    await asyncio.sleep(3)
-                    try:
-                        await ctx2.close()
-                    except Exception:
-                        pass
-                    await asyncio.sleep(2)
-                    return True
-                if i % 10 == 0:
-                    log.info(f"[{state}] Aguardando login... ({i*3}s)")
-
-            await ctx2.close()
-            log.error(f"[{state}] Timeout — login não completado")
-            return False
-    except Exception as e:
-        log.error(f"[{state}] Erro na renovação: {e}")
-        return False
-
-
-# ── HELPERS: NAVEGAÇÃO DO PORTAL ──────────────────────────────────────────────
-async def goto_dashboard(page, state):
-    """Navega ao dashboard e seleciona filtros corretos."""
-    portal_home = PORTALS[state]["home"]
-    portal_dashboard = PORTALS[state]["dashboard"]
-
-    await page.goto(portal_home, wait_until="domcontentloaded")
-    await wait_stable(page)
-
-    for sel in ['text="Go to Ticket Dashboard"', 'a:has-text("Ticket Dashboard")']:
-        if await page.locator(sel).count():
-            await click_and_wait(page, page.locator(sel).first, "nav")
-            break
-
-    if "dashboard" not in page.url.lower() and "tickets" not in page.url.lower():
-        await page.goto(portal_dashboard, wait_until="domcontentloaded")
-        await wait_nav(page)
-
-    if "login" in page.url.lower():
-        log.warning(f"[{state}] Dashboard redirecionou para login — tentando novamente...")
-        await page.goto(portal_home, wait_until="domcontentloaded")
-        await wait_nav(page)
-        if "login" in page.url.lower():
-            return False
-        await page.goto(portal_dashboard, wait_until="domcontentloaded")
-        await wait_nav(page)
-        if "login" in page.url.lower():
-            return False
-
-    if state == "IN":
-        for sel in ['label:has-text("My Office Tickets")', 'span:has-text("My Office Tickets")', 'text="My Office Tickets"']:
-            el = page.locator(sel).first
-            if await el.count():
-                await click_and_wait(page, el, "stable")
-                break
-        for sel in ['label:has-text("Show Completed Tickets")', 'text="Show Completed Tickets"', 'input[type="checkbox"]:near(:text("Completed"))']:
-            el = page.locator(sel).first
-            if await el.count():
-                try:
-                    cb = page.locator('input[type="checkbox"]').first
-                    if not await cb.is_checked():
-                        await click_and_wait(page, el, "stable")
-                except Exception:
-                    await click_and_wait(page, el, "stable")
-                break
-    elif state == "FL":
-        selected = False
-        for sel in ['label:has-text("My Office Tickets")', 'span:has-text("My Office Tickets")', 'text="My Office Tickets"']:
-            el = page.locator(sel).first
-            if await el.count():
-                await click_and_wait(page, el, "stable")
-                selected = True
-                break
-        if not selected:
-            for sel in ['label:has-text("My Company Tickets")', 'span:has-text("My Company Tickets")', 'text="My Company Tickets"']:
-                el = page.locator(sel).first
-                if await el.count():
-                    await click_and_wait(page, el, "stable")
-                    break
-
-    return True
-
-
-async def set_items_per_page(page, count=100):
-    """Muda Items/Page pra 100 no dashboard."""
-    try:
-        sel = page.locator('.num-per-page-selector mat-select, mat-select:near(:text("Items / Page"))')
-        if await sel.count():
-            await sel.first.click()
-            await page.wait_for_timeout(300)
-            opt = page.locator(f'mat-option:has-text("{count}")')
-            if await opt.count():
-                await opt.first.click()
-                await wait_stable(page)
-                log.info(f"Items/Page alterado para {count}")
-                return True
-    except Exception as e:
-        log.debug(f"Não conseguiu mudar Items/Page: {e}")
-    return False
-
-
-async def select_office(page, state):
-    """Re-seleciona My Office/Company Tickets após voltar ao dashboard."""
-    if state == "IN":
-        for sel in ['label:has-text("My Office Tickets")', 'text="My Office Tickets"']:
-            if await page.locator(sel).count():
-                await click_and_wait(page, page.locator(sel).first, "stable")
-                break
-    elif state == "FL":
-        selected = False
-        for sel in ['label:has-text("My Office Tickets")', 'text="My Office Tickets"']:
-            if await page.locator(sel).count():
-                await click_and_wait(page, page.locator(sel).first, "stable")
-                selected = True
-                break
-        if not selected:
-            for sel in ['label:has-text("My Company Tickets")', 'text="My Company Tickets"']:
-                if await page.locator(sel).count():
-                    await click_and_wait(page, page.locator(sel).first, "stable")
-                    break
-
-
-async def filter_ticket(page, tnum):
-    """Digita número do ticket no filtro e espera resultados."""
-    lbl = page.locator('mat-label:has-text("Filter by Ticket Number")')
-    if await lbl.count():
-        await lbl.first.click()
-    else:
-        await page.locator('#mat-input-0').click(force=True)
-    await page.wait_for_timeout(100)
-    await page.keyboard.press("Control+a")
-    await page.keyboard.type(tnum, delay=15)
-    await wait_filter_results(page)
-
-
-async def back_to_dashboard(page, state):
-    """Volta ao dashboard rapidamente."""
-    await page.goto(PORTALS[state]["dashboard"], wait_until="domcontentloaded")
-    await wait_stable(page)
-    await select_office(page, state)
-
-
-async def ensure_login(page, ctx, p, state):
-    """Verifica login e renova se necessário. Retorna (page, ctx) atualizados."""
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-    if "login" in page.url.lower():
-        await ctx.close()
-        await asyncio.sleep(1)
-        ok = await auto_login(state)
-        if not ok:
-            return None, None
-        await asyncio.sleep(1)
-        ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_stable(page)
-        if "login" in page.url.lower():
-            log.error(f"[{state}] Login falhou após renovação — cookies não persistiram")
-            await ctx.close()
-            return None, None
-        log.info(f"[{state}] Sessão renovada com sucesso: {page.url}")
-    return page, ctx
-
-
-async def fast_back(page, state):
-    """Volta ao dashboard usando go_back (mais rápido que goto completo)."""
-    try:
-        await page.go_back(wait_until="domcontentloaded")
-        await page.wait_for_timeout(300)
-        url = page.url.lower()
-        if "dashboard" in url or ("tickets" in url and "ticket/" not in url):
-            return
-    except Exception:
-        pass
-    await back_to_dashboard(page, state)
-
-
-# ── SCRAPE (PARALELO) ────────────────────────────────────────────────────────
-async def scrape(state, ticket_numbers, tickets_data=None):
-    results = {}
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-
-    # Tickets que precisam de notes (Text tab)
-    needs_notes = set()
-    if tickets_data:
-        for t in tickets_data:
-            notes = (t.get("notes") or "").strip()
-            if not notes or notes == "[811 Location]":
-                needs_notes.add(t["ticket"])
-
-    # Divide em chunks pras abas paralelas
-    chunks = [[] for _ in range(NUM_TABS)]
-    for i, tnum in enumerate(ticket_numbers):
-        chunks[i % NUM_TABS].append(tnum)
-    chunks = [c for c in chunks if c]
-
-    async with async_playwright() as p:
-        ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_stable(page)
-
-        # Verifica login
-        if "login" in page.url.lower():
-            await ctx.close()
-            await asyncio.sleep(1)
-            ok = await auto_login(state)
-            if not ok:
-                return results
-            await asyncio.sleep(1)
-            ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
-            await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-            await wait_stable(page)
-            if "login" in page.url.lower():
-                log.error(f"[{state}] Scrape: login falhou após renovação")
-                await ctx.close()
-                return results
-
-        log.info(f"[{state}] Logado! Abrindo {len(chunks)} abas paralelas...")
-
-        async def process_chunk(chunk, tab_id):
-            """Processa um grupo de tickets em uma aba independente."""
-            tab_results = {}
-            if not chunk:
-                return tab_results
-
-            pg = await ctx.new_page()
-            pg.set_default_timeout(60000)
-
-            ok = await goto_dashboard(pg, state)
-            if not ok:
-                log.error(f"[{state}][T{tab_id}] Dashboard inacessível — abortando aba")
-                try:
-                    await pg.close()
-                except Exception:
-                    pass
-                return tab_results
-
-            log.info(f"[{state}][T{tab_id}] Dashboard OK — {len(chunk)} tickets")
-
-            for idx, tnum in enumerate(chunk):
-                log.info(f"[{state}][T{tab_id}] ({idx+1}/{len(chunk)}) Ticket {tnum}")
-                result = {"location_text": "", "responses": []}
-                MAX_RETRIES = 2
-
-                for _attempt in range(MAX_RETRIES):
-                    try:
-                        await filter_ticket(pg, tnum)
-
-                        if not await pg.get_by_text(tnum, exact=True).count():
-                            log.warning(f"[{state}] {tnum}: não encontrado")
-                            tab_results[tnum] = result
-                            break
-
-                        await pg.get_by_text(tnum, exact=True).first.click()
-                        await wait_stable(pg)
-
-                        # Text tab — só se precisa de notes
-                        if tnum in needs_notes or not tickets_data:
-                            tt = pg.locator('[role="tab"]:has-text("Text")').first
-                            if await tt.count():
-                                await click_and_wait(pg, tt, "tab")
-                            body = await pg.locator("body").inner_text()
-                            result["location_text"] = extract_location_text(body, state=state)
-
-                        # Responses tab
-                        rt = pg.locator('[role="tab"]:has-text("Responses")').first
-                        if await rt.count():
-                            await rt.click()
-                            try:
-                                await pg.wait_for_selector(
-                                    'text="Loading ticket responses..."',
-                                    state="hidden", timeout=6000
-                                )
-                            except Exception:
-                                pass
-                            await wait_tab_content(pg)
-
-                            # Clica "All" pra capturar TODAS as utilities
-                            filter_clicked = False
-                            all_links = pg.locator('text=/^All \\(/')
-                            if await all_links.count():
-                                await click_and_wait(pg, all_links.first, "filter")
-                                filter_clicked = True
-
-                            if not filter_clicked:
-                                cur_links = pg.locator('text=/^Current Only/')
-                                if await cur_links.count():
-                                    await click_and_wait(pg, cur_links.first, "filter")
-                                    filter_clicked = True
-
-                            if not filter_clicked:
-                                for sel in ['button:has-text("All")', 'a:has-text("All")']:
-                                    if await pg.locator(sel).count():
-                                        await click_and_wait(pg, pg.locator(sel).first, "filter")
-                                        break
-
-                            await wait_stable(pg)
-                            body_text = await pg.locator("body").inner_text()
-
-                            if idx < 2 and tab_id == 0 and DEBUG_MODE:
-                                with open(f"debug_responses_{state}_{tnum}.txt", "w", encoding="utf-8") as df:
-                                    df.write(body_text)
-
-                            # Parse responses (resilient to whitespace/order changes)
-                            resp_idx = -1
-                            resp_patterns = [
-                                r"Status\s+Date\s+Service\s+Area\s+Response",
-                                r"Service\s+Area",
-                                r"Utility\s+Name",
-                            ]
-                            for rp in resp_patterns:
-                                rm = re.search(rp, body_text, re.IGNORECASE)
-                                if rm:
-                                    resp_idx = rm.start()
-                                    break
-                            if resp_idx >= 0:
-                                resp_section = body_text[resp_idx:resp_idx + 50000]
-                                linhas = resp_section.split("\n")
-                                i = 0
-                                while i < len(linhas):
-                                    linha = linhas[i].strip()
-                                    if linha in ["Status", "Date", "Service Area", "Response", "Entry Method", "Comments", ""]:
-                                        i += 1
-                                        continue
-
-                                    if linha == "Event":
-                                        i += 1
-                                        while (i < len(linhas)
-                                               and linhas[i].strip() not in ["Current", "No Response", "Positive Response", "Event"]
-                                               and not linhas[i].strip().startswith("No Response")):
-                                            i += 1
-                                        continue
-
-                                    if linha.startswith("No Response"):
-                                        status_raw = "No Response"
-                                        i += 1
-                                        utility = linhas[i].strip() if i < len(linhas) else ""
-                                        i += 1
-                                        if i < len(linhas) and re.match(r"^[A-Z0-9]{2,10}$", linhas[i].strip()):
-                                            i += 1
-                                        if i < len(linhas) and linhas[i].strip().startswith("ID"):
-                                            i += 1
-                                        if utility and len(utility) > 2 and not utility.startswith("ID") and not re.match(r"^[A-Z0-9]{2,10}$", utility):
-                                            result["responses"].append({
-                                                "utility": utility, "status_raw": status_raw,
-                                                "status": classify(status_raw, ""),
-                                                "response": "", "comment": ""
-                                            })
-                                        continue
-
-                                    if linha in ["Current", "Positive Response"]:
-                                        status_raw = linha
-                                        i += 1
-                                        data_line = linhas[i].strip() if i < len(linhas) else ""
-                                        i += 1
-                                        utility = linhas[i].strip() if i < len(linhas) else ""
-                                        i += 1
-                                        if i < len(linhas) and re.match(r"^[A-Z0-9]{2,10}$", linhas[i].strip()):
-                                            i += 1
-                                        if i < len(linhas) and linhas[i].strip().startswith("ID"):
-                                            i += 1
-                                        response = linhas[i].strip() if i < len(linhas) else ""
-                                        i += 1
-                                        comment = ""
-                                        while i < len(linhas):
-                                            l = linhas[i].strip()
-                                            if l in ["Web Service", ""] or l.startswith("Entered via"):
-                                                i += 1
-                                                continue
-                                            if l in ["Current", "Positive Response", "Event", "No Response"] or l.startswith("No Response"):
-                                                break
-                                            comment = l
-                                            i += 1
-                                            break
-                                        responded_date = None
-                                        if data_line:
-                                            dl = data_line.strip()[:24]
-                                            for fmt in [
-                                                "%m/%d/%Y %I:%M %p",   # 03/24/2026 08:50 AM
-                                                "%m/%d/%Y %I:%M:%S %p",# 03/24/2026 08:50:00 AM
-                                                "%m/%d/%Y %H:%M",      # 03/24/2026 08:50
-                                                "%m/%d/%Y %H:%M:%S",   # 03/24/2026 08:50:00
-                                                "%m/%d/%Y",            # 03/24/2026
-                                                "%m/%d/%y %I:%M %p",   # 03/24/26 08:50 AM
-                                                "%m/%d/%y %H:%M",      # 03/24/26 08:50
-                                                "%m/%d/%y",            # 03/24/26
-                                            ]:
-                                                try:
-                                                    responded_date = datetime.strptime(dl[:len(fmt)+2].strip(), fmt).replace(tzinfo=None).isoformat()
-                                                    break
-                                                except ValueError:
-                                                    continue
-                                        if (utility and len(utility) > 2
-                                                and not utility.startswith("ID")
-                                                and not re.match(r"^[A-Z0-9]{2,10}$", utility)):
-                                            result["responses"].append({
-                                                "utility": utility, "status_raw": status_raw,
-                                                "status": classify(status_raw, response + " " + comment),
-                                                "response": response, "comment": comment,
-                                                "responded_date": responded_date,
-                                            })
-                                        continue
-                                    i += 1
-
-                            log.info(f"[{state}] {tnum}: {len(result['responses'])} utilities")
-
-                        await fast_back(pg, state)
-                        break  # Sucesso — sai do retry loop
-
-                    except Exception as e:
-                        if _attempt < MAX_RETRIES - 1 and "Timeout" in str(e):
-                            log.warning(f"[{state}] {tnum}: Timeout (tentativa {_attempt+1}/{MAX_RETRIES}) — retry...")
-                            try:
-                                await back_to_dashboard(pg, state)
-                            except Exception:
-                                pass
-                            continue
-                        log.error(f"[{state}] {tnum}: ERRO -> {e}")
-                        try:
-                            await back_to_dashboard(pg, state)
-                        except Exception:
-                            pass
-
-                tab_results[tnum] = result
-
-            try:
-                await pg.close()
-            except Exception:
-                pass
-            log.info(f"[{state}][T{tab_id}] Concluído — {len(chunk)} tickets processados")
-            return tab_results
-
-        # Roda todas as abas em paralelo
-        chunk_results = await asyncio.gather(*[process_chunk(c, i) for i, c in enumerate(chunks)])
-        for cr in chunk_results:
-            results.update(cr)
-
-        await ctx.close()
-    return results
-
-
-# ── SYNC SUMMARY (estruturado) ───────────────────────────────────────────────
-class SyncSummary:
-    """Resumo estruturado de uma execução de sync."""
-
-    def __init__(self):
-        self.cleared = 0
-        self.reverted = 0
-        self.private_locator = 0
-        self.pending = 0
-        self.confirmed_clear = 0
-        self.backfilled = 0
-        self.locked_skipped = 0
-        self.responses_saved = 0
-
-    def __str__(self):
-        parts = []
-        if self.cleared:
-            parts.append(f"{self.cleared} auto-clear")
-        if self.reverted:
-            parts.append(f"{self.reverted} revertidos")
-        if self.private_locator:
-            parts.append(f"{self.private_locator} private-locator")
-        if self.pending:
-            parts.append(f"{self.pending} pendentes")
-        if self.confirmed_clear:
-            parts.append(f"{self.confirmed_clear} clear confirmados")
-        if self.backfilled:
-            parts.append(f"{self.backfilled} backfill")
-        if self.locked_skipped:
-            parts.append(f"{self.locked_skipped} locked")
-        parts.append(f"{self.responses_saved} respostas salvas")
-        return " | ".join(parts)
-
-
-# ── BATCH PATCH HELPER ────────────────────────────────────────────────────────
-
-def _get_latest_response_date(responses):
-    """Extrai a data da ÚLTIMA utility que respondeu.
-
-    Itera as respostas e encontra o MAX de responded_date.
-    Fallback: datetime.now() se nenhuma resposta tem data válida.
-    """
-    DATE_FMTS = [
-        "%Y-%m-%dT%H:%M:%S",      # ISO
-        "%Y-%m-%dT%H:%M",          # ISO short
-        "%m/%d/%Y %I:%M:%S %p",    # 03/24/2026 08:50:00 AM
-        "%m/%d/%Y %I:%M %p",       # 03/24/2026 08:50 AM
-        "%m/%d/%Y %H:%M:%S",       # 03/24/2026 08:50:00
-        "%m/%d/%Y %H:%M",          # 03/24/2026 08:50
-        "%m/%d/%Y",                # 03/24/2026
-        "%m/%d/%y",                # 03/24/26
-    ]
-    latest = None
-    for resp in responses:
-        rd = resp.get("responded_date")
-        if not rd:
-            continue
-        rd_str = str(rd).strip().replace("Z", "")
-        parsed = None
-        for fmt in DATE_FMTS:
-            try:
-                parsed = datetime.strptime(rd_str[:len(fmt)+4].strip(), fmt)
-                break
-            except ValueError:
-                continue
-        if not parsed:
-            try:
-                parsed = datetime.fromisoformat(rd_str)
-            except Exception:
-                continue
-        if parsed and (latest is None or parsed > latest):
-            latest = parsed
-    return latest or datetime.now()
-
-
-def sb_batch_patch(table, patches, id_field="id"):
-    """Aplica múltiplos patches via PATCH individual (confiável).
-
-    Usa PATCH (não upsert) porque upsert tenta INSERT primeiro
-    e falha se campos obrigatórios estiverem faltando.
-    """
-    if not patches:
-        return
-    success = 0
-    for item in patches:
-        item_copy = dict(item)
-        item_id = item_copy.pop(id_field, None)
-        if item_id is None:
-            log.warning(f"[BatchPatch] Item sem {id_field}, pulando")
-            continue
-        try:
-            sb_patch(table, item_id, item_copy)
-            success += 1
-        except Exception as e:
-            log.error(f"[BatchPatch] Erro em {id_field}={item_id}: {e}")
-    log.info(f"[BatchPatch] {success}/{len(patches)} patches aplicados em {table}")
-
-
-# ── SAVE TO SUPABASE ──────────────────────────────────────────────────────────
-def save_to_supabase(state, results, tickets):
-    ticket_map = {t["ticket"]: t for t in tickets}
-    summary = SyncSummary()
-    all_records = []
-    ticket_patches = []  # Acumula patches pra batch no final
-
-    for tnum, data in results.items():
-        t = ticket_map.get(tnum)
-        if not t:
-            continue
-        tid = t["id"]
-        patch = {"id": tid}  # Acumula campos pra este ticket
-        needs_patch = False
-
-        if data["location_text"] and not (t.get("notes") or "").strip():
-            patch["notes"] = f"[811 Location] {data['location_text']}"
-            needs_patch = True
-
-        # Dedup responses: Clear tem prioridade sobre Pending pra mesma utility
-        latest_by_utility = {}
-        for resp in data["responses"]:
-            key = resp["utility"]
-            if key in latest_by_utility and latest_by_utility[key]["status"] == "Clear" and resp["status"] == "Pending":
-                continue
-            latest_by_utility[key] = resp
-        deduped_responses = list(latest_by_utility.values())
-
-        # Coleta records para bulk upsert
-        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-        for resp in deduped_responses:
-            parsed_date = resp.get("responded_date")
-            record = {
-                "ticket_id": tid, "ticket_num": tnum, "state": state,
-                "utility_name": resp["utility"], "status": resp["status"],
-                "response_text": resp.get("response") or resp.get("comment") or resp.get("status_raw", ""),
-                "synced_at": now_iso,
-                # Sempre inclui responded_at (evita NOT NULL constraint).
-                # Se tem data real parseada, usa ela. Senão, fallback pra synced_at.
-                # fix_clear_dates diferencia comparando responded_at vs synced_at.
-                "responded_at": parsed_date if parsed_date else (now_iso if resp["status"] != "Pending" else now_iso),
-            }
-            all_records.append(record)
-
-        if deduped_responses:
-            statuses = [r["status"] for r in deduped_responses]
-            none_pending = not any(s == "Pending" for s in statuses)
-            all_responded = all(s in ("Clear", "Pending") for s in statuses)
-            ticket_locked = t.get("status_locked", False)
-
-            for resp in deduped_responses:
-                log.info(f"  [{state}] {tnum} | {resp['utility']}: {resp['status']} ({resp.get('response', '')[:60]})")
-
-            # ── DETECTAR 3H: PRIVATE LOCATOR NECESSÁRIO ──
-            private_utils = []
-            for resp in deduped_responses:
-                resp_text = (resp.get("response", "") + " " + resp.get("comment", "") + " " + resp.get("status_raw", "")).strip()
-                if needs_private_locator(resp_text):
-                    private_utils.append(resp["utility"])
-            if private_utils:
-                current_pending = (t.get("pending") or "").strip()
-                pvt_tag = "🔒 PRIVATE LOCATOR: " + ", ".join(private_utils)
-                if "PRIVATE LOCATOR" not in current_pending:
-                    new_pending = (current_pending + "\n" + pvt_tag).strip() if current_pending else pvt_tag
-                    patch["pending"] = new_pending
-                    needs_patch = True
-                    log.warning(f"[{state}] {tnum}: ⚠ PRIVATE LOCATOR necessário — {', '.join(private_utils)}")
-                    summary.private_locator += 1
-
-            # ── STATUS LOCKED: NUNCA alterar ──
-            if ticket_locked:
-                log.info(f"[{state}] {tnum}: 🔒 STATUS TRAVADO (manual) — nenhuma alteração automática")
-                summary.locked_skipped += 1
-                if needs_patch:
-                    ticket_patches.append(patch)
-                continue
-
-            # ── RENOVAÇÃO: Período de graça ──
-            old_expire_str = t.get("expire_old") or ""
-            is_renewed = bool(t.get("old_ticket2"))
-            in_grace = False
-            if is_renewed and old_expire_str and old_expire_str != "—":
-                try:
-                    # Tenta parsear a data de vencimento do ticket antigo
-                    exp_str = old_expire_str.split("Time:")[0].strip()
-                    exp_dt = datetime.strptime(exp_str, "%m/%d/%Y")
-                    in_grace = exp_dt.date() >= datetime.now().date()
-                except Exception:
-                    pass
-            if in_grace:
-                log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {old_expire_str}) — mantém Clear")
-                if needs_patch:
-                    ticket_patches.append(patch)
-                continue
-
-            if none_pending and all_responded and t.get("status") == "Open":
-                # AUTO-CLEAR — usa data da ÚLTIMA utility que respondeu (não datetime.now)
-                clear_dt = _get_latest_response_date(deduped_responses)
-                clear_ts = int(clear_dt.timestamp() * 1000)
-                clear_label = clear_dt.strftime('%m/%d/%Y')
-                hist = t.get("history") or []
-                clear_note = f"[AUTO 811] Clear em {clear_label}"
-                hist.append({"ts": clear_ts, "action": clear_note, "color": "#16a34a"})
-                new_notes = append_auto_note(patch.get("notes") or t.get("notes"), clear_note)
-                patch.update({"status": "Clear", "notes": new_notes, "history": hist})
-                needs_patch = True
-                log.info(f"[{state}] {tnum}: AUTO-CLEAR (data real: {clear_label})")
-                summary.cleared += 1
-
-            elif none_pending and all_responded and t.get("status") == "Clear":
-                # Backfill: se não tem evento de clear no histórico, adiciona
-                hist = t.get("history") or []
-                has_clear_evt = any(
-                    "auto 811" in (h.get("action", "")).lower() and "revertido" not in (h.get("action", "")).lower()
-                    for h in hist
-                )
-                has_clear_evt = has_clear_evt or any("→ clear" in (h.get("action", "")).lower() for h in hist)
-
-                if not has_clear_evt:
-                    # Tenta usar data real das respostas; fallback pra notas; fallback pra now
-                    backfill_dt = _get_latest_response_date(deduped_responses)
-                    # Se as respostas não tinham datas, tenta extrair das notas
-                    if backfill_dt == datetime.now().replace(hour=0, minute=0, second=0, microsecond=0):
-                        notes_text = t.get("notes") or ""
-                        date_match = re.search(r'\[AUTO 811\] Clear em (\d{1,2}/\d{1,2}/\d{4})', notes_text)
-                        if date_match:
-                            try:
-                                backfill_dt = datetime.strptime(date_match.group(1), "%m/%d/%Y")
-                            except Exception:
-                                pass
-                    backfill_ts = int(backfill_dt.timestamp() * 1000)
-                    backfill_label = backfill_dt.strftime('%m/%d/%Y')
-
-                    hist.append({"ts": backfill_ts, "action": f"[AUTO 811] Clear em {backfill_label}", "color": "#16a34a"})
-                    patch["history"] = hist
-                    needs_patch = True
-                    log.info(f"[{state}] {tnum}: Clear confirmado + BACKFILL histórico ({backfill_label})")
-                    summary.backfilled += 1
-                else:
-                    log.info(f"[{state}] {tnum}: Clear confirmado")
-                    summary.confirmed_clear += 1
-
-            elif not none_pending and t.get("status") == "Open":
-                pending_utils = [r["utility"] for r in deduped_responses if r["status"] == "Pending"]
-                log.info(f"[{state}] {tnum}: Pendente — aguardando: {pending_utils}")
-                summary.pending += 1
-
-            elif not none_pending and t.get("status") == "Clear":
-                # REVERTENDO Clear→Open
-                pending_utils = [r["utility"] for r in deduped_responses if r["status"] == "Pending"]
-                now_ts = int(datetime.now().timestamp() * 1000)
-                hist = t.get("history") or []
-                revert_note = f"[AUTO 811] Revertido Clear→Open em {datetime.now().strftime('%m/%d/%Y')} — pendente: {', '.join(pending_utils)}"
-                hist.append({"ts": now_ts, "action": f"[AUTO 811] Revertido Clear→Open — {', '.join(pending_utils)}", "color": "#dc2626"})
-                new_notes = append_auto_note(patch.get("notes") or t.get("notes"), revert_note)
-                log.warning(f"[{state}] {tnum}: REVERTENDO Clear→Open — pendente: {pending_utils}")
-                patch.update({"status": "Open", "notes": new_notes, "history": hist})
-                needs_patch = True
-                summary.reverted += 1
-
-        if needs_patch:
-            ticket_patches.append(patch)
-
-    # ── Batch ticket patches (substitui N+1 sb_patch individuais) ──
-    if ticket_patches:
-        log.info(f"[{state}] Aplicando {len(ticket_patches)} ticket patches em batch...")
-        sb_batch_patch("tickets", ticket_patches, id_field="id")
-
-    # Bulk upsert responses
-    if all_records:
-        try:
-            for i in range(0, len(all_records), BATCH_SIZE):
-                batch = all_records[i:i + BATCH_SIZE]
-                sb_upsert("ticket_811_responses", batch)
-                if i + BATCH_SIZE < len(all_records):
-                    time.sleep(0.5)
-            summary.responses_saved = len(all_records)
-            log.info(f"[{state}] Bulk upsert: {summary.responses_saved} registros salvos")
-        except Exception as e:
-            log.error(f"[{state}] Erro no bulk upsert: {e} — tentando individual...")
-            for rec in all_records:
-                try:
-                    sb_upsert("ticket_811_responses", rec)
-                    summary.responses_saved += 1
-                except Exception as e2:
-                    log.error(f"Erro individual {rec.get('ticket_num')}/{rec.get('utility_name')}: {e2}")
-
-    return summary
-
-
-# ── IMPORTAR TICKETS NOVOS ────────────────────────────────────────────────────
-async def import_new_tickets(state, triggered_by="manual"):
-    log.info(f"[{state}] === Importando tickets novos ===")
-    existing = sb_get("tickets", f"&state=eq.{state}")
-    existing_nums = {t["ticket"] for t in existing}
-    projects = sb_get("projects")
-    new_tickets = []
-    scraped_this_session = set()
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-
-    canceled_set = get_canceled_set(state)
-    if canceled_set:
-        log.info(f"[{state}] Cache: {len(canceled_set)} tickets cancelados conhecidos — serão pulados")
-
-    async with async_playwright() as p:
-        ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_stable(page)
-
-        page, ctx = await ensure_login(page, ctx, p, state)
-        if not page:
-            return 0
-
-        log.info(f"[{state}] Logado para importação")
-        ok = await goto_dashboard(page, state)
-        if not ok:
-            log.error(f"[{state}] Não conseguiu acessar dashboard — abortando importação")
-            await ctx.close()
-            return 0
-
-        await set_items_per_page(page, 100)
-
-        page_num = 1
-        empty_pages = 0
-        last_page_tickets = set()
-
-        while page_num <= MAX_IMPORT_PAGES:
-            if page_num == MAX_IMPORT_PAGES:
-                log.warning(f"[{state}] Limite de {MAX_IMPORT_PAGES} páginas atingido — pode haver mais tickets não importados")
-
-            log.info(f"[{state}] Lendo página {page_num}...")
-            ticket_labels = page.locator("label.column-fixed")
-            count = await ticket_labels.count()
-            page_nums = []
-            seen = set()
-            all_on_page = set()
-
-            for i in range(count):
-                txt = (await ticket_labels.nth(i).inner_text()).strip()
-                if re.match(r"^\d{8,12}$", txt):
-                    all_on_page.add(txt)
-                    if txt in canceled_set:
-                        continue
-                    if txt not in existing_nums and txt not in seen and txt not in scraped_this_session:
-                        page_nums.append(txt)
-                        seen.add(txt)
-
-            # Detecta loop de paginação
-            if all_on_page and all_on_page == last_page_tickets:
-                log.info(f"[{state}] Página {page_num} idêntica a anterior — fim da paginação")
-                break
-            last_page_tickets = all_on_page
-
-            log.info(f"[{state}] Pág {page_num}: {len(page_nums)} tickets novos (de {len(all_on_page)} na página)")
-            if len(page_nums) == 0:
-                empty_pages += 1
-            else:
-                empty_pages = 0
-
-            for tnum in page_nums:
-                try:
-                    await filter_ticket(page, tnum)
-
-                    if not await page.get_by_text(tnum, exact=True).count():
-                        log.warning(f"[{state}] {tnum}: não encontrado — pulando")
-                        await page.keyboard.press("Control+a")
-                        await page.keyboard.press("Delete")
-                        await wait_filter_results(page)
-                        await select_office(page, state)
-                        continue
-
-                    await page.get_by_text(tnum, exact=True).first.click()
-                    await wait_stable(page)
-
-                    tt = page.locator('[role="tab"]:has-text("Text")').first
-                    if await tt.count():
-                        await click_and_wait(page, tt, "tab")
-
-                    body = await page.locator("body").inner_text()
-
-                    if is_ticket_canceled(body):
-                        replaced_match = re.search(r"REPLACED\s+BY\s+TICKET\s+(?:NUMBER:?\s*)(\d+)", body, re.IGNORECASE)
-                        replaced_by = replaced_match.group(1) if replaced_match else "N/A"
-                        log.warning(f"[{state}] {tnum}: CANCELADO (substituído por {replaced_by}) — pulando")
-                        add_to_canceled_cache(state, tnum)
-                        await back_to_dashboard(page, state)
-                        continue
-
-                    def extract(pattern, text, default=""):
-                        m = re.search(pattern, text, re.IGNORECASE)
-                        return m.group(1).strip() if m else default
-
-                    tnum_ext = extract(r"Ticket\s*:\s*(\d+)", body) or tnum
-                    state_code = extract(r"State:\s*(\w{2})", body, state)
-                    city = extract(r"Cityname:\s*([^\n]+)", body)
-                    if not city:
-                        city = extract(r"GeoPlace:\s*([^\n]+)", body)
-                    township = extract(r"Twp:\s*([^\n]+)", body)
-                    street_name = extract(r"Street\s*:\s*([^\n]+)", body)
-                    street_number = extract(r"Address\s*:\s*(\d+[^\n]*)", body)
-                    if street_number and street_name and not street_name[0].isdigit():
-                        street = f"{street_number.strip()} {street_name.strip()}"
-                    else:
-                        street = street_name
-                    work_type = extract(r"(?:Work Type|Type of Work|Work type)\s*:\s*([^\n]+)", body)
-                    job_id = extract(r"Job\s*(?:ID|#|Number)?\s*:\s*([^\n]+)", body)
-
-                    # Cliente e Prime do "Done for"
-                    done_for_raw = extract(r"(?:Done\s*for|Work\s*(?:being\s*)?done\s*for)\s*:\s*([^\n]+)", body)
-                    client_811 = ""
-                    prime_811 = ""
-                    if done_for_raw:
-                        parts = [p.strip() for p in done_for_raw.replace("\\", "/").split("/") if p.strip()]
-                        if len(parts) >= 2:
-                            prime_811 = parts[0]
-                            client_811 = parts[1]
-                        elif len(parts) == 1:
-                            client_811 = parts[0]
-                        log.info(f"[{state}] {tnum_ext}: Done for → client={client_811}, prime={prime_811}")
-
-                    expire_str = extract_expire_date(body)
-                    if expire_str:
-                        log.info(f"[{state}] {tnum_ext}: Expire → {expire_str}")
-                    location = extract_location_text(body, state=state)
-
-                    # Match com projeto
-                    project_id = None
-                    if job_id:
-                        for proj in projects:
-                            if job_id.strip() in (proj.get("name", "") + proj.get("description", "")):
-                                project_id = proj["id"]
-                                break
-                    if not project_id:
-                        for proj in projects:
-                            if proj.get("state", "").upper() == state_code.upper():
-                                loc_lower = (proj.get("description", "") + proj.get("name", "")).lower()
-                                if city.lower() in loc_lower or township.lower() in loc_lower:
-                                    project_id = proj["id"]
-                                    break
-
-                    # Geocoding
-                    geo_lat, geo_lon = None, None
-                    boundary_match = re.search(
-                        r"Boundary:\s*n\s*([\d.]+)\s+s\s*([\d.]+)\s+w\s*([-\d.]+)\s+e\s*([-\d.]+)",
-                        body, re.IGNORECASE
-                    )
-                    if boundary_match:
-                        n, s_val, w, e = (
-                            float(boundary_match.group(1)), float(boundary_match.group(2)),
-                            float(boundary_match.group(3)), float(boundary_match.group(4))
-                        )
-                        geo_lat = round((n + s_val) / 2, 6)
-                        geo_lon = round((w + e) / 2, 6)
-                    elif street and city:
-                        geo_lat, geo_lon = await geocode_address(street, city, state_code)
-
-                    work_type_final = work_type or "Main line"
-                    if geo_lat and geo_lon:
-                        geo_lat, geo_lon, work_type_final = adjust_coords_by_location(
-                            geo_lat, geo_lon, location, work_type_final
-                        )
-
-                    # Verificar se substitui ticket anterior
-                    old_ticket_num = ""
-                    inherited_path = None
-                    old_tkt_match = re.search(r"Old\s*Tkt\s*:\s*(\d+)", body, re.IGNORECASE)
-                    if old_tkt_match:
-                        old_ticket_num = old_tkt_match.group(1)
-                    if not old_ticket_num:
-                        rep_match = re.search(r"Replaces?\s+(?:Ticket\s*)?(?:Number:?\s*)?(\d+)", body, re.IGNORECASE)
-                        if rep_match:
-                            old_ticket_num = rep_match.group(1)
-
-                    if old_ticket_num:
-                        log.info(f"[{state}] {tnum_ext}: Substitui ticket anterior {old_ticket_num}")
-                        try:
-                            old_tickets = sb_get("tickets", f"&ticket=eq.{old_ticket_num}&state=eq.{state_code}")
-                            if old_tickets and old_tickets[0].get("field_path"):
-                                inherited_path = old_tickets[0]["field_path"]
-                                log.info(f"[{state}] {tnum_ext}: Trajeto herdado do ticket {old_ticket_num} ({len(inherited_path)} pts)")
-                        except Exception as e:
-                            log.debug(f"Erro ao buscar ticket anterior {old_ticket_num}: {e}")
-
-                    history_entries = [
-                        {"ts": int(datetime.now().timestamp() * 1000), "action": f"Importado 811 - {city}, {state_code}", "color": "#10a574"}
-                    ]
-                    if inherited_path:
-                        history_entries.append(
-                            {"ts": int(datetime.now().timestamp() * 1000), "action": f"Trajeto herdado do ticket {old_ticket_num}", "color": "#6d28d9"}
-                        )
-
-                    ticket_data = {
-                        "ticket": tnum_ext, "company": "One Drill", "state": state_code,
-                        "location": f"{city}, {township}".strip(", "), "address": street,
-                        "status": "Open", "expire": expire_str, "footage": 0,
-                        "client": client_811, "prime": prime_811, "tipo": work_type_final,
-                        "job": job_id or "", "notes": f"[811 Location] {location}" if location else "",
-                        "project_id": project_id, "pending": "", "old_ticket2": old_ticket_num,
-                        "status_old": "", "expire_old": "", "field_path": inherited_path,
-                        "geocoded_lat": geo_lat, "geocoded_lon": geo_lon,
-                        "history": history_entries, "attachments": [],
-                    }
-                    new_tickets.append(ticket_data)
-                    scraped_this_session.add(tnum_ext)
-                    log.info(f"[{state}] Extraído: {tnum_ext}  {city}, {township}")
-                    await back_to_dashboard(page, state)
-
-                except Exception as e:
-                    log.error(f"[{state}] Erro no ticket {tnum}: {e}")
-                    try:
-                        await back_to_dashboard(page, state)
-                    except Exception:
-                        pass
-
-            next_btn = page.get_by_text("Next").first
-            if await next_btn.count() and await next_btn.is_enabled():
-                await click_and_wait(page, next_btn, "nav")
-                await select_office(page, state)
-                page_num += 1
-            else:
-                break
-
-        await ctx.close()
-
-    inserted = 0
-    for td in new_tickets:
-        try:
-            if td['ticket'] in existing_nums:
-                log.warning(f"[{state}] {td['ticket']}: DUPLICATA — já existe no sistema, pulando")
-                continue
-            sb_insert("tickets", td)
-            inserted += 1
-            existing_nums.add(td['ticket'])
-            log.info(f"[{state}] [OK] {td['ticket']}")
-        except Exception as e:
-            log.error(f"[{state}] Erro inserindo {td['ticket']}: {e}")
-
-    log.info(f"[{state}] === Importação: {inserted} tickets novos ===")
-    return inserted
-
-
-# ── REESCRAPER: ATUALIZA NOTES + EXPIRE ───────────────────────────────────────
-async def rescrape_notes(state, force=False):
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-    tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Open,Damage,Clear)&order=ticket")
-    if not tickets:
-        log.info(f"[{state}] Nenhum ticket ativo para re-scrape")
-        return
-
-    if force:
-        to_fix = tickets
-    else:
-        to_fix = [
-            t for t in tickets
-            if not (t.get("notes") or "").strip()
-            or (t.get("notes") or "").strip() == "[811 Location]"
-            or not (t.get("expire") or "").strip()
-        ]
-
-    log.info(f"[{state}] Re-scrape{'(FORCE)' if force else ''}: {len(to_fix)} tickets (de {len(tickets)} ativos)")
-    if not to_fix:
-        log.info(f"[{state}] Nada a fazer")
-        return
-
-    async with async_playwright() as p:
-        ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_stable(page)
-        page, ctx = await ensure_login(page, ctx, p, state)
-        if not page:
-            return
-        log.info(f"[{state}] Logado para re-scrape")
-        ok = await goto_dashboard(page, state)
-        if not ok:
-            log.error(f"[{state}] Re-scrape: não conseguiu acessar dashboard — abortando")
-            await ctx.close()
-            return
-
-        fixed = 0
-        for idx, t in enumerate(to_fix):
-            tnum = t["ticket"]
-            tid = t["id"]
-            log.info(f"[{state}] Re-scrape ({idx+1}/{len(to_fix)}) {tnum}")
-            try:
-                await filter_ticket(page, tnum)
-                if not await page.get_by_text(tnum, exact=True).count():
-                    log.warning(f"[{state}] {tnum}: não encontrado")
-                    continue
-                await page.get_by_text(tnum, exact=True).first.click()
-                await wait_stable(page)
-
-                tt = page.locator('[role="tab"]:has-text("Text")').first
-                if await tt.count():
-                    await click_and_wait(page, tt, "tab")
-
-                body = await page.locator("body").inner_text()
-                location = extract_location_text(body, state=state)
-                patch_data = {}
-
-                if location and (not (t.get("notes") or "").strip() or (t.get("notes") or "").strip() == "[811 Location]"):
-                    patch_data["notes"] = f"[811 Location] {location}"
-
-                if not (t.get("expire") or "").strip():
-                    expire_str = extract_expire_date(body)
-                    if expire_str:
-                        patch_data["expire"] = expire_str
-
-                if location and t.get("geocoded_lat") and t.get("geocoded_lon"):
-                    new_lat, new_lon, new_tipo = adjust_coords_by_location(
-                        t["geocoded_lat"], t["geocoded_lon"], location, t.get("tipo")
-                    )
-                    if new_lat != t["geocoded_lat"] or new_lon != t["geocoded_lon"] or new_tipo != t.get("tipo"):
-                        patch_data.update({"geocoded_lat": new_lat, "geocoded_lon": new_lon, "tipo": new_tipo})
-
-                if patch_data:
-                    sb_patch("tickets", tid, patch_data)
-                    fixed += 1
-                await back_to_dashboard(page, state)
-
-            except Exception as e:
-                log.error(f"[{state}] Re-scrape {tnum}: ERRO → {e}")
-                try:
-                    await back_to_dashboard(page, state)
-                except Exception:
-                    pass
-
-        await ctx.close()
-    log.info(f"[{state}] === Re-scrape concluído: {fixed}/{len(to_fix)} atualizados ===")
-
-
-# ── LIMPAR TICKETS CANCELADOS ─────────────────────────────────────────────────
-async def cleanup_canceled(state):
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-    canceled = 0
-
-    # Fase 1: Deletar tickets com status "Cancel" no Supabase
-    already_canceled = sb_get("tickets", f"&state=eq.{state}&status=eq.Cancel")
-    if already_canceled:
-        log.info(f"[{state}] Cleanup F1: {len(already_canceled)} tickets com status Cancel — deletando...")
-        for t in already_canceled:
-            try:
-                sb_delete("ticket_811_responses", f"ticket_num=eq.{t['ticket']}&state=eq.{state}")
-                sb_delete("tickets", f"id=eq.{t['id']}")
-                canceled += 1
-                log.warning(f"[{state}] Cleanup: {t['ticket']} (Cancel) — excluído")
-            except Exception as e:
-                log.error(f"[{state}] Cleanup: erro {t['ticket']}: {e}")
-
-    # Fase 2: Verificar tickets ativos no portal
-    tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Open,Damage,Clear)&order=ticket")
-    if not tickets:
-        log.info(f"[{state}] Cleanup: nenhum ticket ativo para verificar")
-        log.info(f"[{state}] === Cleanup concluído: {canceled} removidos ===")
-        return canceled
-
-    log.info(f"[{state}] Cleanup F2: verificando {len(tickets)} tickets no portal...")
-
-    async with async_playwright() as p:
-        ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_stable(page)
-        page, ctx = await ensure_login(page, ctx, p, state)
-        if not page:
-            return canceled
-        log.info(f"[{state}] Cleanup: logado")
-        ok = await goto_dashboard(page, state)
-        if not ok:
-            log.error(f"[{state}] Cleanup: não conseguiu acessar dashboard — abortando")
-            await ctx.close()
-            return canceled
-
-        for idx, t in enumerate(tickets):
-            tnum = t["ticket"]
-            tid = t["id"]
-            try:
-                await filter_ticket(page, tnum)
-                if not await page.get_by_text(tnum, exact=True).count():
-                    continue
-                await page.get_by_text(tnum, exact=True).first.click()
-                await wait_stable(page)
-
-                body = await page.locator("body").inner_text()
-                tt = page.locator('[role="tab"]:has-text("Text")').first
-                if await tt.count():
-                    await click_and_wait(page, tt, "tab")
-                    body = await page.locator("body").inner_text()
-
-                if is_ticket_canceled(body):
-                    replaced_match = re.search(r"REPLACED\s+BY\s+TICKET\s+(?:NUMBER:?\s*)(\d+)", body, re.IGNORECASE)
-                    replaced_by = replaced_match.group(1) if replaced_match else "N/A"
-                    try:
-                        sb_delete("ticket_811_responses", f"ticket_num=eq.{tnum}&state=eq.{state}")
-                        sb_delete("tickets", f"id=eq.{tid}")
-                        canceled += 1
-                        add_to_canceled_cache(state, tnum)
-                        log.warning(f"[{state}] Cleanup: {tnum} CANCELADO — excluído (substituído por {replaced_by})")
-                    except Exception as e:
-                        log.error(f"[{state}] Cleanup: erro deletar {tnum}: {e}")
-
-                await back_to_dashboard(page, state)
-
-            except Exception as e:
-                log.error(f"[{state}] Cleanup {tnum}: ERRO → {e}")
-                try:
-                    await back_to_dashboard(page, state)
-                except Exception:
-                    pass
-
-        await ctx.close()
-
-    log.info(f"[{state}] === Cleanup concluído: {canceled} tickets cancelados removidos ===")
-    return canceled
-
-
-# ── CLEAR TICKET CACHE ────────────────────────────────────────────────────────
-def filter_tickets_for_sync(tickets, state):
-    """Filtra tickets que realmente precisam de scraping.
-
-    - Open / Damage: SEMPRE verificar
-    - Clear: Pular se TODAS utilities já responderam E último sync < CLEAR_CACHE_HOURS
-    """
-    must_check = [t for t in tickets if t.get("status") in ("Open", "Damage")]
-    clear_tickets = [t for t in tickets if t.get("status") == "Clear"]
-
-    if not clear_tickets:
-        return must_check, 0
-
-    clear_nums = [t["ticket"] for t in clear_tickets]
-    try:
-        pending_responses = sb_get(
-            "ticket_811_responses",
-            f"&state=eq.{state}&status=eq.Pending"
-            f"&ticket_num=in.({','.join(clear_nums)})"
-            "&select=ticket_num"
-        )
-        tickets_with_pending = {str(r["ticket_num"]) for r in pending_responses}
-    except Exception as e:
-        log.warning(f"[{state}] Cache: erro ao buscar pendentes, verificando todos: {e}")
-        return tickets, 0
-
-    try:
-        last_sync = sb_get(
-            "sync_811_log",
-            f"&state=eq.{state}&status=eq.success&order=finished_at.desc&limit=1"
-        )
-        if last_sync and last_sync[0].get("finished_at"):
-            last_sync_time = datetime.fromisoformat(last_sync[0]["finished_at"])
-            if last_sync_time.tzinfo is not None:
-                last_sync_time = last_sync_time.replace(tzinfo=None)
-        else:
-            last_sync_time = None
-    except Exception:
-        last_sync_time = None
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    cache_cutoff = now - timedelta(hours=CLEAR_CACHE_HOURS)
-
-    skipped = 0
-    for t in clear_tickets:
-        tnum = t["ticket"]
-
-        if tnum in tickets_with_pending:
-            must_check.append(t)
-            continue
-
-        if not last_sync_time or last_sync_time < cache_cutoff:
-            must_check.append(t)
-            continue
-
-        skipped += 1
-
-    return must_check, skipped
-
-
-# ── HEALTH CHECK ──────────────────────────────────────────────────────────────
-_health_consecutive_failures = {}
-
-
-def scrape_health_check(state, tickets_checked, results):
-    """Detecta problemas silenciosos no scraping e alerta por email."""
-    global _health_consecutive_failures
-
-    if tickets_checked < 5:
-        return
-
-    empty_count = sum(1 for tnum, data in results.items() if not data.get("responses"))
-    empty_pct = (empty_count / max(len(results), 1)) * 100 if results else 100
-    returned = len(results)
-    missing = tickets_checked - returned
-    total_responses = sum(len(data.get("responses", [])) for data in results.values())
-
-    problems = []
-
-    if returned == 0:
-        problems.append(f"CRÍTICO: 0 de {tickets_checked} tickets retornaram resultado. Scraping pode estar quebrado.")
-    elif empty_pct >= 80 and tickets_checked >= 10:
-        problems.append(f"ATENÇÃO: {empty_count}/{returned} tickets ({empty_pct:.0f}%) sem respostas. Portal pode ter mudado.")
-    elif missing > tickets_checked * 0.5 and missing >= 5:
-        problems.append(f"ATENÇÃO: {missing}/{tickets_checked} tickets não encontrados. Problema de navegação/filtro.")
-    elif total_responses == 0 and tickets_checked >= 10:
-        problems.append(f"ATENÇÃO: 0 respostas extraídas de {returned} tickets. Aba Responses pode ter mudado.")
-
-    if problems:
-        _health_consecutive_failures[state] = _health_consecutive_failures.get(state, 0) + 1
-        failures = _health_consecutive_failures[state]
-
-        subject = f"[{state}] Alerta de saúde do scraping ({failures}x consecutivo)"
-        body = (
-            f"OneDrill 811 — Health Check\n{'='*50}\n\n"
-            f"Estado: {state}\n"
-            f"Tickets verificados: {tickets_checked}\n"
-            f"Tickets com resultado: {returned}\n"
-            f"Tickets sem respostas: {empty_count}\n"
-            f"Total de respostas extraídas: {total_responses}\n"
-            f"Falhas consecutivas: {failures}\n\n"
-            f"PROBLEMAS DETECTADOS:\n"
-        )
-        for prob in problems:
-            body += f"  • {prob}\n"
-        body += (
-            f"\nAção recomendada:\n"
-            f"  1. Rode: python 811_sync.py --debug --state {state}\n"
-            f"  2. Verifique os screenshots gerados\n"
-            f"  3. Verifique se o portal {state} mudou o layout\n"
-            f"\n-- OneDrill 811 Health Monitor"
-        )
-
-        log.warning(f"[{state}] HEALTH CHECK: {'; '.join(problems)}")
-        send_alert(subject, body)
-    else:
-        if state in _health_consecutive_failures and _health_consecutive_failures[state] > 0:
-            log.info(f"[{state}] Health check: OK (recuperado após {_health_consecutive_failures[state]} falha(s))")
-        _health_consecutive_failures[state] = 0
-
-
-# ── SYNC STATE ────────────────────────────────────────────────────────────────
-async def sync_state(state, triggered_by="manual"):
-    log.info(f"{'='*55}")
-    log.info(f"  OneDrill 811 Sync  {state}  [{triggered_by}]")
-    log.info(f"{'='*55}")
-    lid = log_start(state, triggered_by)
-    checked = 0
-    summary = SyncSummary()
-    try:
-        if not PORTALS[state]["user"]() or not PORTALS[state]["pass"]():
-            raise ValueError(f"Credenciais faltando para {state}")
-
-        all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Open,Damage,Clear)&order=ticket")
-        if not all_tickets:
-            log.info(f"[{state}] Nenhum ticket ativo")
-            log_finish(lid, 0, 0)
-            return
-
-        tickets_to_scrape, skipped = filter_tickets_for_sync(all_tickets, state)
-        if skipped > 0:
-            log.info(f"[{state}] Cache: {skipped} tickets Clear pulados (sem pendências, verificados recentemente)")
-
-        checked = len(tickets_to_scrape)
-        if not tickets_to_scrape:
-            log.info(f"[{state}] Nenhum ticket precisa verificação agora ({len(all_tickets)} ativos, {skipped} em cache)")
-            log_finish(lid, 0, 0)
-            return
-
-        nums = [t["ticket"] for t in tickets_to_scrape]
-        log.info(f"[{state}] {checked} tickets para verificar (de {len(all_tickets)} ativos)")
-        results = await scrape(state, nums, tickets_data=tickets_to_scrape)
-
-        scrape_health_check(state, checked, results)
-
-        summary = save_to_supabase(state, results, all_tickets)
-        log_finish(lid, checked, summary.responses_saved)
-        log.info(f"[{state}] CONCLUÍDO  {checked} verificados, {skipped} em cache | {summary}")
-
-    except Exception as e:
-        log.error(f"[{state}] FALHOU: {e}")
-        log_finish(lid, checked, summary.responses_saved, "error", str(e))
-
-
-async def sync_all(triggered_by="manual"):
-    await asyncio.gather(
-        sync_state("IN", triggered_by),
-        sync_state("FL", triggered_by)
-    )
-
-
-async def sync_and_import(state, triggered_by="manual"):
-    await import_new_tickets(state, triggered_by)
-    await sync_state(state, triggered_by)
-
-
-async def sync_and_import_all(triggered_by="manual"):
-    """Roda IN e FL em paralelo."""
-    await asyncio.gather(
-        sync_and_import("IN", triggered_by),
-        sync_and_import("FL", triggered_by)
-    )
-
-
-async def cleanup_all():
-    """Cleanup IN e FL em paralelo."""
-    await asyncio.gather(
-        cleanup_canceled("IN"),
-        cleanup_canceled("FL")
-    )
-
-
-# ── RELATÓRIO DIÁRIO POR EMAIL ────────────────────────────────────────────────
-def send_daily_report():
-    """Envia email com resumo diário."""
-    if not GMAIL_USER or not GMAIL_PASS or not ALERT_EMAIL:
-        log.warning("Email não configurado — relatório diário não enviado")
-        return
-    try:
-        tickets = sb_get("tickets", "&order=ticket")
-        utils = []
-        offset = 0
-        while True:
-            try:
-                r = _sb_request(
-                    requests.get,
-                    f"{SB_URL}/rest/v1/ticket_811_responses?select=ticket_num,utility_name,status&order=ticket_num&offset={offset}&limit=1000",
-                    headers=SB_H, timeout=20
-                )
-                data = r.json()
-            except Exception as e:
-                log.warning(f"Relatório: erro ao buscar respostas (offset={offset}): {e}")
-                break
-            if not data:
-                break
-            utils.extend(data)
-            if len(data) < 1000:
-                break
-            offset += 1000
-
-        active = [t for t in tickets if t.get("status") not in ("Closed", "Cancel")]
-        open_t = [t for t in active if t.get("status") == "Open"]
-        clear_t = [t for t in active if t.get("status") == "Clear"]
-        damage_t = [t for t in active if t.get("status") == "Damage"]
-
-        hoje = datetime.now()
-        vencendo = []
-        for t in active:
-            exp = t.get("expire", "")
-            if not exp or exp == "—":
-                continue
-            try:
-                d = datetime.strptime(exp, "%m/%d/%Y")
-                diff = (d - hoje).days
-                if 0 <= diff <= 10:
-                    vencendo.append(f"  - {t['ticket']} ({t.get('status','?')}) vence {exp} — {t.get('location','')}, {t.get('state','')}")
-            except Exception:
-                pass
-
-        util_pending = {}
-        open_nums = set(t["ticket"] for t in active)
-        for u in utils:
-            if u.get("status") == "Pending" and str(u.get("ticket_num", "")) in open_nums:
-                name = u.get("utility_name", "?")
-                if name not in util_pending:
-                    util_pending[name] = []
-                util_pending[name].append(str(u["ticket_num"]))
-
-        total_pending = sum(len(v) for v in util_pending.values())
-        tickets_with_pending = set()
-        for tks in util_pending.values():
-            tickets_with_pending.update(tks)
-
-        lines = []
-        lines.append(f"OneDrill — Relatório Diário {hoje.strftime('%m/%d/%Y')}")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append("RESUMO GERAL:")
-        lines.append(f"  Total ativo: {len(active)} tickets")
-        lines.append(f"  Open: {len(open_t)}  |  Clear: {len(clear_t)}  |  Damage: {len(damage_t)}")
-        lines.append(f"  Open ft: {sum(t.get('footage',0) for t in open_t):,}")
-        lines.append(f"  Clear ft: {sum(t.get('footage',0) for t in clear_t):,}")
-        lines.append("")
-
-        if vencendo:
-            lines.append(f"⚠ TICKETS VENCENDO NOS PRÓXIMOS 10 DIAS ({len(vencendo)}):")
-            lines.extend(vencendo)
-            lines.append("")
-        else:
-            lines.append("✅ Nenhum ticket vencendo nos próximos 10 dias.")
-            lines.append("")
-
-        if util_pending:
-            sorted_utils = sorted(util_pending.items(), key=lambda x: -len(x[1]))
-            lines.append(f"🔴 UTILITIES PENDENTES ({total_pending} pendências em {len(tickets_with_pending)} tickets):")
-            for name, tks in sorted_utils:
-                lines.append(f"  {name}: {len(tks)} tickets")
-                for tk in tks[:10]:
-                    lines.append(f"    - {tk}")
-                if len(tks) > 10:
-                    lines.append(f"    ... +{len(tks)-10} mais")
-            lines.append("")
-        else:
-            lines.append("✅ Nenhuma utility pendente!")
-            lines.append("")
-
-        sem_expire = [t for t in active if not (t.get("expire") or "").strip() or t.get("expire") == "—"]
-        if sem_expire:
-            lines.append(f"📋 TICKETS SEM DATA DE VENCIMENTO ({len(sem_expire)}):")
-            for t in sem_expire[:15]:
-                lines.append(f"  - {t['ticket']} ({t.get('status','?')}) — {t.get('location','')}, {t.get('state','')}")
-            if len(sem_expire) > 15:
-                lines.append(f"  ... +{len(sem_expire)-15} mais")
-            lines.append("")
-
-        # Erros recentes do sync log
-        try:
-            ontem = (hoje - timedelta(days=1)).isoformat()
-            sync_logs = sb_get("sync_811_log", f"&status=eq.error&started_at=gte.{ontem}&order=started_at.desc&limit=10")
-            if sync_logs:
-                lines.append(f"🔴 ERROS DE SYNC NAS ÚLTIMAS 24H ({len(sync_logs)}):")
-                for sl in sync_logs:
-                    lines.append(f"  - [{sl.get('state','?')}] {sl.get('started_at','?')[:16]} — {(sl.get('error_msg') or 'sem detalhes')[:100]}")
-                lines.append("")
-        except Exception:
-            pass
-
-        lines.append("—")
-        lines.append("OneDrill 811 Sync — Relatório automático")
-
-        body = "\n".join(lines)
-        subject = f"Resumo {hoje.strftime('%m/%d')} — {len(open_t)} Open, {len(vencendo)} vencendo, {total_pending} pendências"
-
-        send_alert(subject, body)
-        log.info(f"Relatório diário enviado: {subject}")
-
-    except Exception as e:
-        log.error(f"Erro ao gerar relatório diário: {e}")
-
-
-# ── SCRAPE CONTATOS DE UTILITIES (FL - Sunshine 811) ──────────────────────────
-def get_already_processed_tickets(state="FL"):
-    """Retorna set de ticket_ref que já têm contatos salvos."""
-    try:
-        encoded_state = urllib.parse.quote(state, safe='')
-        data = sb_get("utility_contacts", f"&state=eq.{encoded_state}&select=ticket_ref&ticket_ref=not.is.null")
-        refs = {row["ticket_ref"] for row in data if row.get("ticket_ref")}
-        log.info(f"[{state}] [SKIP-CHECK] {len(refs)} tickets já têm contatos salvos")
-        return refs
-    except Exception as e:
-        log.warning(f"[{state}] Não foi possível checar tickets processados: {e}")
-        return set()
-
-
-def sb_upsert_contact(data):
-    """Upsert contato — on_conflict utility_name+contact_name+state."""
-    h = {**SB_H, "Prefer": "resolution=merge-duplicates,return=minimal"}
-    allowed_fields = {"utility_name", "state", "phone_main", "phone_alt", "phone_emergency", "ticket_ref", "contact_name", "notes"}
-    clean_data = {k: v for k, v in data.items() if k in allowed_fields and v}
-    r = _sb_request(
-        requests.post,
-        f"{SB_URL}/rest/v1/utility_contacts?on_conflict=utility_name,contact_name,state",
-        headers=h, json=clean_data, timeout=20
-    )
-    return r
-
-
-def parse_contact_table(body, ticket_num, state):
-    """Parse contatos de utilities do body da página Find Ticket (FL) ou Responses (IN).
-
-    Inclui validação: descarta blocos com confiança baixa (utility name duvidoso, sem telefone).
-    """
-    contacts = []
-    lines_list = body.split("\n")
-
-    start_idx = -1
-    for i, line in enumerate(lines_list):
-        if "Positive Response" in line or ("Service Area" in line and "Contact" in line):
-            start_idx = i + 1
-            break
-
-    if start_idx < 0:
-        return contacts
-
-    # Extrai blocos (cada bloco começa com No ou Yes)
-    blocks = []
-    current_block = []
-    for i in range(start_idx, len(lines_list)):
-        line = lines_list[i].strip()
-        if not line:
-            continue
-        if line in ("No", "Yes") and current_block:
-            blocks.append(current_block)
-            current_block = [line]
-        else:
-            current_block.append(line)
-    if current_block:
-        blocks.append(current_block)
-
-    phone_pat = re.compile(r'\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}')
-
-    # Palavras que NÃO são nomes de utility (falsos positivos comuns)
-    INVALID_UTILITY_NAMES = {
-        "POSITIVE RESPONSE", "NO RESPONSE", "SERVICE AREA", "CONTACT",
-        "DATE", "STATUS", "RESPONSE", "ENTRY METHOD", "COMMENTS",
-        "TICKET", "SEARCH", "HOME", "DASHBOARD", "FILTER",
-    }
-
-    for block in blocks:
-        if len(block) < 5:
-            continue
-
-        util_name = ""
-        svc_code = ""
-        util_type = ""
-
-        # Encontra utility name com validação
-        for j, bline in enumerate(block):
-            if bline in ("No", "Yes"):
-                continue
-            # Validação: >5 chars, all caps, não é telefone, não é data, não é falso positivo
-            if (len(bline) > 5
-                    and bline == bline.upper()
-                    and not phone_pat.search(bline)
-                    and not bline.startswith("Date")
-                    and bline.strip() not in INVALID_UTILITY_NAMES
-                    and not re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}", bline)):  # Não é data
-                util_name = bline
-                if j + 1 < len(block):
-                    next_l = block[j + 1].strip()
-                    if len(next_l) <= 10 and next_l == next_l.upper():
-                        svc_code = next_l
-                    if j + 2 < len(block):
-                        type_l = block[j + 2].strip()
-                        if (type_l == type_l.upper()
-                                and not phone_pat.search(type_l)
-                                and not type_l.startswith("Date")
-                                and len(type_l) > 2):
-                            util_type = type_l
-                break
-
-        if not util_name:
-            continue
-
-        # Encontra telefones com nome anterior
-        phone_entries = []
-        for j, bline in enumerate(block):
-            phones = phone_pat.findall(bline)
-            if phones:
-                phone = phones[0].strip()
-                name = ""
-                if j > 0:
-                    prev = block[j - 1].strip()
-                    if not phone_pat.search(prev) and prev not in ("No", "Yes") and not prev.startswith("Date"):
-                        name = prev
-                name_in_line = bline.split(phone)[0].strip().rstrip("(").strip()
-                if name_in_line and len(name_in_line) > 2:
-                    name = name_in_line
-                phone_entries.append({"name": name, "phone": phone})
-
-        # Encontra respondent
-        respondent = ""
-        for bline in block:
-            resp_match = re.search(r'Respondent[:\s]*(.+)', bline, re.IGNORECASE)
-            if resp_match:
-                respondent = resp_match.group(1).strip()
-                if "(" in respondent:
-                    respondent = respondent.split("(")[0].strip()
-                break
-
-        # Validação: bloco sem telefone E sem respondent = provavelmente lixo
-        if not phone_entries and not respondent:
-            log.debug(f"[{state}] {ticket_num}: bloco '{util_name[:30]}' descartado — sem telefone nem respondent")
-            continue
-
-        # Cria registro por PESSOA
-        seen_names = set()
-        roles = ["Contact", "Alternate", "Emergency"]
-        for k, entry in enumerate(phone_entries[:3]):
-            name = entry["name"]
-            phone = entry["phone"]
-            if not name or name == util_name or name == svc_code or name == util_type:
-                continue
-            name_key = name.upper().strip("* ").strip()
-            if name_key in seen_names:
-                continue
-            seen_names.add(name_key)
-            contacts.append({
-                "utility_name": util_name,
-                "service_area_code": svc_code,
-                "contact_name": name.strip("* ").strip(),
-                "phone_main": phone,
-                "state": state,
-                "ticket_ref": ticket_num,
-                "notes": (roles[k] if k < 3 else "Other") + " | " + util_type,
-            })
-
-        if respondent:
-            resp_key = respondent.upper().strip()
-            if resp_key not in seen_names:
-                contacts.append({
-                    "utility_name": util_name,
-                    "service_area_code": svc_code,
-                    "contact_name": respondent,
-                    "phone_main": "",
-                    "state": state,
-                    "ticket_ref": ticket_num,
-                    "notes": "Respondent | " + util_type,
-                })
-
-    return contacts
-
-
-async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
-    """Scrape contatos de utilities via Find Ticket (FL + IN)."""
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-
-    if not ticket_numbers:
-        tickets_db = sb_get("tickets", f"&state=eq.{state}&status=in.(Open,Damage,Clear)&order=ticket")
-        ticket_numbers = [t["ticket"] for t in tickets_db]
-
-    if not ticket_numbers:
-        log.info(f"[{state}] Nenhum ticket para buscar contatos")
-        return 0
-
-    log.info(f"[{state}] === Scraping contatos de {len(ticket_numbers)} tickets ===")
-    saved = 0
-
-    if not force:
-        already_done = get_already_processed_tickets(state)
-        ticket_numbers = [t for t in ticket_numbers if t not in already_done]
-        log.info(f"[{state}] Após skip: {len(ticket_numbers)} tickets a processar")
-    else:
-        log.info(f"[{state}] --force ativo: processando todos os {len(ticket_numbers)} tickets")
-
-    if not ticket_numbers:
-        log.info(f"[{state}] Todos tickets já processados — nada a fazer")
-        return 0
-
-    # Pré-carrega contatos existentes em memória
-    existing_contacts_set = set()
-    try:
-        all_existing = sb_get("utility_contacts", f"&state=eq.{state}&select=utility_name,contact_name")
-        for row in all_existing:
-            key = (row.get("utility_name", "").strip().upper(), row.get("contact_name", "").strip().upper())
-            existing_contacts_set.add(key)
-        log.info(f"[{state}] {len(existing_contacts_set)} contatos existentes em memória")
-    except Exception as e:
-        log.warning(f"[{state}] Não foi possível pré-carregar contatos: {e}")
-
-    async with async_playwright() as p:
-        ctx = await p.chromium.launch_persistent_context(perfil, headless=False, args=["--no-sandbox"])
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
-
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_stable(page)
-
-        if "login" in page.url.lower():
-            await ctx.close()
-            await asyncio.sleep(1)
-            ok = await auto_login(state)
-            if not ok:
-                return 0
-            await asyncio.sleep(1)
-            ctx = await p.chromium.launch_persistent_context(perfil, headless=False, args=["--no-sandbox"])
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
-
-        for idx, tnum in enumerate(ticket_numbers):
-            log.info(f"[{state}] Contatos ({idx+1}/{len(ticket_numbers)}) Ticket {tnum}")
-            try:
-                if state == "FL":
-                    find_url = "https://exactix.sunshine811.com/findTicketByNumberAndPhone"
-                    await page.goto(find_url, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2500)
-
-                    if "login" in page.url.lower():
-                        sl = page.locator('a:has-text("Search here")').first
-                        if await sl.count():
-                            await sl.click()
-                            await page.wait_for_timeout(2500)
-
-                    # Mouse click em cada campo + digitar (simula pessoa real)
-                    inputs = page.locator('input:visible')
-                    ic = await inputs.count()
-
-                    if ic >= 2:
-                        box1 = await inputs.nth(0).bounding_box()
-                        if box1:
-                            await page.mouse.click(box1['x'] + box1['width']/2, box1['y'] + box1['height']/2)
-                            await page.wait_for_timeout(200)
-                            await page.keyboard.type(tnum, delay=40)
-                            await page.wait_for_timeout(300)
-
-                        box2 = await inputs.nth(1).bounding_box()
-                        if box2:
-                            await page.mouse.click(box2['x'] + box2['width']/2, box2['y'] + box2['height']/2)
-                            await page.wait_for_timeout(200)
-                            await inputs.nth(1).fill(COMPANY_PHONE)
-                            await page.wait_for_timeout(300)
-
-                        log.info(f"[{state}] {tnum}: campos preenchidos via mouse+keyboard")
-
-                    search_btn = page.locator('button:has-text("Search")').first
-                    box3 = await search_btn.bounding_box() if await search_btn.count() else None
-                    if box3:
-                        await page.mouse.click(box3['x'] + box3['width']/2, box3['y'] + box3['height']/2)
-                        log.info(f"[{state}] {tnum}: Search clicado")
-
-                    try:
-                        await page.wait_for_selector('text="Positive Response", mat-card, table', timeout=8000)
-                    except Exception:
-                        await page.wait_for_timeout(3000)
-
-                    if idx < 2:
-                        ss2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"debug_after_search_{state}_{tnum}.png")
-                        await page.screenshot(path=ss2, full_page=True)
-                        log.info(f"[{state}] Screenshots salvos")
-
-                    await page.wait_for_timeout(500)
-
-                elif state == "IN":
-                    await page.goto(f"https://811.indiana811.org/tickets/{tnum}", wait_until="domcontentloaded")
-                    await wait_stable(page)
-                    resp_tab = page.locator('a:has-text("Responses"), [role="tab"]:has-text("Responses")').first
-                    if await resp_tab.count():
-                        await resp_tab.click()
-                        await wait_stable(page, timeout=5000)
-
-                body = await page.locator("body").inner_text()
-
-                if idx < 2:
-                    debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"debug_contacts_{state}_{tnum}.txt")
-                    with open(debug_path, "w", encoding="utf-8") as f:
-                        f.write(f"URL: {page.url}\n\n{body}")
-                    log.info(f"[{state}] Debug salvo: {debug_path}")
-
-                contacts = parse_contact_table(body, tnum, state)
-
-                if contacts:
-                    for contact in contacts:
-                        db_record = {
-                            "utility_name": contact.get("utility_name", ""),
-                            "contact_name": contact.get("contact_name", ""),
-                            "state": state,
-                            "phone_main": contact.get("phone_main", ""),
-                            "ticket_ref": tnum,
-                            "notes": contact.get("notes", ""),
-                        }
-                        try:
-                            cname = (db_record.get("contact_name", "") or "").strip()
-                            uname = (db_record.get("utility_name", "") or "").strip()
-                            dedup_key = (uname.upper(), cname.upper())
-                            if cname and uname and dedup_key in existing_contacts_set:
-                                continue
-                            sb_upsert_contact(db_record)
-                            if cname and uname:
-                                existing_contacts_set.add(dedup_key)
-                            saved += 1
-                            log.info(f"[{state}] SALVO: {uname} / {cname} / {db_record.get('phone_main','')}")
-                        except Exception as e:
-                            log.error(f"[{state}] Erro salvando contato {db_record.get('utility_name','?')} / {db_record.get('contact_name','?')}: {e}")
-                            if saved == 0:
-                                log.error(f"[{state}] Data enviado: {db_record}")
-                    log.info(f"[{state}] {tnum}: {len(contacts)} contatos extraídos")
-                else:
-                    log.warning(f"[{state}] {tnum}: nenhum contato encontrado")
-
-            except Exception as e:
-                log.error(f"[{state}] Contatos {tnum}: ERRO → {e}")
-
-        try:
-            await ctx.close()
-        except Exception:
-            pass
-
-    log.info(f"[{state}] === Contatos: {saved} salvos/atualizados de {len(ticket_numbers)} tickets ===")
-    return saved
-
-
-# ── UTILITY HELPERS ───────────────────────────────────────────────────────────
-def get_contacts_for_utility(utility_name, state="FL"):
-    try:
-        data = sb_get("utility_contacts", f"&utility_name=eq.{utility_name}&state=eq.{state}")
-        return data[0] if data else None
-    except Exception:
-        return None
-
-
-def get_all_contacts(state="FL"):
-    try:
-        return sb_get("utility_contacts", f"&state=eq.{state}&order=utility_name")
-    except Exception:
-        return []
-
-
-# ── EXPORT EXCEL ──────────────────────────────────────────────────────────────
-def export_excel():
-    try:
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-
-        log.info("Exportando Excel...")
-        tickets = sb_get("tickets", "&order=ticket")
-        projects = sb_get("projects", "&order=name")
-        proj_map = {p["id"]: p["name"] for p in projects}
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Tickets"
-
-        headers = [
-            "Ticket #", "Projeto", "Cliente", "Prime", "Estado", "Local",
-            "Status", "Footage", "Expira", "Tipo", "Endereço", "Job #",
-            "Pending", "Empresa",
-        ]
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="1a6cf0")
-            cell.alignment = Alignment(horizontal="center")
-
-        STATUS_COLOR = {"Open": "FFCCCC", "Clear": "CCFFCC", "Damage": "FFE5B4", "Closed": "EEEEEE"}
-        for row, t in enumerate(tickets, 2):
-            vals = [
-                t.get("ticket", ""), proj_map.get(t.get("project_id", ""), ""),
-                t.get("client", ""), t.get("prime", ""), t.get("state", ""),
-                t.get("location", ""), t.get("status", ""), t.get("footage", 0),
-                t.get("expire", ""), t.get("tipo", ""), t.get("address", ""),
-                t.get("job", ""), t.get("pending", ""), t.get("company", ""),
-            ]
-            for col, val in enumerate(vals, 1):
-                cell = ws.cell(row=row, column=col, value=val)
-                cell.fill = PatternFill("solid", fgColor=STATUS_COLOR.get(t.get("status", ""), "FFFFFF"))
-
-        for col in ws.columns:
-            ws.column_dimensions[col[0].column_letter].width = 18
-
-        # Aba Projetos
-        wp = wb.create_sheet("Projetos")
-        ph = ["Nome", "Cliente", "Estado", "Status", "Total Feet", "Tickets"]
-        for col, h in enumerate(ph, 1):
-            cell = wp.cell(row=1, column=col, value=h)
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="1a6cf0")
-
-        ticket_count = {}
-        for t in tickets:
-            pid = t.get("project_id", "")
-            ticket_count[pid] = ticket_count.get(pid, 0) + 1
-
-        for row, p_data in enumerate(projects, 2):
-            for col, val in enumerate([
-                p_data.get("name", ""), p_data.get("client", ""), p_data.get("state", ""),
-                p_data.get("status", ""), p_data.get("total_feet", 0),
-                ticket_count.get(p_data["id"], 0),
-            ], 1):
-                wp.cell(row=row, column=col, value=val)
-
-        fname = f"OneDrill_Tickets_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-        wb.save(fname)
-        log.info(f"Excel salvo: {fname}")
-        return fname
-    except Exception as e:
-        log.error(f"Erro ao exportar Excel: {e}")
-        return None
-
-
-# ── DEBUG ─────────────────────────────────────────────────────────────────────
-async def debug_screenshot(state):
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
-    if not os.path.exists(perfil):
-        print(f"Perfil não encontrado: {perfil}")
-        return
-    async with playwright_context(state, headless=False) as (p, ctx, page):
-        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
-        await wait_nav(page)
-        log.info(f"[{state}] URL: {page.url}")
-        if "login" in page.url.lower():
-            log.warning(f"[{state}] Sessão expirada!")
-            return
-        await page.screenshot(path=f"debug_2_after_login_{state}.png")
-        for sel in ['text="Go to Ticket Dashboard"', 'a:has-text("Ticket Dashboard")']:
-            if await page.locator(sel).count():
-                await click_and_wait(page, page.locator(sel), "nav")
-                break
-        await page.screenshot(path=f"debug_3_dashboard_{state}.png")
-        with open(f"debug_page_{state}.html", "w", encoding="utf-8") as f:
-            f.write(await page.content())
-        await page.wait_for_timeout(20000)
-
-
-# ── BACKFILL HISTORY ──────────────────────────────────────────────────────────
-def backfill_history():
-    """Adiciona eventos de clear no histórico para tickets Clear que não têm.
-    Usa data real da última resposta 811 (não datetime.now).
-    """
-    log.info("=== BACKFILL: Adicionando eventos de clear no histórico ===")
-    all_clear = sb_get("tickets", "&status=eq.Clear&order=ticket")
-    if not all_clear:
-        log.info("Nenhum ticket Clear encontrado")
-        return
-
-    fixed = 0
-    for t in all_clear:
-        tid = t["id"]
-        tnum = t["ticket"]
-        state = t.get("state", "")
-        hist = t.get("history") or []
-
-        has_clear_evt = any(
-            "auto 811" in (h.get("action", "")).lower() and "revertido" not in (h.get("action", "")).lower()
-            for h in hist
-        )
-        has_clear_evt = has_clear_evt or any("→ clear" in (h.get("action", "")).lower() for h in hist)
-        if has_clear_evt:
-            continue
-
-        # ── Busca data real da última resposta 811 ──
-        # Filtra datas corrompidas (responded_at ≈ synced_at = fallback do sync)
-        backfill_dt = None
-        try:
-            resps = sb_get(
-                "ticket_811_responses",
-                f"&ticket_num=eq.{tnum}&state=eq.{state}"
-                "&responded_at=not.is.null&select=responded_at,synced_at"
-            )
-            real_dates = []
-            for r in resps:
-                ra = r.get("responded_at")
-                sa = r.get("synced_at")
-                if not ra:
-                    continue
-                try:
-                    ra_dt = datetime.fromisoformat(str(ra).replace("Z", ""))
-                    if sa:
-                        sa_dt = datetime.fromisoformat(str(sa).replace("Z", ""))
-                        if abs((ra_dt - sa_dt).total_seconds()) / 3600 < 6:
-                            continue
-                    real_dates.append(ra_dt)
-                except Exception:
-                    continue
-            if real_dates:
-                backfill_dt = max(real_dates)
-        except Exception as e:
-            log.debug(f"  {tnum}: erro ao buscar respostas: {e}")
-
-        # Fallback: tenta extrair das notas
-        if not backfill_dt:
-            notes_text = t.get("notes") or ""
-            date_match = re.search(r'\[AUTO 811\] Clear em (\d{1,2}/\d{1,2}/\d{4})', notes_text)
-            if date_match:
-                try:
-                    backfill_dt = datetime.strptime(date_match.group(1), "%m/%d/%Y")
-                except Exception:
-                    pass
-
-        # Último fallback: agora
-        if not backfill_dt:
-            backfill_dt = datetime.now()
-
-        backfill_ts = int(backfill_dt.timestamp() * 1000)
-        backfill_label = backfill_dt.strftime('%m/%d/%Y')
-
-        hist.append({"ts": backfill_ts, "action": f"[AUTO 811] Clear em {backfill_label}", "color": "#16a34a"})
-        sb_patch("tickets", tid, {"history": hist})
-        log.info(f"  {tnum}: BACKFILL → {backfill_label}")
-        fixed += 1
-
-    log.info(f"=== BACKFILL CONCLUÍDO: {fixed} tickets corrigidos (de {len(all_clear)} Clear) ===")
-
-
-def fix_clear_dates():
-    """Corrige datas de clear no histórico de tickets que têm a data do sync
-    em vez da data real da última resposta 811.
-
-    Para cada ticket Clear:
-    1. Busca o evento [AUTO 811] ou → clear no history
-    2. Busca a data real da última resposta na tabela ticket_811_responses
-    3. Se a data do history for diferente da data real, corrige o timestamp
-    """
-    log.info("=" * 55)
-    log.info("  FIX-DATES: Corrigindo datas de clear no histórico")
-    log.info("=" * 55)
-
-    all_clear = sb_get("tickets", "&status=eq.Clear&order=ticket")
-    if not all_clear:
-        log.info("Nenhum ticket Clear encontrado")
-        return
-
-    fixed = 0
-    skipped = 0
-    no_response = 0
-
-    for t in all_clear:
-        tid = t["id"]
-        tnum = t["ticket"]
-        state = t.get("state", "")
-        hist = t.get("history") or []
-
-        # Encontra o evento de clear no history
-        clear_evt_idx = None
-        for i, h in enumerate(hist):
-            a = (h.get("action", "") or "").lower()
-            if ("auto 811" in a and "revertido" not in a) or "→ clear" in a or "auto-clear" in a:
-                clear_evt_idx = i
-                # Pega o ÚLTIMO evento de clear (mais recente)
-
-        if clear_evt_idx is None:
-            skipped += 1
-            continue
-
-        current_ts = hist[clear_evt_idx].get("ts", 0)
-
-        # Busca data real da última resposta 811.
-        # IMPORTANTE: responded_at pode estar corrompido (= synced_at quando parser
-        # não capturou a data). Filtra apenas respostas onde responded_at difere
-        # de synced_at por mais de 6h (indicando data real do portal).
-        real_dt = None
-        try:
-            resps = sb_get(
-                "ticket_811_responses",
-                f"&ticket_num=eq.{tnum}&state=eq.{state}"
-                "&responded_at=not.is.null&select=responded_at,synced_at"
-            )
-            real_dates = []
-            for r in resps:
-                ra = r.get("responded_at")
-                if not ra:
-                    continue
-                try:
-                    ra_dt = datetime.fromisoformat(str(ra).replace("Z", ""))
-                    # Aceita todas as datas — o parser agora captura datas reais.
-                    # Antes filtrava diff<6h vs synced_at, mas isso descartava
-                    # respostas legítimas do mesmo dia.
-                    real_dates.append(ra_dt)
-                except Exception:
-                    continue
-            if real_dates:
-                real_dt = max(real_dates)
-        except Exception as e:
-            log.debug(f"  {tnum}: erro ao buscar respostas: {e}")
-
-        if not real_dt:
-            no_response += 1
-            continue
-
-        real_ts = int(real_dt.timestamp() * 1000)
-        real_label = real_dt.strftime('%m/%d/%Y')
-
-        # Compara: se a diferença for > 1 hora, corrige
-        diff_hours = abs(current_ts - real_ts) / 3600000
-        if diff_hours < 1:
-            skipped += 1
-            continue
-
-        # Corrige o timestamp e o texto do evento
-        old_label = datetime.fromtimestamp(current_ts / 1000).strftime('%m/%d/%Y') if current_ts else "?"
-        hist[clear_evt_idx]["ts"] = real_ts
-        hist[clear_evt_idx]["action"] = f"[AUTO 811] Clear em {real_label}"
-
-        # Também corrige nas notas se existir
-        notes = t.get("notes") or ""
-        if f"[AUTO 811] Clear em {old_label}" in notes:
-            notes = notes.replace(
-                f"[AUTO 811] Clear em {old_label}",
-                f"[AUTO 811] Clear em {real_label}"
-            )
-
-        patch_data = {"history": hist, "updated_at": real_dt.isoformat()}
-        if notes != (t.get("notes") or ""):
-            patch_data["notes"] = notes
-
-        sb_patch("tickets", tid, patch_data)
-        log.info(f"  {tnum}: {old_label} → {real_label} (corrigido, diff={diff_hours:.0f}h)")
-        fixed += 1
-
-    log.info(f"{'=' * 55}")
-    log.info(f"  FIX-DATES CONCLUÍDO:")
-    log.info(f"    {fixed} corrigidos")
-    log.info(f"    {skipped} já corretos / sem evento clear")
-    log.info(f"    {no_response} sem data de resposta no banco")
-    log.info(f"    {len(all_clear)} total Clear")
-    log.info(f"{'=' * 55}")
-
-
-# ── BACKUP ────────────────────────────────────────────────────────────────────
-def backup_database(backup_dir=None, keep_days=30):
-    """Exporta todas as tabelas do Supabase para JSON datado.
-    
-    Estrutura: backups/2026-04-08/tickets.json, projects.json, etc.
-    Mantém os últimos 'keep_days' dias de backup.
-    """
-    import json, shutil
-    from datetime import timedelta
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    base = backup_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
-    folder = os.path.join(base, today)
-    os.makedirs(folder, exist_ok=True)
-
-    tables = [
-        ("tickets", "&order=id"),
-        ("projects", "&order=id"),
-        ("ticket_811_responses", "&order=id"),
-        ("utility_contacts", "&order=id"),
-        ("sync_811_log", "&order=id"),
-        ("app_roles", "&order=id"),
-    ]
-
-    log.info("=" * 55)
-    log.info("  BACKUP: Exportando banco de dados")
-    log.info(f"  Destino: {folder}")
-    log.info("=" * 55)
-
-    total_rows = 0
-    for table_name, query in tables:
-        try:
-            # Paginate: Supabase returns max 1000 rows per request
-            all_rows = []
-            offset = 0
-            batch_size = 1000
-            while True:
-                data = sb_get(table_name, f"{query}&limit={batch_size}&offset={offset}")
-                if not data:
-                    break
-                all_rows.extend(data)
-                if len(data) < batch_size:
-                    break
-                offset += batch_size
-
-            filepath = os.path.join(folder, f"{table_name}.json")
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(all_rows, f, ensure_ascii=False, indent=2, default=str)
-            
-            total_rows += len(all_rows)
-            log.info(f"  ✅ {table_name}: {len(all_rows)} registros")
-        except Exception as e:
-            log.error(f"  ❌ {table_name}: {e}")
-
-    # Gerar resumo
-    summary = {
-        "date": today,
-        "tables": {},
-        "total_rows": total_rows,
-    }
-    for table_name, _ in tables:
-        fp = os.path.join(folder, f"{table_name}.json")
-        if os.path.exists(fp):
-            summary["tables"][table_name] = {
-                "rows": len(json.load(open(fp, encoding="utf-8"))),
-                "size_kb": round(os.path.getsize(fp) / 1024, 1),
-            }
-    with open(os.path.join(folder, "_summary.json"), "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
-
-    log.info(f"  📊 Total: {total_rows} registros exportados")
-
-    # Cleanup: manter apenas os últimos 'keep_days' dias
-    cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
-    removed = 0
-    if os.path.isdir(base):
-        for d in sorted(os.listdir(base)):
-            dpath = os.path.join(base, d)
-            if os.path.isdir(dpath) and d < cutoff and d != today:
-                try:
-                    shutil.rmtree(dpath)
-                    removed += 1
-                except Exception:
-                    pass
-    if removed:
-        log.info(f"  🗑️ {removed} backup(s) antigo(s) removido(s) (>{keep_days} dias)")
-
-    log.info("=" * 55)
-    log.info(f"  BACKUP CONCLUÍDO: {folder}")
-    log.info("=" * 55)
-    return folder
-
-
-# ── SCHEDULER ─────────────────────────────────────────────────────────────────
-def run_scheduler():
-    """Agendador com threading e controle de concorrência melhorado."""
-    import threading
-
-    _running = {}
-    _running_lock = threading.Lock()  # Thread-safe
-
-    def run_in_thread(name, fn):
-        """Executa fn em thread separado. Pula se já estiver rodando."""
-        with _running_lock:
-            if _running.get(name):
-                log.info(f"[Scheduler] {name} já em execução — pulando")
-                return
-
-        def _run():
-            with _running_lock:
-                _running[name] = True
-            try:
-                log.info(f"[Scheduler] Iniciando: {name}")
-                fn()
-                log.info(f"[Scheduler] Concluído: {name}")
-            except Exception as e:
-                log.error(f"[Scheduler] Erro em {name}: {e}")
-            finally:
-                with _running_lock:
-                    _running[name] = False
-
-        threading.Thread(target=_run, name=name, daemon=True).start()
-
-    def task_sync():
-        asyncio.run(sync_and_import_all("scheduled"))
-
-    def task_keepalive():
-        import random as _r
-        # Não roda keepalive se sync está ativo (evita conflito de sessão)
-        with _running_lock:
-            if _running.get("sync") or _running.get("sync_startup"):
-                log.info("[Scheduler] Keepalive pulado — sync ativo")
-                return
-        asyncio.run(keep_alive("IN"))
-        time.sleep(_r.uniform(45, 120))
-        asyncio.run(keep_alive("FL"))
-
-    def task_contacts():
-        asyncio.run(scrape_contacts("FL"))
-
-    log.info("=" * 60)
-    log.info("  OneDrill 811 — SCHEDULER INICIADO")
-    log.info(f"  {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-    log.info("=" * 60)
-
-    # Sync inicial
-    run_in_thread("sync_startup", task_sync)
-
-    # Stagger: keepalive roda 1h depois do sync (evita conflito)
-    schedule.every(2).hours.do(lambda: run_in_thread("sync", task_sync))
-    schedule.every(2).hours.at(":30").do(lambda: run_in_thread("keepalive", task_keepalive))
-    schedule.every().day.at("08:00").do(lambda: run_in_thread("contacts_fl", task_contacts))
-    schedule.every().day.at("07:00").do(send_daily_report)
-    schedule.every().day.at("18:00").do(export_excel)
-
-    log.info("[Scheduler] Agenda configurada:")
-    log.info("  - Sync + Import:  a cada 2h (threading)")
-    log.info("  - Keep-alive:     a cada 2h :30min (staggered, threading)")
-    log.info("  - Contatos FL:    diário 08:00")
-    log.info("  - Relatório:      diário 07:00")
-    log.info("  - Excel:          diário 18:00")
-    log.info("[Scheduler] Loop ativo — aguardando próximas execuções...")
-
-    while True:
-        try:
-            schedule.run_pending()
-        except Exception as e:
-            log.error(f"[Scheduler] Erro no loop: {e}")
-        time.sleep(30)
-
-
-# ── SELF TESTS (rodar com --selftest) ────────────────────────────────────────
-def run_self_tests():
-    """Testes internos para classify(), needs_private_locator(), append_auto_note() etc."""
-    passed = 0
-    failed = 0
-
-    def _assert(label, expected, actual):
-        nonlocal passed, failed
-        if expected == actual:
-            passed += 1
-            print(f"  ✅ {label}")
-        else:
-            failed += 1
-            print(f"  ❌ {label}: esperado={expected!r}, recebeu={actual!r}")
-
-    print("\n=== OneDrill 811 Self-Tests ===\n")
-
-    # ── classify() tests ──
-    print("classify():")
-    _assert("Clear: 1 - marked", "Clear", classify("Current", "1 - marked"))
-    _assert("Clear: 2 - clear", "Clear", classify("Current", "2 - clear no facilities"))
-    _assert("Clear: 5 - no conflict", "Clear", classify("Current", "5 - no conflict"))
-    _assert("Clear: marked text", "Clear", classify("Positive Response", "Marked with exception"))
-    _assert("Clear: 3U not service", "Clear", classify("Positive Response", "3U - Not service provider"))
-    _assert("Clear: 3H private", "Clear", classify("Current", "3H - Privately owned facility"))
-    _assert("Pending: no response", "Pending", classify("No Response", ""))
-    _assert("Pending: unmarked", "Pending", classify("Current", "unmarked"))
-    _assert("Pending: marking delay", "Pending", classify("Current", "marking delay"))
-    _assert("Pending: no access", "Pending", classify("Current", "no access"))
-    _assert("Pending: positive ambiguous", "Pending", classify("Positive Response", ""))
-    _assert("Clear: clear status", "Clear", classify("Clear", ""))
-    _assert("Clear: no facilit", "Clear", classify("Current", "No facilities in area"))
-
-    # ── needs_private_locator() tests ──
-    print("\nneeds_private_locator():")
-    _assert("3H detected", True, needs_private_locator("3H - Privately owned facility"))
-    _assert("privately owned", True, needs_private_locator("This is a privately owned line"))
-    _assert("private facility owner", True, needs_private_locator("Contact private facility owner"))
-    _assert("normal response", False, needs_private_locator("1 - Marked"))
-    _assert("empty string", False, needs_private_locator(""))
-
-    # ── is_ticket_canceled() tests ──
-    print("\nis_ticket_canceled():")
-    _assert("CANCEL header", True, is_ticket_canceled("CANCEL\nSome body text"))
-    _assert("FUNCTION: CANCEL", True, is_ticket_canceled("Header\nFunction: CANCEL\nMore text"))
-    _assert("replaced by", True, is_ticket_canceled("CANCELED ticket\nREPLACED BY TICKET NUMBER 12345678"))
-    _assert("normal ticket", False, is_ticket_canceled("Normal ticket body\nLocation: Main St"))
-    _assert("empty", False, is_ticket_canceled(""))
-
-    # ── append_auto_note() tests ──
-    print("\nappend_auto_note():")
-    _assert("adds to empty", "[AUTO 811] Clear", append_auto_note("", "[AUTO 811] Clear"))
-    _assert("dedup exact", "existing\n[AUTO 811] Clear", append_auto_note("existing\n[AUTO 811] Clear", "[AUTO 811] Clear"))
-    _assert("preserves manual", True, "manual note" in append_auto_note("manual note", "[AUTO 811] New"))
-    _assert("truncates excess", True, len(append_auto_note(
-        "\n".join(f"[AUTO 811] Note {i}" for i in range(15)),
-        "[AUTO 811] Note 15"
-    ).split("\n")) <= MAX_AUTO_NOTES + 1)
-
-    # ── _get_latest_response_date() tests ──
-    print("\n_get_latest_response_date():")
-    _assert("ISO dates: picks latest", True,
-        _get_latest_response_date([
-            {"utility": "A", "responded_date": "2026-03-23T10:11:00"},
-            {"utility": "B", "responded_date": "2026-03-25T09:30:00"},
-            {"utility": "C", "responded_date": "2026-03-24T08:50:00"},
-        ]).strftime('%m/%d/%Y') == "03/25/2026")
-    _assert("mixed formats", True,
-        _get_latest_response_date([
-            {"utility": "A", "responded_date": "03/28/2026"},
-            {"utility": "B", "responded_date": "2026-03-25T09:30:00"},
-        ]).strftime('%m/%d/%Y') == "03/28/2026")
-    _assert("no dates: returns now", True,
-        _get_latest_response_date([
-            {"utility": "A", "status": "Clear"},
-        ]).date() == datetime.now().date())
-    _assert("empty list: returns now", True,
-        _get_latest_response_date([]).date() == datetime.now().date())
-
-    # ── extract_expire_date() tests ──
-    print("\nextract_expire_date():")
-    _assert("mm/dd/yyyy", "04/15/2026", extract_expire_date("Expire on: 04/15/2026\nNext line"))
-    _assert("due date", "03/20/2026", extract_expire_date("Due Date: 03/20/2026\nBody"))
-    _assert("no date", "", extract_expire_date("No expiration info here"))
-
-    print(f"\n{'='*40}")
-    print(f"Resultado: {passed} passou, {failed} falhou")
-    if failed == 0:
-        print("✅ Todos os testes passaram!")
-    else:
-        print("❌ Alguns testes falharam.")
-        sys.exit(1)
-    print()
-
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OneDrill - 811 Sync v2")
-    parser.add_argument("--state",      choices=["FL", "IN"], help="Estado a sincronizar")
-    parser.add_argument("--all",        action="store_true", help="Sincronizar FL + IN")
-    parser.add_argument("--imp",        action="store_true", help="Importar tickets novos + respostas")
-    parser.add_argument("--imp_all",    action="store_true", help="Importar FL + IN")
-    parser.add_argument("--excel",      action="store_true", help="Exportar Excel")
-    parser.add_argument("--debug",      action="store_true", help="Debug: screenshots")
-    parser.add_argument("--rescrape",   action="store_true", help="Re-scrape notes")
-    parser.add_argument("--cleanup",    action="store_true", help="Excluir tickets cancelados")
-    parser.add_argument("--cleanup_all", action="store_true", help="Cleanup IN + FL em paralelo")
-    parser.add_argument("--report",     action="store_true", help="Enviar relatório diário por email")
-    parser.add_argument("--contacts",   action="store_true", help="Scrape contatos de utilities (FL)")
-    parser.add_argument("--force",      action="store_true", help="Forçar re-scrape de TODOS")
-    parser.add_argument("--backfill",   action="store_true", help="Backfill: adicionar eventos de clear no histórico")
-    parser.add_argument("--fix-dates",  action="store_true", help="Corrigir datas de clear usando data real da última resposta 811")
-    parser.add_argument("--no-cache",   action="store_true", help="Forçar re-scrape de todos (incluindo Clear em cache)")
-    parser.add_argument("--schedule",   action="store_true", help="Iniciar agendador automático")
-    parser.add_argument("--selftest",   action="store_true", help="Rodar testes internos (classify, parser)")
-    parser.add_argument("--backup",     action="store_true", help="Backup completo do banco de dados (JSON)")
-    parser.add_argument("--no-lock",    action="store_true", help="Pular verificação de lock file")
-    args = parser.parse_args()
-
-    # Lock file — pula pra debug e schedule (schedule gerencia internamente)
-    use_lock = not args.no_lock and not args.debug and not args.schedule and not args.selftest
-
-    def _run():
-        if args.selftest:
-            run_self_tests()
-        elif args.backup:
-            backup_database()
-        elif args.debug:
-            asyncio.run(debug_screenshot(args.state or "IN"))
-        elif args.excel:
-            export_excel()
-        elif args.report:
-            send_daily_report()
-        elif args.contacts:
-            asyncio.run(scrape_contacts(args.state or "FL", force=args.force))
-        elif args.cleanup_all:
-            asyncio.run(cleanup_all())
-        elif args.cleanup:
-            asyncio.run(cleanup_canceled(args.state or "IN"))
-        elif args.rescrape:
-            asyncio.run(rescrape_notes(args.state or "FL", force=args.force))
-        elif args.backfill:
-            backfill_history()
-        elif getattr(args, 'fix_dates', False):
-            fix_clear_dates()
-        elif args.all:
-            asyncio.run(sync_all())
-        elif args.imp_all:
-            asyncio.run(sync_and_import_all())
-        elif args.imp:
-            asyncio.run(sync_and_import(args.state or "IN"))
-        elif args.state:
-            asyncio.run(sync_state(args.state))
-        elif args.schedule:
-            run_scheduler()
-        else:
-            parser.print_help()
-
-    if use_lock:
-        try:
-            with ProcessLock():
-                _run()
-        except RuntimeError as e:
-            log.error(str(e))
-            sys.exit(1)
-    else:
-        _run()
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OneDrill</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4"></script>
+</head>
+<body>
+
+<!-- ===== LOADING SCREEN ===== -->
+<div id="loading-screen">
+  <div class="loading-icon"><img src="logo.png" alt="OneDrill"></div>
+  <div class="loading-logo">ONEDRILL</div>
+  <div class="loading-bar"><div class="loading-fill"></div></div>
+  <div class="loading-hint">Conectando ao banco de dados...</div>
+</div>
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="login-screen" class="hidden">
+  <div class="login-brand">
+    <div class="login-emblem"><img src="logo.png" alt="OneDrill"></div>
+    <div class="login-brand-name">ONEDRILL</div>
+  </div>
+  <div class="login-box">
+    <div class="login-enter-section">
+      <button class="login-btn" data-action="enter-viewer">Entrar →</button>
+      <button class="login-view-btn" data-action="enter-viewer">Continuar como Manager / Visualizador</button>
+    </div>
+    <div class="login-divider"><span>Admin</span></div>
+    <div class="login-admin-section">
+      <div class="login-admin-label">Acesso administrativo</div>
+      <input class="login-inp" type="email" id="admin-email" placeholder="Email" data-next-focus="admin-pw">
+      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" data-action="try-login">
+      <button class="login-admin-btn" data-action="try-login">Entrar como Admin</button>
+      <div class="login-err" id="login-err">Senha incorreta</div>
+    </div>
+  </div>
+  <div class="login-footer">OneDrill Ticket Management System</div>
+</div>
+
+<!-- ===== SHARED PROJECT VIEW (standalone) ===== -->
+<div class="page" id="pg-shared">
+  <header class="shared-topbar">
+    <div class="shared-logo">
+      <div class="logo-emblem"><img src="logo.png" alt=""></div>
+      ONEDRILL
+    </div>
+    <div class="shared-proj-name" id="shared-proj-name"></div>
+    <button class="btn btn-sm" id="shared-enter-btn" data-action="exit-shared">Abrir app completo →</button>
+  </header>
+
+  <div class="shared-body shared-body--relative">
+    <div class="shared-panel-overlay" id="shared-overlay" data-action="toggle-shared-panel"></div>
+    <div class="shared-map">
+      <div id="shared-map-el"></div>
+      <div class="mctrl mctrl--top-right">
+        <button class="mbtn" id="sh-bsat" data-layer="sat">Satélite</button>
+        <button class="mbtn active" id="sh-bhyb" data-layer="hyb">Híbrido</button>
+        <button class="mbtn" id="sh-bstr" data-layer="str">Ruas</button>
+        <div class="map-divider"></div>
+        <button class="mbtn" data-action="sh-fit-all">Ver todos</button>
+      </div>
+      <button class="shared-mob-toggle" id="shared-mob-toggle" data-action="toggle-shared-panel">
+        📋 <span id="shared-toggle-label">Ver tickets</span>
+      </button>
+    </div>
+    <aside class="shared-sidebar" id="shared-sidebar">
+      <div class="shared-stats" id="shared-stats"></div>
+      <div class="shared-filters">
+        <input class="fi" id="sh-srch" placeholder="Buscar ticket..." data-filter="shared-search">
+        <select class="fi fi--auto-width" id="sh-stat" data-filter="shared-status">
+          <option value="">Todos</option>
+          <option>Open</option>
+          <option>Clear</option>
+          <option>Damage</option>
+          <option>Closed</option>
+          <option>Cancel</option>
+        </select>
+      </div>
+      <div class="shared-count" id="shared-count"></div>
+      <div class="shared-list" id="shared-list"></div>
+    </aside>
+  </div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
+<div id="app-shell" class="app-shell hidden">
+
+  <!-- Left Sidebar Navigation -->
+  <aside class="snav" id="sidebar-nav">
+    <div class="snav-brand">
+      <div class="snav-logo"><img src="logo.png" alt=""></div>
+      <span class="snav-name">ONEDRILL</span>
+    </div>
+
+    <div class="snav-search-wrap">
+      <input class="snav-search" id="gsearch" placeholder="Buscar ticket, cliente..." data-action="global-search">
+      <div class="gsearch-dd" id="gsearch-dd"></div>
+    </div>
+
+    <nav class="snav-menu">
+      <button class="snav-item active" data-page="dash">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </button>
+      <button class="snav-item" data-page="proj">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        Projetos
+      </button>
+      <button class="snav-item" data-page="analytics">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Analytics
+      </button>
+      <button class="snav-item" data-page="map">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg>
+        Mapa
+      </button>
+      <button class="snav-item" data-page="tickets">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Tickets
+      </button>
+      <button class="snav-item" data-page="contacts">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Contatos
+      </button>
+      <button class="snav-item" data-page="completed" id="nav-completed" style="display:none">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><polyline points="9 14 12 17 15 11"/></svg>
+        <span>Histórico <span id="nav-completed-count" style="font-size:10px;opacity:.6"></span></span>
+      </button>
+    </nav>
+
+    <div class="snav-actions">
+      <button class="btn snav-action-btn" data-action="export-excel">↓ Excel</button>
+      <button class="btn snav-action-btn hidden" id="btn-import" data-action="open-import">↑ Importar</button>
+      <button class="btn btn-primary snav-action-btn hidden" id="btn-new-ticket" data-action="new-ticket">+ Ticket</button>
+    </div>
+
+    <div class="snav-footer">
+      <div class="snav-sync">
+        <div class="sync-dot" id="sync-dot"></div>
+        <span id="sync-label">Conectado</span>
+        <button class="snav-refresh-btn" data-action="manual-refresh" title="Atualizar dados">⟳</button>
+      </div>
+      <div class="snav-sync-status" id="last-sync-status">🟡 IN: —<br>🟡 FL: —</div>
+      <div class="snav-footer-row">
+        <span class="role-badge" id="role-badge">VIEWER</span>
+        <div class="snav-footer-actions">
+          <button class="snav-notif-btn" data-action="toggle-notif" aria-label="Notificações">
+            🔔<span class="notif-badge hidden" id="notif-badge">0</span>
+          </button>
+          <button class="snav-notif-btn" data-action="toggle-info" aria-label="Informações">ℹ️</button>
+          <button class="snav-logout-btn" id="btn-logout" data-action="logout" title="Sair" aria-label="Sair">⏻</button>
+        </div>
+      </div>
+      <div class="notif-panel" id="notif-panel"></div>
+      <div class="notif-panel" id="info-panel"></div>
+    </div>
+  </aside>
+
+  <!-- Mobile topbar -->
+  <div class="mob-topbar">
+    <button class="mob-menu-btn" data-action="toggle-mob-nav" aria-label="Menu">☰</button>
+    <div class="mob-logo-icon"><img src="logo.png" alt=""></div>
+    <span class="mob-brand-name">ONEDRILL</span>
+  </div>
+  <div class="mob-nav-overlay" id="mob-nav-overlay" data-action="toggle-mob-nav"></div>
+
+  <!-- Main content area -->
+  <main class="main-area">
+
+    <!-- Dashboard -->
+    <div class="page active" id="pg-dash">
+      <div class="dash-inner" id="dash-content"></div>
+    </div>
+
+    <!-- Projetos -->
+    <div class="page" id="pg-proj">
+      <div class="proj-inner">
+        <div class="proj-header">
+          <div class="page-title">Projetos</div>
+          <div class="proj-header-actions">
+            <select class="fi fi--min-120" id="proj-state-filter" data-filter="proj-state">
+              <option value="">Todos estados</option>
+            </select>
+            <button class="btn btn-primary hidden" id="btn-new-proj" data-action="new-project">+ Projeto</button>
+          </div>
+        </div>
+        <div class="proj-grid" id="proj-grid"></div>
+      </div>
+    </div>
+
+    <!-- Mapa -->
+    <div class="page" id="pg-map">
+      <button class="sb-toggle" id="sb-toggle" data-action="toggle-sidebar">📋 Tickets</button>
+      <div class="sidebar-overlay" id="sb-overlay" data-action="toggle-sidebar"></div>
+
+      <aside class="sidebar" id="map-sidebar">
+        <div class="sb-filters">
+          <select class="fi" id="proj-filter" data-filter="proj-filter">
+            <option value="">Todos os projetos</option>
+          </select>
+          <input class="fi" id="srch" placeholder="Buscar ticket, cliente..." data-filter="map-search">
+          <div class="frow">
+            <select class="fi" id="fcli" data-filter="map-client"><option value="">Todos clientes</option></select>
+            <select class="fi" id="floc" data-filter="map-location"><option value="">Todos locais</option></select>
+            <select class="fi" id="map-util-filter" data-filter="map-utility">
+              <option value="">Todas utilities</option>
+              <option value="__pending__">Com pendentes</option>
+            </select>
+          </div>
+          <div class="filter-toggles">
+            <span class="filter-toggles-label">Status:</span>
+            <button class="ftog on-open" id="ft-open" data-toggle-filter="open">Open</button>
+            <button class="ftog on-damage" id="ft-damage" data-toggle-filter="damage">Damage</button>
+            <button class="ftog on-clear" id="ft-clear" data-toggle-filter="clear">Clear</button>
+            <button class="ftog" id="ft-closed" data-toggle-filter="closed">Closed</button>
+            <button class="ftog" id="ft-cancel" data-toggle-filter="cancel">Cancel</button>
+          </div>
+        </div>
+        <div class="sb-count" id="tcount"></div>
+        <div class="tlist" id="tlist"></div>
+      </aside>
+
+      <div class="mapc">
+        <div id="map"></div>
+
+        <div class="mctrl">
+          <button class="mbtn" id="bsat" data-layer="sat">Satélite</button>
+          <button class="mbtn active" id="bhyb" data-layer="hyb">Híbrido</button>
+          <button class="mbtn" id="bstr" data-layer="str">Ruas</button>
+          <div class="map-divider"></div>
+          <button class="mbtn" data-action="fit-all">Ver todos</button>
+          <div class="map-divider"></div>
+          <div class="map-legend">
+            <div class="legend-title">Legenda</div>
+            <div class="legend-group-label">Status</div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--red"></div><span class="legend-text">Open</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--green"></div><span class="legend-text">Clear</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--amber"></div><span class="legend-text">Damage</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--dark"></div><span class="legend-text">Closed</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--purple"></div><span class="legend-text">Cancel</span></div>
+            <div class="legend-divider"></div>
+            <div class="legend-group-label">Tipo</div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--solid"></div><span class="legend-text">Main Line</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--dashed"></div><span class="legend-text">Service</span></div>
+          </div>
+        </div>
+
+        <!-- Field draw panel -->
+        <div id="field-draw-panel">
+          <div class="fdraw-header">
+            <div>
+              <div class="fdraw-title">✏️ Desenhando trajeto</div>
+              <div class="fdraw-sub" id="field-draw-ticket"></div>
+            </div>
+            <button class="modal-close" data-action="cancel-field-draw">×</button>
+          </div>
+          <div class="fdraw-instructions">
+            🖱 <strong>Clique</strong> para adicionar pontos · <strong>Duplo clique</strong> para finalizar
+          </div>
+          <div class="fdraw-footer">
+            <span class="fdraw-count" id="field-draw-count">0 pts</span>
+            <div class="fdraw-actions">
+              <button class="btn btn-sm" data-action="undo-field-pt">↩ Desfazer</button>
+              <button class="btn btn-sm" data-action="clear-field-path">🗑 Limpar</button>
+              <button class="btn btn-sm btn-primary" data-action="save-field-path">✅ Salvar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map popup panel -->
+        <div class="map-panel" id="panel">
+          <div class="mp-title">
+            <span id="ptitle-txt"></span>
+            <button class="mp-close" data-action="close-panel">×</button>
+          </div>
+          <div id="pbody"></div>
+          <div class="mp-foot">
+            <button class="btn btn-sm" data-action="open-detail-from-panel">Detalhes →</button>
+            <button class="btn btn-sm" id="panel-nav-btn" data-action="navigate-from-panel">🗺 Navegar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tickets table -->
+    <div class="page" id="pg-tickets">
+      <div class="tbar">
+        <input class="fi fi--max-200" id="tbl-srch" placeholder="Buscar..." data-filter="tbl-search">
+        <select class="fi fi--max-120" id="tbl-stat" data-filter="tbl-status">
+          <option value="">Todos status</option>
+          <option>Open</option>
+          <option>Clear</option>
+          <option>Damage</option>
+          <option>Closed</option>
+          <option>Cancel</option>
+        </select>
+        <select class="fi fi--max-180" id="tbl-proj" data-filter="tbl-proj"><option value="">Todos projetos</option></select>
+        <select class="fi fi--max-150" id="tbl-cli" data-filter="tbl-client"><option value="">Todos clientes</option></select>
+        <select class="fi fi--max-200" id="tbl-util" data-filter="tbl-utility"><option value="">Todas utilities</option></select>
+        <button class="btn btn-sm tbar-export" data-action="export-filtered">↓ Excel filtrado</button>
+        <span class="tbar-count" id="tbl-count"></span>
+      </div>
+      <div class="tbl-wrap">
+        <div class="tbl-inner">
+          <table>
+            <thead>
+              <tr>
+                <th data-sort="ticket">Ticket #</th>
+                <th data-sort="client">Cliente</th>
+                <th data-sort="prime">Prime</th>
+                <th data-sort="location">Local</th>
+                <th data-sort="status">Status</th>
+                <th data-sort="footage">Footage</th>
+                <th data-sort="expire">Expira</th>
+                <th data-sort="risk" id="tbl-head-risk" title="Ordenar por risco">⚠ Risco</th>
+                <th data-sort="tipo">Tipo</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tbl-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contacts -->
+    <div class="page" id="pg-contacts">
+      <div class="contacts-inner">
+        <div class="contacts-header">
+          <div class="page-title">Contatos de Utilities</div>
+          <div class="contacts-header-actions">
+            <input class="fi fi--w-180" id="contacts-search" placeholder="Buscar utility..." data-filter="contacts-search">
+            <select class="fi fi--auto-width" id="contacts-state-filter" data-filter="contacts-state">
+              <option value="">Todos</option>
+              <option>FL</option>
+              <option>IN</option>
+            </select>
+            <button class="btn btn-sm" data-action="export-contacts">↓ Excel</button>
+            <button class="btn btn-primary btn-sm hidden" id="btn-add-contact" data-action="new-contact">+ Contato</button>
+          </div>
+        </div>
+        <div id="contacts-grid"></div>
+      </div>
+    </div>
+
+    <!-- Analytics -->
+    <div class="page" id="pg-analytics">
+      <div class="dash-inner" id="analytics-content"></div>
+    </div>
+
+    <div class="page" id="pg-completed">
+      <div class="dash-inner" id="completed-content"></div>
+    </div>
+
+  </main>
+</div><!-- /app-shell -->
+
+<!-- ===== MODALS ===== -->
+
+<!-- MODAL: New/Edit Ticket -->
+<div class="overlay" id="ov-ticket">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="mtitle" id="ticket-modal-title">Novo ticket</div>
+      <button class="modal-close" data-close="ov-ticket">×</button>
+    </div>
+    <div class="fgrid">
+      <div class="fg full"><label class="fl">Ticket #</label><input class="finp" id="tm-t" placeholder="Número do ticket"></div>
+      <div class="fg"><label class="fl">Status</label>
+        <select class="fsel" id="tm-s">
+          <option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option>
+        </select>
+      </div>
+      <div class="fg"><label class="fl">Projeto</label><select class="fsel" id="tm-proj"><option value="">Sem projeto</option></select></div>
+      <div class="fg"><label class="fl">Empresa</label><input class="finp" id="tm-co" placeholder="One Drill"></div>
+      <div class="fg"><label class="fl">Cliente</label><input class="finp" id="tm-c" placeholder="Duke Energy..."></div>
+      <div class="fg"><label class="fl">Prime</label><input class="finp" id="tm-prime" placeholder="DIRECTLINE..."></div>
+      <div class="fg"><label class="fl">Local</label><input class="finp" id="tm-l" placeholder="Orlando"></div>
+      <div class="fg"><label class="fl">Estado</label><input class="finp" id="tm-st" placeholder="FL"></div>
+      <div class="fg"><label class="fl">Footage</label><input class="finp" id="tm-f" type="number" placeholder="0"></div>
+      <div class="fg"><label class="fl">Expira</label><input class="finp" id="tm-e" placeholder="MM/DD/AAAA"></div>
+      <div class="fg"><label class="fl">Tipo</label><input class="finp" id="tm-tipo" placeholder="Main line / Service"></div>
+      <div class="fg"><label class="fl">Job #</label><input class="finp" id="tm-job" placeholder="Job number"></div>
+      <div class="fg full"><label class="fl">Endereço</label><input class="finp" id="tm-addr" placeholder="CART PATH LN"></div>
+      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="tm-notes"></textarea></div>
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-ticket">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-ticket">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: New/Edit Project -->
+<div class="overlay" id="ov-proj">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div class="mtitle" id="proj-modal-title">Novo projeto</div>
+      <button class="modal-close" data-close="ov-proj">×</button>
+    </div>
+    <div class="fgrid">
+      <div class="fg"><label class="fl">Localidade</label><input class="finp" id="pm-loc" placeholder="Vigo - Terre Haute"></div>
+      <div class="fg"><label class="fl">Número do Projeto</label><input class="finp" id="pm-num" placeholder="2505472"></div>
+      <div class="fg"><label class="fl">Cliente</label><input class="finp" id="pm-client"></div>
+      <div class="fg"><label class="fl">Estado</label><input class="finp" id="pm-state"></div>
+      <div class="fg"><label class="fl">Status</label><select class="fsel" id="pm-status"><option>Active</option><option>Completed</option></select></div>
+      <div class="fg"><label class="fl">Total Feet</label><input class="finp" id="pm-feet" type="number" placeholder="0"></div>
+      <div class="fg full"><label class="fl">Coordenadas centro (lat, lon)</label><input class="finp" id="pm-coords" placeholder="39.403689, -87.349948"></div>
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-proj">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-project">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Import -->
+<div class="overlay" id="ov-import">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div class="mtitle">Importar Excel</div>
+      <button class="modal-close" data-close="ov-import">×</button>
+    </div>
+    <div class="import-note">
+      Compatível com <strong>Controle_Tickets.xlsx</strong><br>
+      Colunas: <strong>Ticket#, Company, State, Location, Status, Expire on, Footage, Client, Prime, Tipo, Main Address, Pending, Old Ticket #, Status Old, Old Expiration Date</strong>
+    </div>
+    <div class="uzone" id="uzone" data-action="trigger-file-input">
+      <div class="uzone-icon">📂</div>
+      <div class="uzone-text">Clique ou arraste o arquivo aqui</div>
+      <div class="uzone-hint">.xlsx · .xls · .csv</div>
+    </div>
+    <input type="file" id="ffile" accept=".xlsx,.xls,.csv" class="hidden">
+    <div id="prevarea" class="hidden">
+      <div class="import-options">
+        <span class="import-label" id="prevlabel"></span>
+        <div class="import-modes">
+          <label class="import-mode-opt">
+            <input type="radio" name="importmode" value="replace" checked>
+            <span><strong>Substituir tudo</strong></span>
+          </label>
+          <label class="import-mode-opt">
+            <input type="radio" name="importmode" value="update">
+            <span><strong>Atualizar dados</strong> — preserva trajetos ✏️</span>
+          </label>
+          <label class="import-mode-opt">
+            <input type="radio" name="importmode" value="add">
+            <span><strong>Acumular</strong></span>
+          </label>
+        </div>
+      </div>
+      <div class="prevwrap"><table class="ptable" id="ptbl"></table></div>
+      <div class="progwrap" id="progwrap">
+        <span id="progtxt">Importando...</span>
+        <div class="progtrack"><div class="progfill" id="progfill"></div></div>
+      </div>
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-import">Cancelar</button>
+      <button class="btn btn-primary hidden" id="bimport" data-action="do-import">Importar dados</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Move to project -->
+<div class="overlay" id="ov-move-proj">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div class="mtitle">Mover para projeto</div>
+      <button class="modal-close" data-close="ov-move-proj">×</button>
+    </div>
+    <div class="move-proj-info" id="move-proj-ticket-info"></div>
+    <div class="fg"><label class="fl">Projeto</label><select class="fsel" id="move-proj-sel"><option value="">Sem projeto</option></select></div>
+    <div class="factions">
+      <button class="btn" data-close="ov-move-proj">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-move-proj">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Delete project -->
+<div class="overlay" id="ov-del-proj">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div class="mtitle mtitle--danger">Excluir projeto</div>
+      <button class="modal-close" data-close="ov-del-proj">×</button>
+    </div>
+    <div class="del-proj-info" id="del-proj-info"></div>
+    <div class="del-proj-warning">
+      ⚠️ Os tickets deste projeto <strong>não serão excluídos</strong>, apenas desvinculados.
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-del-proj">Cancelar</button>
+      <button class="btn btn-danger" data-action="confirm-del-proj">Excluir projeto</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Contact -->
+<div class="overlay" id="ov-contact">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div class="mtitle" id="contact-modal-title">Novo contato</div>
+      <button class="modal-close" data-close="ov-contact">×</button>
+    </div>
+    <div class="fgrid">
+      <div class="fg full"><label class="fl">Utility</label><input class="finp" id="ct-utility" placeholder="Duke Energy"></div>
+      <div class="fg"><label class="fl">Nome do contato</label><input class="finp" id="ct-name" placeholder="John Smith"></div>
+      <div class="fg"><label class="fl">Estado</label><select class="fsel" id="ct-state"><option>FL</option><option>IN</option></select></div>
+      <div class="fg"><label class="fl">Ticket ref.</label><input class="finp" id="ct-ticket" placeholder="Número"></div>
+      <div class="fg"><label class="fl">Tel. principal</label><input class="finp" id="ct-phone1" placeholder="(321) 555-1234"></div>
+      <div class="fg"><label class="fl">Tel. alternativo</label><input class="finp" id="ct-phone2"></div>
+      <div class="fg"><label class="fl">Tel. emergência</label><input class="finp" id="ct-phone3"></div>
+      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="ct-notes"></textarea></div>
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-contact">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-contact">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Ticket Detail -->
+<div class="overlay" id="ov-detail">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <div class="mtitle" id="det-title"></div>
+        <div class="det-subtitle" id="det-sub"></div>
+      </div>
+      <div class="det-head-actions">
+        <button class="btn btn-sm btn-draw hidden" id="det-draw-btn" data-action="go-draw-field">✏️ Desenhar</button>
+        <button class="btn btn-sm btn-accent" id="det-proj-btn" data-action="open-move-proj">📁 Projeto</button>
+        <button class="btn btn-sm hidden" id="det-edit-btn" data-action="edit-current-ticket">Editar</button>
+        <button class="btn btn-sm hidden" id="det-renew-btn" onclick="renewTicket()" style="background:#7c3aed;color:white;border-color:#7c3aed">🔄 Renovar</button>
+        <button class="btn btn-sm" data-action="navigate-from-detail">🗺 Navegar</button>
+        <button class="modal-close" data-close="ov-detail">×</button>
+      </div>
+    </div>
+    <div class="det-grid">
+      <div>
+        <div class="fsection fsection--first">
+          <div class="fsection-lbl">Informações</div>
+          <div id="det-info"></div>
+        </div>
+        <div class="fsection">
+          <div class="fsection-lbl">Histórico</div>
+          <div class="det-hist-scroll" id="det-hist"></div>
+        </div>
+      </div>
+      <div>
+        <div class="fsection fsection--first">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Mapa do ticket</div>
+            <button class="btn btn-sm" data-action="open-full-map">Ver no mapa →</button>
+          </div>
+          <div id="mini-map-container"></div>
+        </div>
+        <div class="fsection">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Utilities 811</div>
+            <span class="util-summary" id="util-summary"></span>
+          </div>
+          <div id="util-list">
+            <div class="util-loading">Carregando...</div>
+          </div>
+        </div>
+        <div class="fsection" id="field-status-section">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Status Manual</div>
+            <span class="locked-badge hidden" id="det-lock-badge">🔒 Travado</span>
+          </div>
+          <div class="manual-status-hint">Ao definir manualmente, a automação 811 não vai sobrescrever.</div>
+          <div class="manual-status-grid">
+            <button class="btn btn-status-clear" data-manual-status="Clear">✅ Clear</button>
+            <button class="btn btn-status-closed" data-manual-status="Closed">✔ Completed</button>
+            <button class="btn btn-status-open" data-manual-status="Open">🔴 Open</button>
+            <button class="btn btn-status-damage" data-manual-status="Damage">⚠ Damage</button>
+          </div>
+          <button class="btn btn-unlock-status hidden" id="det-unlock-btn" data-action="unlock-status">🔓 Desbloquear automação</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast">
+  <div class="tdot" id="tdot"></div>
+  <span id="tmsg"></span>
+</div>
+
+<script src="app.js"></script>
+
+<!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
+<script>
+(function(){
+  'use strict';
+
+  /* ── Utility: close modal ── */
+  document.addEventListener('click', e => {
+    const closeBtn = e.target.closest('[data-close]');
+    if (closeBtn) { closeModal(closeBtn.dataset.close); return; }
+  });
+
+  /* ── Utility: Enter key on login inputs ── */
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const el = e.target;
+    if (el.dataset.nextFocus) { document.getElementById(el.dataset.nextFocus).focus(); return; }
+    if (el.dataset.action === 'try-login') { tryLogin(); return; }
+  });
+
+  /* ── Global search input ── */
+  const gsearch = document.getElementById('gsearch');
+  if (gsearch) {
+    gsearch.addEventListener('input', function() { globalSearch(this.value); });
+    gsearch.addEventListener('focus', function() { this.parentElement.classList.add('focus'); });
+    gsearch.addEventListener('blur', function() { setTimeout(() => this.parentElement.classList.remove('focus'), 200); });
+  }
+
+  /* ── Click delegation for data-action ── */
+  const actionMap = {
+    'enter-viewer':          () => enterViewer(),
+    'try-login':             () => tryLogin(),
+    'exit-shared':           () => exitSharedView(),
+    'toggle-shared-panel':   () => toggleSharedPanel(),
+    'sh-fit-all':            () => shFitAll(),
+    'export-excel':          () => exportExcel(),
+    'open-import':           () => openImport(),
+    'new-ticket':            () => openNewTicket(),
+    'manual-refresh':        () => manualRefresh(),
+    'toggle-notif':          () => toggleNotifPanel(),
+    'toggle-info':           () => toggleInfoPanel(),
+    'logout':                () => doLogout(),
+    'toggle-mob-nav':        () => toggleMobNav(),
+    'new-project':           () => openNewProject(),
+    'toggle-sidebar':        () => toggleSidebar(),
+    'fit-all':               () => fitAll(),
+    'cancel-field-draw':     () => cancelFieldDraw(),
+    'undo-field-pt':         () => undoFieldPt(),
+    'clear-field-path':      () => clearFieldPath(),
+    'save-field-path':       () => saveFieldPath(),
+    'close-panel':           () => document.getElementById('panel').classList.remove('vis'),
+    'open-detail-from-panel':() => openTicketDetail(currentPanelId),
+    'navigate-from-panel':   () => openNavigation(currentPanelId),
+    'export-filtered':       () => exportFiltered(),
+    'export-contacts':       () => exportContacts(),
+    'new-contact':           () => openContactModal(),
+    'save-ticket':           () => saveTicket(),
+    'save-project':          () => saveProject(),
+    'trigger-file-input':    () => document.getElementById('ffile').click(),
+    'do-import':             () => doImport(),
+    'save-move-proj':        () => saveMoveProj(),
+    'confirm-del-proj':      () => confirmDelProj(),
+    'save-contact':          () => saveContact(),
+    'go-draw-field':         () => goDrawField(currentDetailId),
+    'open-move-proj':        () => openMoveProj(currentDetailId),
+    'edit-current-ticket':   () => editCurrentTicket(),
+    'navigate-from-detail':  () => openNavigation(currentDetailId),
+    'open-full-map':         () => openFullMap(currentDetailId),
+    'unlock-status':         () => unlockStatus(currentDetailId),
+  };
+
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const fn = actionMap[btn.dataset.action];
+    if (fn) fn();
+  });
+
+  /* ── Navigation via data-page ── */
+  document.addEventListener('click', e => {
+    const item = e.target.closest('[data-page]');
+    if (!item || !item.classList.contains('snav-item')) return;
+    nav(item.dataset.page);
+  });
+
+  /* ── Map layers via data-layer ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-layer]');
+    if (!btn) return;
+    const layer = btn.dataset.layer;
+    // Shared view layers
+    if (btn.closest('#pg-shared')) { shSetLayer(layer); }
+    // Main map layers
+    else { setLayer(layer); }
+  });
+
+  /* ── Table sort via data-sort ── */
+  document.addEventListener('click', e => {
+    const th = e.target.closest('[data-sort]');
+    if (th) sortBy(th.dataset.sort);
+  });
+
+  /* ── Status buttons via data-manual-status ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-manual-status]');
+    if (btn) setManualStatus(btn.dataset.manualStatus);
+  });
+
+  /* ── Filter toggles ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-toggle-filter]');
+    if (btn) toggleMF(btn.dataset.toggleFilter);
+  });
+
+  /* ── Filter change events ── */
+  const filterChangeMap = {
+    'shared-search':  () => renderSharedList(),
+    'shared-status':  () => renderSharedList(),
+    'proj-state':     () => renderProjects(),
+    'proj-filter':    () => onProjFilter(),
+    'map-client':     () => redrawAll(),
+    'map-location':   () => redrawAll(),
+    'map-utility':    () => redrawAll(),
+    'tbl-status':     () => renderTable(),
+    'tbl-proj':       () => renderTable(),
+    'tbl-client':     () => renderTable(),
+    'tbl-utility':    () => renderTable(),
+    'contacts-state': () => renderContacts(),
+  };
+
+  const filterInputMap = {
+    'map-search':      () => debouncedRedraw(),
+    'tbl-search':      () => debouncedTable(),
+    'contacts-search': () => debouncedContacts(),
+  };
+
+  document.addEventListener('change', e => {
+    const key = e.target.dataset.filter;
+    if (key && filterChangeMap[key]) filterChangeMap[key]();
+  });
+
+  document.addEventListener('input', e => {
+    const key = e.target.dataset.filter;
+    if (key && filterInputMap[key]) filterInputMap[key]();
+    if (key && filterChangeMap[key] && e.target.tagName === 'INPUT') filterChangeMap[key]();
+  });
+
+  /* ── Import: file input + drag & drop ── */
+  const ffile = document.getElementById('ffile');
+  if (ffile) ffile.addEventListener('change', e => onFileIn(e));
+
+  const uzone = document.getElementById('uzone');
+  if (uzone) {
+    uzone.addEventListener('dragover', e => { e.preventDefault(); uzone.classList.add('drag'); });
+    uzone.addEventListener('dragleave', () => uzone.classList.remove('drag'));
+    uzone.addEventListener('drop', e => onDrop(e));
+  }
+
+})();
+</script>
+</body>
+</html>

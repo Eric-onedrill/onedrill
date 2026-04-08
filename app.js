@@ -1035,7 +1035,7 @@ function openTicketDetail(id){
 
   const c=scol(t.status);
   const proj=projects.find(p=>p.id===t.projectId);
-  document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+(t.oldTicket2||t.old_ticket2)+')':'');
+  document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]+')':'');
   document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(isInRenewalGrace(t)?' · 🔄 Graça até '+(t.expireOld||t.expire_old):'');
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
 
@@ -1067,7 +1067,7 @@ function openTicketDetail(id){
   if(!isSharedView&&isAdmin){
     document.getElementById('det-edit-btn').style.display='';
     document.getElementById('det-draw-btn').style.display='';
-    document.getElementById('det-renew-btn').style.display=(t.status==='Clear'||t.status==='Open')?'':'none';
+    document.getElementById('det-renew-btn').style.display=(t.status!=='Closed'&&t.status!=='Cancel')?'':'none';
     document.getElementById('field-status-section').style.display='';
   }else{
     document.getElementById('det-edit-btn').style.display='none';
@@ -1140,9 +1140,12 @@ async function renewTicket(){
   const oldNum=t.ticket;
   const oldExpire=t.expire;
   const oldStatus=t.status;
+  // Cadeia de tickets anteriores (suporta múltiplas renovações)
+  const prevChain=t.oldTicket2||t.old_ticket2||'';
+  const fullChain=prevChain?oldNum+' → '+prevChain:oldNum;
   // Salva dados antigos
-  t.old_ticket2=oldNum;
-  t.oldTicket2=oldNum;
+  t.old_ticket2=fullChain;
+  t.oldTicket2=fullChain;
   t.expire_old=oldExpire;
   t.expireOld=oldExpire;
   t.status_old=oldStatus;
@@ -1159,7 +1162,7 @@ async function renewTicket(){
     setTimeout(()=>openTicketDetail(t.id),300);
   }else{
     // Reverte
-    t.ticket=oldNum;t.old_ticket2='';t.oldTicket2='';t.expire_old='';t.expireOld='';t.status_old='';t.statusOld='';
+    t.ticket=oldNum;t.old_ticket2=prevChain;t.oldTicket2=prevChain;t.expire_old='';t.expireOld='';t.status_old='';t.statusOld='';
     t.history.pop();
     toast('Erro ao salvar renovação.','danger');
   }
@@ -1331,7 +1334,7 @@ function renderTable(){
         +`</div>`
       :'';
     return`<tr onclick="openTicketDetail(${t.id})">`
-      +`<td style="font-family:var(--mono);font-weight:500">${esc(t.ticket)}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 renovou '+(t.oldTicket2||t.old_ticket2)+'</div>':''}</td>`
+      +`<td style="font-family:var(--mono);font-weight:500">${esc(t.ticket)}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 renovou '+esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+'</div>':''}</td>`
       +`<td style="color:var(--text2);font-size:12px">${esc(t.client)}</td>`
       +`<td style="color:var(--muted);font-size:12px">${esc(t.prime||'—')}</td>`
       +`<td>${esc(t.location)}, ${esc(t.state)}</td>`

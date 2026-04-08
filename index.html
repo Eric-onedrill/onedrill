@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OneDrill</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
@@ -13,33 +14,35 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4"></script>
 </head>
 <body>
 
+<!-- ===== LOADING SCREEN ===== -->
 <div id="loading-screen">
-  <div style="width:70px;height:70px"><img src="logo.png" alt="OneDrill" style="width:100%;height:100%"></div>
+  <div class="loading-icon"><img src="logo.png" alt="OneDrill"></div>
   <div class="loading-logo">ONEDRILL</div>
   <div class="loading-bar"><div class="loading-fill"></div></div>
-  <div style="font-size:11px;color:rgba(184,146,47,.4);font-family:var(--mono);margin-top:8px">Conectando ao banco de dados...</div>
+  <div class="loading-hint">Conectando ao banco de dados...</div>
 </div>
 
-<div id="login-screen" style="display:none">
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="login-screen" class="hidden">
   <div class="login-brand">
     <div class="login-emblem"><img src="logo.png" alt="OneDrill"></div>
     <div class="login-brand-name">ONEDRILL</div>
   </div>
   <div class="login-box">
     <div class="login-enter-section">
-      <button class="login-btn" onclick="enterViewer()">Entrar →</button>
-      <button class="login-view-btn" onclick="enterViewer()">Continuar como Manager / Visualizador</button>
+      <button class="login-btn" data-action="enter-viewer">Entrar →</button>
+      <button class="login-view-btn" data-action="enter-viewer">Continuar como Manager / Visualizador</button>
     </div>
     <div class="login-divider"><span>Admin</span></div>
     <div class="login-admin-section">
       <div class="login-admin-label">Acesso administrativo</div>
-      <input class="login-inp" type="email" id="admin-email" placeholder="Email" onkeydown="if(event.key==='Enter')document.getElementById('admin-pw').focus()">
-      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" onkeydown="if(event.key==='Enter')tryLogin()">
-      <button class="login-admin-btn" onclick="tryLogin()">Entrar como Admin</button>
+      <input class="login-inp" type="email" id="admin-email" placeholder="Email" data-next-focus="admin-pw">
+      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" data-action="try-login">
+      <button class="login-admin-btn" data-action="try-login">Entrar como Admin</button>
       <div class="login-err" id="login-err">Senha incorreta</div>
     </div>
   </div>
@@ -48,297 +51,330 @@
 
 <!-- ===== SHARED PROJECT VIEW (standalone) ===== -->
 <div class="page" id="pg-shared">
-  <div class="shared-topbar">
-    <div class="shared-logo"><div class="logo-emblem"><img src="logo.png" alt=""></div>ONEDRILL</div>
+  <header class="shared-topbar">
+    <div class="shared-logo">
+      <div class="logo-emblem"><img src="logo.png" alt=""></div>
+      ONEDRILL
+    </div>
     <div class="shared-proj-name" id="shared-proj-name"></div>
-    <button class="btn btn-sm" id="shared-enter-btn" onclick="exitSharedView()">Abrir app completo →</button>
-  </div>
-  <div class="shared-body" style="position:relative">
-    <div class="shared-panel-overlay" id="shared-overlay" onclick="toggleSharedPanel()"></div>
+    <button class="btn btn-sm" id="shared-enter-btn" data-action="exit-shared">Abrir app completo →</button>
+  </header>
+
+  <div class="shared-body shared-body--relative">
+    <div class="shared-panel-overlay" id="shared-overlay" data-action="toggle-shared-panel"></div>
     <div class="shared-map">
       <div id="shared-map-el"></div>
-      <div class="mctrl" style="top:10px;right:10px">
-        <button class="mbtn" id="sh-bsat" onclick="shSetLayer('sat')">Satélite</button>
-        <button class="mbtn active" id="sh-bhyb" onclick="shSetLayer('hyb')">Híbrido</button>
-        <button class="mbtn" id="sh-bstr" onclick="shSetLayer('str')">Ruas</button>
+      <div class="mctrl mctrl--top-right">
+        <button class="mbtn" id="sh-bsat" data-layer="sat">Satélite</button>
+        <button class="mbtn active" id="sh-bhyb" data-layer="hyb">Híbrido</button>
+        <button class="mbtn" id="sh-bstr" data-layer="str">Ruas</button>
         <div class="map-divider"></div>
-        <button class="mbtn" onclick="shFitAll()">Ver todos</button>
+        <button class="mbtn" data-action="sh-fit-all">Ver todos</button>
       </div>
-      <button class="shared-mob-toggle" id="shared-mob-toggle" onclick="toggleSharedPanel()">📋 <span id="shared-toggle-label">Ver tickets</span></button>
+      <button class="shared-mob-toggle" id="shared-mob-toggle" data-action="toggle-shared-panel">
+        📋 <span id="shared-toggle-label">Ver tickets</span>
+      </button>
     </div>
-    <div class="shared-sidebar" id="shared-sidebar">
+    <aside class="shared-sidebar" id="shared-sidebar">
       <div class="shared-stats" id="shared-stats"></div>
       <div class="shared-filters">
-        <input class="fi" id="sh-srch" placeholder="Buscar ticket..." oninput="renderSharedList()" style="flex:1">
-        <select class="fi" id="sh-stat" onchange="renderSharedList()" style="width:auto">
-          <option value="">Todos</option><option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option>
+        <input class="fi" id="sh-srch" placeholder="Buscar ticket..." data-filter="shared-search">
+        <select class="fi fi--auto-width" id="sh-stat" data-filter="shared-status">
+          <option value="">Todos</option>
+          <option>Open</option>
+          <option>Clear</option>
+          <option>Damage</option>
+          <option>Closed</option>
+          <option>Cancel</option>
         </select>
       </div>
       <div class="shared-count" id="shared-count"></div>
       <div class="shared-list" id="shared-list"></div>
-    </div>
+    </aside>
   </div>
 </div>
 
 <!-- ===== MAIN APP ===== -->
-<div id="app-shell" class="app-shell" style="display:none">
+<div id="app-shell" class="app-shell hidden">
 
-<!-- Left Sidebar Navigation -->
-<aside class="snav" id="sidebar-nav">
-  <div class="snav-brand">
-    <div class="snav-logo"><img src="logo.png" alt=""></div>
-    <span class="snav-name">ONEDRILL</span>
+  <!-- Left Sidebar Navigation -->
+  <aside class="snav" id="sidebar-nav">
+    <div class="snav-brand">
+      <div class="snav-logo"><img src="logo.png" alt=""></div>
+      <span class="snav-name">ONEDRILL</span>
+    </div>
+
+    <div class="snav-search-wrap">
+      <input class="snav-search" id="gsearch" placeholder="Buscar ticket, cliente..." data-action="global-search">
+      <div class="gsearch-dd" id="gsearch-dd"></div>
+    </div>
+
+    <nav class="snav-menu">
+      <button class="snav-item active" data-page="dash">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </button>
+      <button class="snav-item" data-page="proj">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        Projetos
+      </button>
+      <button class="snav-item" data-page="analytics">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Analytics
+      </button>
+      <button class="snav-item" data-page="map">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg>
+        Mapa
+      </button>
+      <button class="snav-item" data-page="tickets">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Tickets
+      </button>
+      <button class="snav-item" data-page="contacts">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Contatos
+      </button>
+    </nav>
+
+    <div class="snav-actions">
+      <button class="btn snav-action-btn" data-action="export-excel">↓ Excel</button>
+      <button class="btn snav-action-btn hidden" id="btn-import" data-action="open-import">↑ Importar</button>
+      <button class="btn btn-primary snav-action-btn hidden" id="btn-new-ticket" data-action="new-ticket">+ Ticket</button>
+    </div>
+
+    <div class="snav-footer">
+      <div class="snav-sync">
+        <div class="sync-dot" id="sync-dot"></div>
+        <span id="sync-label">Conectado</span>
+        <button class="snav-refresh-btn" data-action="manual-refresh" title="Atualizar dados">⟳</button>
+      </div>
+      <div class="snav-sync-status" id="last-sync-status">🟡 IN: —<br>🟡 FL: —</div>
+      <div class="snav-footer-row">
+        <span class="role-badge" id="role-badge">VIEWER</span>
+        <div class="snav-footer-actions">
+          <button class="snav-notif-btn" data-action="toggle-notif" aria-label="Notificações">
+            🔔<span class="notif-badge hidden" id="notif-badge">0</span>
+          </button>
+          <button class="snav-notif-btn" data-action="toggle-info" aria-label="Informações">ℹ️</button>
+          <button class="snav-logout-btn" id="btn-logout" data-action="logout" title="Sair" aria-label="Sair">⏻</button>
+        </div>
+      </div>
+      <div class="notif-panel" id="notif-panel"></div>
+      <div class="notif-panel" id="info-panel"></div>
+    </div>
+  </aside>
+
+  <!-- Mobile topbar -->
+  <div class="mob-topbar">
+    <button class="mob-menu-btn" data-action="toggle-mob-nav" aria-label="Menu">☰</button>
+    <div class="mob-logo-icon"><img src="logo.png" alt=""></div>
+    <span class="mob-brand-name">ONEDRILL</span>
   </div>
-  <div class="snav-search-wrap">
-    <input class="snav-search" id="gsearch" placeholder="Buscar ticket, cliente..." oninput="globalSearch(this.value)" onfocus="this.parentElement.classList.add('focus')" onblur="setTimeout(()=>this.parentElement.classList.remove('focus'),200)">
-    <div class="gsearch-dd" id="gsearch-dd"></div>
-  </div>
-  <div class="snav-menu">
-    <button class="snav-item active" data-page="dash" onclick="nav('dash')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</button>
-    <button class="snav-item" data-page="proj" onclick="nav('proj')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>Projetos</button>
-    <button class="snav-item" data-page="analytics" onclick="nav('analytics')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Analytics</button>
-    <button class="snav-item" data-page="map" onclick="nav('map')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg>Mapa</button>
-    <button class="snav-item" data-page="tickets" onclick="nav('tickets')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Tickets</button>
-    <button class="snav-item" data-page="contacts" onclick="nav('contacts')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>Contatos</button>
-  </div>
-  <div class="snav-actions">
-    <button class="btn snav-action-btn" onclick="exportExcel()">↓ Excel</button>
-    <button class="btn snav-action-btn" id="btn-import" onclick="openImport()" style="display:none">↑ Importar</button>
-    <button class="btn btn-primary snav-action-btn" id="btn-new-ticket" onclick="openNewTicket()" style="display:none">+ Ticket</button>
-  </div>
-  <div class="snav-footer">
-    <div class="snav-sync"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Conectado</span><button onclick="manualRefresh()" title="Atualizar dados" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,.15);border-radius:var(--r);padding:2px 8px;cursor:pointer;font-size:11px;color:rgba(255,255,255,.5);font-family:var(--mono);transition:all .15s" onmouseover="this.style.color='#b8922f';this.style.borderColor='#b8922f'" onmouseout="this.style.color='rgba(255,255,255,.5)';this.style.borderColor='rgba(255,255,255,.15)'">⟳</button></div>
-    <div id="last-sync-status" style="font-size:10px;color:var(--muted);line-height:1.8;padding:3px 0 4px;font-family:var(--mono)">🟡 IN: —<br>🟡 FL: —</div>
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <span class="role-badge" id="role-badge">VIEWER</span>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="snav-notif-btn" onclick="toggleNotifPanel()">🔔<span class="notif-badge" id="notif-badge" style="display:none">0</span></button>
-        <button class="snav-notif-btn" onclick="toggleInfoPanel()">ℹ️</button>
-        <button id="btn-logout" onclick="doLogout()" title="Sair" style="background:none;border:1px solid var(--border);border-radius:var(--r);padding:4px 7px;cursor:pointer;font-size:13px;color:var(--muted)" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">⏻</button>
+  <div class="mob-nav-overlay" id="mob-nav-overlay" data-action="toggle-mob-nav"></div>
+
+  <!-- Main content area -->
+  <main class="main-area">
+
+    <!-- Dashboard -->
+    <div class="page active" id="pg-dash">
+      <div class="dash-inner" id="dash-content"></div>
+    </div>
+
+    <!-- Projetos -->
+    <div class="page" id="pg-proj">
+      <div class="proj-inner">
+        <div class="proj-header">
+          <div class="page-title">Projetos</div>
+          <div class="proj-header-actions">
+            <select class="fi fi--min-120" id="proj-state-filter" data-filter="proj-state">
+              <option value="">Todos estados</option>
+            </select>
+            <button class="btn btn-primary hidden" id="btn-new-proj" data-action="new-project">+ Projeto</button>
+          </div>
+        </div>
+        <div class="proj-grid" id="proj-grid"></div>
       </div>
     </div>
-    <div class="notif-panel" id="notif-panel"></div>
-    <div class="notif-panel" id="info-panel"></div>
-  </div>
-</aside>
 
-<!-- Mobile topbar -->
-<div class="mob-topbar">
-  <button class="mob-menu-btn" onclick="toggleMobNav()">☰</button>
-  <div style="width:24px;height:24px"><img src="logo.png" alt="" style="width:100%;height:100%"></div>
-  <span style="font-weight:700;color:#b8922f;font-style:italic;font-size:14px">ONEDRILL</span>
-</div>
-<div class="mob-nav-overlay" id="mob-nav-overlay" onclick="toggleMobNav()"></div>
+    <!-- Mapa -->
+    <div class="page" id="pg-map">
+      <button class="sb-toggle" id="sb-toggle" data-action="toggle-sidebar">📋 Tickets</button>
+      <div class="sidebar-overlay" id="sb-overlay" data-action="toggle-sidebar"></div>
 
-<!-- Main content area -->
-<div class="main-area">
+      <aside class="sidebar" id="map-sidebar">
+        <div class="sb-filters">
+          <select class="fi" id="proj-filter" data-filter="proj-filter">
+            <option value="">Todos os projetos</option>
+          </select>
+          <input class="fi" id="srch" placeholder="Buscar ticket, cliente..." data-filter="map-search">
+          <div class="frow">
+            <select class="fi" id="fcli" data-filter="map-client"><option value="">Todos clientes</option></select>
+            <select class="fi" id="floc" data-filter="map-location"><option value="">Todos locais</option></select>
+            <select class="fi" id="map-util-filter" data-filter="map-utility">
+              <option value="">Todas utilities</option>
+              <option value="__pending__">Com pendentes</option>
+            </select>
+          </div>
+          <div class="filter-toggles">
+            <span class="filter-toggles-label">Status:</span>
+            <button class="ftog on-open" id="ft-open" data-toggle-filter="open">Open</button>
+            <button class="ftog on-damage" id="ft-damage" data-toggle-filter="damage">Damage</button>
+            <button class="ftog on-clear" id="ft-clear" data-toggle-filter="clear">Clear</button>
+            <button class="ftog" id="ft-closed" data-toggle-filter="closed">Closed</button>
+            <button class="ftog" id="ft-cancel" data-toggle-filter="cancel">Cancel</button>
+          </div>
+        </div>
+        <div class="sb-count" id="tcount"></div>
+        <div class="tlist" id="tlist"></div>
+      </aside>
 
-<div class="page active" id="pg-dash"><div class="dash-inner" id="dash-content"></div></div>
-<div class="page" id="pg-proj"><div class="proj-inner"><div class="proj-header"><div class="page-title">Projetos</div><div style="display:flex;gap:8px;align-items:center"><select class="fi" id="proj-state-filter" onchange="renderProjects()" style="width:auto;min-width:120px"><option value="">Todos estados</option></select><button class="btn btn-primary" id="btn-new-proj" onclick="openNewProject()" style="display:none">+ Projeto</button></div></div><div class="proj-grid" id="proj-grid"></div></div></div>
-<div class="page" id="pg-map">
-  <button class="sb-toggle" id="sb-toggle" onclick="toggleSidebar()">📋 Tickets</button>
-  <div class="sidebar-overlay" id="sb-overlay" onclick="toggleSidebar()"></div>
-  <div class="sidebar" id="map-sidebar">
-    <div class="sb-filters">
-      <select class="fi" id="proj-filter" onchange="onProjFilter()"><option value="">Todos os projetos</option></select>
-      <input class="fi" id="srch" placeholder="Buscar ticket, cliente..." oninput="debouncedRedraw()">
-      <div class="frow">
-        <select class="fi" id="fcli" onchange="redrawAll()"><option value="">Todos clientes</option></select>
-        <select class="fi" id="floc" onchange="redrawAll()"><option value="">Todos locais</option></select>
-      <select class="fi" id="map-util-filter" onchange="redrawAll()"><option value="">Todas utilities</option><option value="__pending__">Com pendentes</option></select>
-      </div>
-      <div class="filter-toggles">
-        <span style="font-size:10px;color:var(--muted)">Status:</span>
-        <button class="ftog on-open" id="ft-open" onclick="toggleMF('open')">Open</button>
-        <button class="ftog on-damage" id="ft-damage" onclick="toggleMF('damage')">Damage</button>
-        <button class="ftog on-clear" id="ft-clear" onclick="toggleMF('clear')">Clear</button>
-        <button class="ftog" id="ft-closed" onclick="toggleMF('closed')">Closed</button>
-        <button class="ftog" id="ft-cancel" onclick="toggleMF('cancel')">Cancel</button>
-      </div>
-    </div>
-    <div class="sb-count" id="tcount"></div>
-    <div class="tlist" id="tlist"></div>
-  </div>
-  <div class="mapc">
-    <div id="map"></div>
-    <div class="mctrl">
-      <button class="mbtn" id="bsat" onclick="setLayer('sat')">Satélite</button>
-      <button class="mbtn active" id="bhyb" onclick="setLayer('hyb')">Híbrido</button>
-      <button class="mbtn" id="bstr" onclick="setLayer('str')">Ruas</button>
-      <div class="map-divider"></div>
-      <button class="mbtn" onclick="fitAll()">Ver todos</button>
-      <div class="map-divider"></div>
-      <div class="map-legend">
-        <div class="legend-title">Legenda</div>
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Status</div>
-        <div class="legend-item"><div style="width:16px;height:4px;background:var(--red);border-radius:2px"></div><span style="color:var(--text2)">Open</span></div>
-        <div class="legend-item"><div style="width:16px;height:4px;background:var(--green);border-radius:2px"></div><span style="color:var(--text2)">Clear</span></div>
-        <div class="legend-item"><div style="width:16px;height:4px;background:var(--amber);border-radius:2px"></div><span style="color:var(--text2)">Damage</span></div>
-        <div class="legend-item"><div style="width:16px;height:4px;background:var(--dark);border-radius:2px"></div><span style="color:var(--text2)">Closed</span></div>
-        <div class="legend-item"><div style="width:16px;height:4px;background:var(--purple);border-radius:2px"></div><span style="color:var(--text2)">Cancel</span></div>
-        <div style="height:1px;background:var(--border);margin:5px 0"></div>
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Tipo</div>
-        <div class="legend-item"><div style="width:16px;height:4px;background:#888;border-radius:2px"></div><span style="color:var(--text2)">Main Line</span></div>
-        <div class="legend-item"><div style="width:16px;height:0;border-top:3px dashed #888"></div><span style="color:var(--text2)">Service</span></div>
-      </div>
-    </div>
-    <div id="field-draw-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div><div style="font-size:13px;font-weight:700;color:var(--purple)">✏️ Desenhando trajeto</div><div style="font-size:12px;color:var(--muted);margin-top:2px" id="field-draw-ticket"></div></div>
-        <button onclick="cancelFieldDraw()" class="modal-close">×</button>
-      </div>
-      <div style="font-size:11px;color:var(--text2);background:var(--purple-bg);border-radius:var(--r);padding:8px 10px;margin-bottom:10px;line-height:1.6">
-        🖱 <strong>Clique</strong> para adicionar pontos · <strong>Duplo clique</strong> para finalizar
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:7px">
-        <span style="font-size:12px;color:var(--muted);font-family:var(--mono)" id="field-draw-count">0 pts</span>
-        <div style="display:flex;gap:5px">
-          <button class="btn btn-sm" onclick="undoFieldPt()">↩ Desfazer</button>
-          <button class="btn btn-sm" onclick="clearFieldPath()">🗑 Limpar</button>
-          <button class="btn btn-sm btn-primary" onclick="saveFieldPath()">✅ Salvar</button>
+      <div class="mapc">
+        <div id="map"></div>
+
+        <div class="mctrl">
+          <button class="mbtn" id="bsat" data-layer="sat">Satélite</button>
+          <button class="mbtn active" id="bhyb" data-layer="hyb">Híbrido</button>
+          <button class="mbtn" id="bstr" data-layer="str">Ruas</button>
+          <div class="map-divider"></div>
+          <button class="mbtn" data-action="fit-all">Ver todos</button>
+          <div class="map-divider"></div>
+          <div class="map-legend">
+            <div class="legend-title">Legenda</div>
+            <div class="legend-group-label">Status</div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--red"></div><span class="legend-text">Open</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--green"></div><span class="legend-text">Clear</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--amber"></div><span class="legend-text">Damage</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--dark"></div><span class="legend-text">Closed</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--purple"></div><span class="legend-text">Cancel</span></div>
+            <div class="legend-divider"></div>
+            <div class="legend-group-label">Tipo</div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--solid"></div><span class="legend-text">Main Line</span></div>
+            <div class="legend-item"><div class="legend-swatch legend-swatch--dashed"></div><span class="legend-text">Service</span></div>
+          </div>
+        </div>
+
+        <!-- Field draw panel -->
+        <div id="field-draw-panel">
+          <div class="fdraw-header">
+            <div>
+              <div class="fdraw-title">✏️ Desenhando trajeto</div>
+              <div class="fdraw-sub" id="field-draw-ticket"></div>
+            </div>
+            <button class="modal-close" data-action="cancel-field-draw">×</button>
+          </div>
+          <div class="fdraw-instructions">
+            🖱 <strong>Clique</strong> para adicionar pontos · <strong>Duplo clique</strong> para finalizar
+          </div>
+          <div class="fdraw-footer">
+            <span class="fdraw-count" id="field-draw-count">0 pts</span>
+            <div class="fdraw-actions">
+              <button class="btn btn-sm" data-action="undo-field-pt">↩ Desfazer</button>
+              <button class="btn btn-sm" data-action="clear-field-path">🗑 Limpar</button>
+              <button class="btn btn-sm btn-primary" data-action="save-field-path">✅ Salvar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map popup panel -->
+        <div class="map-panel" id="panel">
+          <div class="mp-title">
+            <span id="ptitle-txt"></span>
+            <button class="mp-close" data-action="close-panel">×</button>
+          </div>
+          <div id="pbody"></div>
+          <div class="mp-foot">
+            <button class="btn btn-sm" data-action="open-detail-from-panel">Detalhes →</button>
+            <button class="btn btn-sm" id="panel-nav-btn" data-action="navigate-from-panel">🗺 Navegar</button>
+          </div>
         </div>
       </div>
     </div>
-    <div class="map-panel" id="panel">
-      <div class="mp-title"><span id="ptitle-txt"></span><button class="mp-close" onclick="document.getElementById('panel').classList.remove('vis')">×</button></div>
-      <div id="pbody"></div>
-      <div class="mp-foot">
-        <button class="btn btn-sm" onclick="openTicketDetail(currentPanelId)">Detalhes →</button>
-        <button class="btn btn-sm" id="panel-nav-btn" onclick="openNavigation(currentPanelId)">🗺 Navegar</button>
+
+    <!-- Tickets table -->
+    <div class="page" id="pg-tickets">
+      <div class="tbar">
+        <input class="fi fi--max-200" id="tbl-srch" placeholder="Buscar..." data-filter="tbl-search">
+        <select class="fi fi--max-120" id="tbl-stat" data-filter="tbl-status">
+          <option value="">Todos status</option>
+          <option>Open</option>
+          <option>Clear</option>
+          <option>Damage</option>
+          <option>Closed</option>
+          <option>Cancel</option>
+        </select>
+        <select class="fi fi--max-180" id="tbl-proj" data-filter="tbl-proj"><option value="">Todos projetos</option></select>
+        <select class="fi fi--max-150" id="tbl-cli" data-filter="tbl-client"><option value="">Todos clientes</option></select>
+        <select class="fi fi--max-200" id="tbl-util" data-filter="tbl-utility"><option value="">Todas utilities</option></select>
+        <button class="btn btn-sm tbar-export" data-action="export-filtered">↓ Excel filtrado</button>
+        <span class="tbar-count" id="tbl-count"></span>
+      </div>
+      <div class="tbl-wrap">
+        <div class="tbl-inner">
+          <table>
+            <thead>
+              <tr>
+                <th data-sort="ticket">Ticket #</th>
+                <th data-sort="client">Cliente</th>
+                <th data-sort="prime">Prime</th>
+                <th data-sort="location">Local</th>
+                <th data-sort="status">Status</th>
+                <th data-sort="footage">Footage</th>
+                <th data-sort="expire">Expira</th>
+                <th data-sort="risk" id="tbl-head-risk" title="Ordenar por risco">⚠ Risco</th>
+                <th data-sort="tipo">Tipo</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tbl-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
-  </div>
-</div>
 
-<div class="page" id="pg-tickets">
-  <div class="tbar">
-    <input class="fi" style="max-width:200px" id="tbl-srch" placeholder="Buscar..." oninput="debouncedTable()">
-    <select class="fi" style="max-width:120px" id="tbl-stat" onchange="renderTable()">
-      <option value="">Todos status</option>
-      <option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option>
-    </select>
-    <select class="fi" style="max-width:180px" id="tbl-proj" onchange="renderTable()"><option value="">Todos projetos</option></select>
-    <select class="fi" style="max-width:150px" id="tbl-cli" onchange="renderTable()"><option value="">Todos clientes</option></select>
-    <select class="fi" style="max-width:200px" id="tbl-util" onchange="renderTable()"><option value="">Todas utilities</option></select>
-    <button class="btn btn-sm" onclick="exportFiltered()" style="margin-left:4px">\u2193 Excel filtrado</button><span style="font-size:12px;color:var(--muted);margin-left:4px;font-family:var(--mono)" id="tbl-count"></span>
-  </div>
-  <div class="tbl-wrap"><div class="tbl-inner">
-    <table>
-      <thead><tr>
-        <th onclick="sortBy('ticket')">Ticket #</th>
-        <th onclick="sortBy('client')">Cliente</th>
-        <th onclick="sortBy('prime')">Prime</th>
-        <th onclick="sortBy('location')">Local</th>
-        <th onclick="sortBy('status')">Status</th>
-        <th onclick="sortBy('footage')">Footage</th>
-        <th onclick="sortBy('expire')">Expira</th>
-        <th id="tbl-head-risk" onclick="sortBy('risk')" style="cursor:pointer" title="Ordenar por risco">⚠ Risco</th>
-        <th onclick="sortBy('tipo')">Tipo</th>
-        <th>Ações</th>
-      </tr></thead>
-      <tbody id="tbl-body"></tbody>
-    </table>
-  </div></div>
-</div>
-
-<!-- Contacts page -->
-<div class="page" id="pg-contacts">
-  <div class="contacts-inner">
-    <div class="contacts-header">
-      <div class="page-title">Contatos de Utilities</div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input class="fi" id="contacts-search" placeholder="Buscar utility..." oninput="debouncedContacts()" style="width:180px">
-        <select class="fi" id="contacts-state-filter" onchange="renderContacts()" style="width:auto"><option value="">Todos</option><option>FL</option><option>IN</option></select>
-        <button class="btn btn-sm" onclick="exportContacts()">↓ Excel</button>
-        <button class="btn btn-primary btn-sm" id="btn-add-contact" onclick="openContactModal()" style="display:none">+ Contato</button>
+    <!-- Contacts -->
+    <div class="page" id="pg-contacts">
+      <div class="contacts-inner">
+        <div class="contacts-header">
+          <div class="page-title">Contatos de Utilities</div>
+          <div class="contacts-header-actions">
+            <input class="fi fi--w-180" id="contacts-search" placeholder="Buscar utility..." data-filter="contacts-search">
+            <select class="fi fi--auto-width" id="contacts-state-filter" data-filter="contacts-state">
+              <option value="">Todos</option>
+              <option>FL</option>
+              <option>IN</option>
+            </select>
+            <button class="btn btn-sm" data-action="export-contacts">↓ Excel</button>
+            <button class="btn btn-primary btn-sm hidden" id="btn-add-contact" data-action="new-contact">+ Contato</button>
+          </div>
+        </div>
+        <div id="contacts-grid"></div>
       </div>
     </div>
-    <div id="contacts-grid"></div>
-  </div>
-</div>
 
-<div class="page" id="pg-analytics"><div class="dash-inner" id="analytics-content"></div></div>
-</div><!-- /main-area -->
+    <!-- Analytics -->
+    <div class="page" id="pg-analytics">
+      <div class="dash-inner" id="analytics-content"></div>
+    </div>
+
+  </main>
 </div><!-- /app-shell -->
 
-<!-- MODAL: Contact -->
-<div class="overlay" id="ov-contact">
-  <div class="modal narrow">
-    <div class="modal-head"><div class="mtitle" id="contact-modal-title">Novo contato</div><button class="modal-close" onclick="closeModal('ov-contact')">×</button></div>
-    <div class="fgrid">
-      <div class="fg full"><label class="fl">Utility</label><input class="finp" id="ct-utility" placeholder="Duke Energy"></div>
-      <div class="fg"><label class="fl">Nome do contato</label><input class="finp" id="ct-name" placeholder="John Smith"></div>
-      <div class="fg"><label class="fl">Estado</label><select class="fsel" id="ct-state"><option>FL</option><option>IN</option></select></div>
-      <div class="fg"><label class="fl">Ticket ref.</label><input class="finp" id="ct-ticket" placeholder="Número"></div>
-      <div class="fg"><label class="fl">Tel. principal</label><input class="finp" id="ct-phone1" placeholder="(321) 555-1234"></div>
-      <div class="fg"><label class="fl">Tel. alternativo</label><input class="finp" id="ct-phone2"></div>
-      <div class="fg"><label class="fl">Tel. emergência</label><input class="finp" id="ct-phone3"></div>
-      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="ct-notes" style="min-height:40px"></textarea></div>
-    </div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-contact')">Cancelar</button><button class="btn btn-primary" onclick="saveContact()">Salvar</button></div>
-  </div>
-</div>
-
-<!-- MODAL: Ticket Detail -->
-<div class="overlay" id="ov-detail">
-  <div class="modal wide">
-    <div class="modal-head">
-      <div><div class="mtitle" id="det-title"></div><div style="font-size:13px;color:var(--muted);margin-top:2px" id="det-sub"></div></div>
-      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-sm" id="det-draw-btn" onclick="goDrawField(currentDetailId)" style="display:none;background:var(--purple-bg);color:var(--purple);border-color:var(--purple-border)">✏️ Desenhar</button>
-        <button class="btn btn-sm" id="det-proj-btn" onclick="openMoveProj(currentDetailId)" style="background:var(--accent-bg);color:var(--accent);border-color:#c3d7ff">📁 Projeto</button>
-        <button class="btn btn-sm" id="det-edit-btn" onclick="editCurrentTicket()" style="display:none">Editar</button>
-        <button class="btn btn-sm" onclick="openNavigation(currentDetailId)">🗺 Navegar</button>
-        <button class="modal-close" onclick="closeModal('ov-detail')">×</button>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="det-grid">
-      <div>
-        <div class="fsection" style="margin-top:0"><div class="fsection-lbl">Informações</div><div id="det-info"></div></div>
-        <div class="fsection"><div class="fsection-lbl">Histórico</div><div id="det-hist" style="max-height:160px;overflow-y:auto"></div></div>
-      </div>
-      <div>
-        <div class="fsection" style="margin-top:0">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <div class="fsection-lbl" style="margin-bottom:0">Mapa do ticket</div>
-            <button class="btn btn-sm" onclick="openFullMap(currentDetailId)">Ver no mapa →</button>
-          </div>
-          <div id="mini-map-container"></div>
-        </div>
-        <div class="fsection">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div class="fsection-lbl" style="margin-bottom:0">Utilities 811</div>
-            <span id="util-summary" style="font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
-          </div>
-          <div id="util-list"><div style="color:var(--muted);font-size:12px">Carregando...</div></div>
-        </div>
-
-        <div class="fsection" id="field-status-section">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div class="fsection-lbl" style="margin-bottom:0">Status Manual</div>
-            <span id="det-lock-badge" style="display:none" class="locked-badge">🔒 Travado</span>
-          </div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ao definir manualmente, a automação 811 não vai sobrescrever.</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-            <button class="btn" style="background:var(--green-bg);color:var(--green);border-color:var(--green-border)" onclick="setManualStatus('Clear')">✅ Clear</button>
-            <button class="btn" style="background:var(--purple-bg);color:var(--purple);border-color:var(--purple-border)" onclick="setManualStatus('Closed')">✔ Completed</button>
-            <button class="btn" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" onclick="setManualStatus('Open')">🔴 Open</button>
-            <button class="btn" style="background:var(--amber-bg);color:var(--amber);border-color:var(--amber-border)" onclick="setManualStatus('Damage')">⚠ Damage</button>
-          </div>
-          <button id="det-unlock-btn" class="btn" style="width:100%;margin-top:6px;display:none" onclick="unlockStatus(currentDetailId)">🔓 Desbloquear automação</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- ===== MODALS ===== -->
 
 <!-- MODAL: New/Edit Ticket -->
 <div class="overlay" id="ov-ticket">
   <div class="modal">
-    <div class="modal-head"><div class="mtitle" id="ticket-modal-title">Novo ticket</div><button class="modal-close" onclick="closeModal('ov-ticket')">×</button></div>
+    <div class="modal-head">
+      <div class="mtitle" id="ticket-modal-title">Novo ticket</div>
+      <button class="modal-close" data-close="ov-ticket">×</button>
+    </div>
     <div class="fgrid">
       <div class="fg full"><label class="fl">Ticket #</label><input class="finp" id="tm-t" placeholder="Número do ticket"></div>
-      <div class="fg"><label class="fl">Status</label><select class="fsel" id="tm-s"><option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option></select></div>
+      <div class="fg"><label class="fl">Status</label>
+        <select class="fsel" id="tm-s">
+          <option>Open</option><option>Clear</option><option>Damage</option><option>Closed</option><option>Cancel</option>
+        </select>
+      </div>
       <div class="fg"><label class="fl">Projeto</label><select class="fsel" id="tm-proj"><option value="">Sem projeto</option></select></div>
       <div class="fg"><label class="fl">Empresa</label><input class="finp" id="tm-co" placeholder="One Drill"></div>
       <div class="fg"><label class="fl">Cliente</label><input class="finp" id="tm-c" placeholder="Duke Energy..."></div>
@@ -350,16 +386,22 @@
       <div class="fg"><label class="fl">Tipo</label><input class="finp" id="tm-tipo" placeholder="Main line / Service"></div>
       <div class="fg"><label class="fl">Job #</label><input class="finp" id="tm-job" placeholder="Job number"></div>
       <div class="fg full"><label class="fl">Endereço</label><input class="finp" id="tm-addr" placeholder="CART PATH LN"></div>
-      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="tm-notes" style="min-height:50px"></textarea></div>
+      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="tm-notes"></textarea></div>
     </div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-ticket')">Cancelar</button><button class="btn btn-primary" onclick="saveTicket()">Salvar</button></div>
+    <div class="factions">
+      <button class="btn" data-close="ov-ticket">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-ticket">Salvar</button>
+    </div>
   </div>
 </div>
 
 <!-- MODAL: New/Edit Project -->
 <div class="overlay" id="ov-proj">
   <div class="modal narrow">
-    <div class="modal-head"><div class="mtitle" id="proj-modal-title">Novo projeto</div><button class="modal-close" onclick="closeModal('ov-proj')">×</button></div>
+    <div class="modal-head">
+      <div class="mtitle" id="proj-modal-title">Novo projeto</div>
+      <button class="modal-close" data-close="ov-proj">×</button>
+    </div>
     <div class="fgrid">
       <div class="fg"><label class="fl">Localidade</label><input class="finp" id="pm-loc" placeholder="Vigo - Terre Haute"></div>
       <div class="fg"><label class="fl">Número do Projeto</label><input class="finp" id="pm-num" placeholder="2505472"></div>
@@ -369,61 +411,349 @@
       <div class="fg"><label class="fl">Total Feet</label><input class="finp" id="pm-feet" type="number" placeholder="0"></div>
       <div class="fg full"><label class="fl">Coordenadas centro (lat, lon)</label><input class="finp" id="pm-coords" placeholder="39.403689, -87.349948"></div>
     </div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-proj')">Cancelar</button><button class="btn btn-primary" onclick="saveProject()">Salvar</button></div>
+    <div class="factions">
+      <button class="btn" data-close="ov-proj">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-project">Salvar</button>
+    </div>
   </div>
 </div>
 
 <!-- MODAL: Import -->
 <div class="overlay" id="ov-import">
   <div class="modal wide">
-    <div class="modal-head"><div class="mtitle">Importar Excel</div><button class="modal-close" onclick="closeModal('ov-import')">×</button></div>
-    <div class="import-note">Compatível com <strong>Controle_Tickets.xlsx</strong><br>Colunas: <strong>Ticket#, Company, State, Location, Status, Expire on, Footage, Client, Prime, Tipo, Main Address, Pending, Old Ticket #, Status Old, Old Expiration Date</strong></div>
-    <div class="uzone" id="uzone" onclick="document.getElementById('ffile').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="onDrop(event)">
-      <div style="font-size:24px;margin-bottom:6px">📂</div>
-      <div style="font-size:14px;color:var(--text2);margin-bottom:3px;font-weight:600">Clique ou arraste o arquivo aqui</div>
-      <div style="font-size:12px;color:var(--muted)">.xlsx · .xls · .csv</div>
+    <div class="modal-head">
+      <div class="mtitle">Importar Excel</div>
+      <button class="modal-close" data-close="ov-import">×</button>
     </div>
-    <input type="file" id="ffile" accept=".xlsx,.xls,.csv" style="display:none" onchange="onFileIn(event)">
-    <div id="prevarea" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;margin-bottom:7px">
-        <span style="font-size:12px;color:var(--muted);font-family:var(--mono)" id="prevlabel"></span>
-        <div style="display:flex;flex-direction:column;gap:5px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer"><input type="radio" name="importmode" value="replace" checked><span><strong>Substituir tudo</strong></span></label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer"><input type="radio" name="importmode" value="update"><span><strong>Atualizar dados</strong> — preserva trajetos ✏️</span></label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer"><input type="radio" name="importmode" value="add"><span><strong>Acumular</strong></span></label>
+    <div class="import-note">
+      Compatível com <strong>Controle_Tickets.xlsx</strong><br>
+      Colunas: <strong>Ticket#, Company, State, Location, Status, Expire on, Footage, Client, Prime, Tipo, Main Address, Pending, Old Ticket #, Status Old, Old Expiration Date</strong>
+    </div>
+    <div class="uzone" id="uzone" data-action="trigger-file-input">
+      <div class="uzone-icon">📂</div>
+      <div class="uzone-text">Clique ou arraste o arquivo aqui</div>
+      <div class="uzone-hint">.xlsx · .xls · .csv</div>
+    </div>
+    <input type="file" id="ffile" accept=".xlsx,.xls,.csv" class="hidden">
+    <div id="prevarea" class="hidden">
+      <div class="import-options">
+        <span class="import-label" id="prevlabel"></span>
+        <div class="import-modes">
+          <label class="import-mode-opt">
+            <input type="radio" name="importmode" value="replace" checked>
+            <span><strong>Substituir tudo</strong></span>
+          </label>
+          <label class="import-mode-opt">
+            <input type="radio" name="importmode" value="update">
+            <span><strong>Atualizar dados</strong> — preserva trajetos ✏️</span>
+          </label>
+          <label class="import-mode-opt">
+            <input type="radio" name="importmode" value="add">
+            <span><strong>Acumular</strong></span>
+          </label>
         </div>
       </div>
       <div class="prevwrap"><table class="ptable" id="ptbl"></table></div>
-      <div class="progwrap" id="progwrap"><span id="progtxt">Importando...</span><div class="progtrack"><div class="progfill" id="progfill"></div></div></div>
+      <div class="progwrap" id="progwrap">
+        <span id="progtxt">Importando...</span>
+        <div class="progtrack"><div class="progfill" id="progfill"></div></div>
+      </div>
     </div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-import')">Cancelar</button><button class="btn btn-primary" id="bimport" onclick="doImport()" style="display:none">Importar dados</button></div>
+    <div class="factions">
+      <button class="btn" data-close="ov-import">Cancelar</button>
+      <button class="btn btn-primary hidden" id="bimport" data-action="do-import">Importar dados</button>
+    </div>
   </div>
 </div>
 
-<!-- MODAL: Mover projeto -->
+<!-- MODAL: Move to project -->
 <div class="overlay" id="ov-move-proj">
   <div class="modal narrow">
-    <div class="modal-head"><div class="mtitle">Mover para projeto</div><button class="modal-close" onclick="closeModal('ov-move-proj')">×</button></div>
-    <div style="margin-bottom:16px;font-size:13px;color:var(--muted)" id="move-proj-ticket-info"></div>
+    <div class="modal-head">
+      <div class="mtitle">Mover para projeto</div>
+      <button class="modal-close" data-close="ov-move-proj">×</button>
+    </div>
+    <div class="move-proj-info" id="move-proj-ticket-info"></div>
     <div class="fg"><label class="fl">Projeto</label><select class="fsel" id="move-proj-sel"><option value="">Sem projeto</option></select></div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-move-proj')">Cancelar</button><button class="btn btn-primary" onclick="saveMoveProj()">Salvar</button></div>
+    <div class="factions">
+      <button class="btn" data-close="ov-move-proj">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-move-proj">Salvar</button>
+    </div>
   </div>
 </div>
 
-<!-- MODAL: Excluir projeto -->
+<!-- MODAL: Delete project -->
 <div class="overlay" id="ov-del-proj">
   <div class="modal narrow">
-    <div class="modal-head"><div class="mtitle" style="color:var(--red)">Excluir projeto</div><button class="modal-close" onclick="closeModal('ov-del-proj')">×</button></div>
-    <div style="font-size:13px;color:var(--text2);margin-bottom:20px" id="del-proj-info"></div>
-    <div style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:16px">⚠️ Os tickets deste projeto <strong>não serão excluídos</strong>, apenas desvinculados.</div>
-    <div class="factions"><button class="btn" onclick="closeModal('ov-del-proj')">Cancelar</button><button class="btn btn-danger" onclick="confirmDelProj()">Excluir projeto</button></div>
+    <div class="modal-head">
+      <div class="mtitle mtitle--danger">Excluir projeto</div>
+      <button class="modal-close" data-close="ov-del-proj">×</button>
+    </div>
+    <div class="del-proj-info" id="del-proj-info"></div>
+    <div class="del-proj-warning">
+      ⚠️ Os tickets deste projeto <strong>não serão excluídos</strong>, apenas desvinculados.
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-del-proj">Cancelar</button>
+      <button class="btn btn-danger" data-action="confirm-del-proj">Excluir projeto</button>
+    </div>
   </div>
 </div>
 
+<!-- MODAL: Contact -->
+<div class="overlay" id="ov-contact">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div class="mtitle" id="contact-modal-title">Novo contato</div>
+      <button class="modal-close" data-close="ov-contact">×</button>
+    </div>
+    <div class="fgrid">
+      <div class="fg full"><label class="fl">Utility</label><input class="finp" id="ct-utility" placeholder="Duke Energy"></div>
+      <div class="fg"><label class="fl">Nome do contato</label><input class="finp" id="ct-name" placeholder="John Smith"></div>
+      <div class="fg"><label class="fl">Estado</label><select class="fsel" id="ct-state"><option>FL</option><option>IN</option></select></div>
+      <div class="fg"><label class="fl">Ticket ref.</label><input class="finp" id="ct-ticket" placeholder="Número"></div>
+      <div class="fg"><label class="fl">Tel. principal</label><input class="finp" id="ct-phone1" placeholder="(321) 555-1234"></div>
+      <div class="fg"><label class="fl">Tel. alternativo</label><input class="finp" id="ct-phone2"></div>
+      <div class="fg"><label class="fl">Tel. emergência</label><input class="finp" id="ct-phone3"></div>
+      <div class="fg full"><label class="fl">Notas</label><textarea class="ftxt" id="ct-notes"></textarea></div>
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-contact">Cancelar</button>
+      <button class="btn btn-primary" data-action="save-contact">Salvar</button>
+    </div>
+  </div>
+</div>
 
+<!-- MODAL: Ticket Detail -->
+<div class="overlay" id="ov-detail">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <div class="mtitle" id="det-title"></div>
+        <div class="det-subtitle" id="det-sub"></div>
+      </div>
+      <div class="det-head-actions">
+        <button class="btn btn-sm btn-draw hidden" id="det-draw-btn" data-action="go-draw-field">✏️ Desenhar</button>
+        <button class="btn btn-sm btn-accent" id="det-proj-btn" data-action="open-move-proj">📁 Projeto</button>
+        <button class="btn btn-sm hidden" id="det-edit-btn" data-action="edit-current-ticket">Editar</button>
+        <button class="btn btn-sm hidden" id="det-renew-btn" onclick="renewTicket()" style="background:#7c3aed;color:white;border-color:#7c3aed">🔄 Renovar</button>
+        <button class="btn btn-sm" data-action="navigate-from-detail">🗺 Navegar</button>
+        <button class="modal-close" data-close="ov-detail">×</button>
+      </div>
+    </div>
+    <div class="det-grid">
+      <div>
+        <div class="fsection fsection--first">
+          <div class="fsection-lbl">Informações</div>
+          <div id="det-info"></div>
+        </div>
+        <div class="fsection">
+          <div class="fsection-lbl">Histórico</div>
+          <div class="det-hist-scroll" id="det-hist"></div>
+        </div>
+      </div>
+      <div>
+        <div class="fsection fsection--first">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Mapa do ticket</div>
+            <button class="btn btn-sm" data-action="open-full-map">Ver no mapa →</button>
+          </div>
+          <div id="mini-map-container"></div>
+        </div>
+        <div class="fsection">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Utilities 811</div>
+            <span class="util-summary" id="util-summary"></span>
+          </div>
+          <div id="util-list">
+            <div class="util-loading">Carregando...</div>
+          </div>
+        </div>
+        <div class="fsection" id="field-status-section">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Status Manual</div>
+            <span class="locked-badge hidden" id="det-lock-badge">🔒 Travado</span>
+          </div>
+          <div class="manual-status-hint">Ao definir manualmente, a automação 811 não vai sobrescrever.</div>
+          <div class="manual-status-grid">
+            <button class="btn btn-status-clear" data-manual-status="Clear">✅ Clear</button>
+            <button class="btn btn-status-closed" data-manual-status="Closed">✔ Completed</button>
+            <button class="btn btn-status-open" data-manual-status="Open">🔴 Open</button>
+            <button class="btn btn-status-damage" data-manual-status="Damage">⚠ Damage</button>
+          </div>
+          <button class="btn btn-unlock-status hidden" id="det-unlock-btn" data-action="unlock-status">🔓 Desbloquear automação</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-<div class="toast" id="toast"><div class="tdot" id="tdot"></div><span id="tmsg"></span></div>
+<!-- Toast notification -->
+<div class="toast" id="toast">
+  <div class="tdot" id="tdot"></div>
+  <span id="tmsg"></span>
+</div>
 
 <script src="app.js"></script>
+
+<!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
+<script>
+(function(){
+  'use strict';
+
+  /* ── Utility: close modal ── */
+  document.addEventListener('click', e => {
+    const closeBtn = e.target.closest('[data-close]');
+    if (closeBtn) { closeModal(closeBtn.dataset.close); return; }
+  });
+
+  /* ── Utility: Enter key on login inputs ── */
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const el = e.target;
+    if (el.dataset.nextFocus) { document.getElementById(el.dataset.nextFocus).focus(); return; }
+    if (el.dataset.action === 'try-login') { tryLogin(); return; }
+  });
+
+  /* ── Global search input ── */
+  const gsearch = document.getElementById('gsearch');
+  if (gsearch) {
+    gsearch.addEventListener('input', function() { globalSearch(this.value); });
+    gsearch.addEventListener('focus', function() { this.parentElement.classList.add('focus'); });
+    gsearch.addEventListener('blur', function() { setTimeout(() => this.parentElement.classList.remove('focus'), 200); });
+  }
+
+  /* ── Click delegation for data-action ── */
+  const actionMap = {
+    'enter-viewer':          () => enterViewer(),
+    'try-login':             () => tryLogin(),
+    'exit-shared':           () => exitSharedView(),
+    'toggle-shared-panel':   () => toggleSharedPanel(),
+    'sh-fit-all':            () => shFitAll(),
+    'export-excel':          () => exportExcel(),
+    'open-import':           () => openImport(),
+    'new-ticket':            () => openNewTicket(),
+    'manual-refresh':        () => manualRefresh(),
+    'toggle-notif':          () => toggleNotifPanel(),
+    'toggle-info':           () => toggleInfoPanel(),
+    'logout':                () => doLogout(),
+    'toggle-mob-nav':        () => toggleMobNav(),
+    'new-project':           () => openNewProject(),
+    'toggle-sidebar':        () => toggleSidebar(),
+    'fit-all':               () => fitAll(),
+    'cancel-field-draw':     () => cancelFieldDraw(),
+    'undo-field-pt':         () => undoFieldPt(),
+    'clear-field-path':      () => clearFieldPath(),
+    'save-field-path':       () => saveFieldPath(),
+    'close-panel':           () => document.getElementById('panel').classList.remove('vis'),
+    'open-detail-from-panel':() => openTicketDetail(currentPanelId),
+    'navigate-from-panel':   () => openNavigation(currentPanelId),
+    'export-filtered':       () => exportFiltered(),
+    'export-contacts':       () => exportContacts(),
+    'new-contact':           () => openContactModal(),
+    'save-ticket':           () => saveTicket(),
+    'save-project':          () => saveProject(),
+    'trigger-file-input':    () => document.getElementById('ffile').click(),
+    'do-import':             () => doImport(),
+    'save-move-proj':        () => saveMoveProj(),
+    'confirm-del-proj':      () => confirmDelProj(),
+    'save-contact':          () => saveContact(),
+    'go-draw-field':         () => goDrawField(currentDetailId),
+    'open-move-proj':        () => openMoveProj(currentDetailId),
+    'edit-current-ticket':   () => editCurrentTicket(),
+    'navigate-from-detail':  () => openNavigation(currentDetailId),
+    'open-full-map':         () => openFullMap(currentDetailId),
+    'unlock-status':         () => unlockStatus(currentDetailId),
+  };
+
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const fn = actionMap[btn.dataset.action];
+    if (fn) fn();
+  });
+
+  /* ── Navigation via data-page ── */
+  document.addEventListener('click', e => {
+    const item = e.target.closest('[data-page]');
+    if (!item || !item.classList.contains('snav-item')) return;
+    nav(item.dataset.page);
+  });
+
+  /* ── Map layers via data-layer ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-layer]');
+    if (!btn) return;
+    const layer = btn.dataset.layer;
+    // Shared view layers
+    if (btn.closest('#pg-shared')) { shSetLayer(layer); }
+    // Main map layers
+    else { setLayer(layer); }
+  });
+
+  /* ── Table sort via data-sort ── */
+  document.addEventListener('click', e => {
+    const th = e.target.closest('[data-sort]');
+    if (th) sortBy(th.dataset.sort);
+  });
+
+  /* ── Status buttons via data-manual-status ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-manual-status]');
+    if (btn) setManualStatus(btn.dataset.manualStatus);
+  });
+
+  /* ── Filter toggles ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-toggle-filter]');
+    if (btn) toggleMF(btn.dataset.toggleFilter);
+  });
+
+  /* ── Filter change events ── */
+  const filterChangeMap = {
+    'shared-search':  () => renderSharedList(),
+    'shared-status':  () => renderSharedList(),
+    'proj-state':     () => renderProjects(),
+    'proj-filter':    () => onProjFilter(),
+    'map-client':     () => redrawAll(),
+    'map-location':   () => redrawAll(),
+    'map-utility':    () => redrawAll(),
+    'tbl-status':     () => renderTable(),
+    'tbl-proj':       () => renderTable(),
+    'tbl-client':     () => renderTable(),
+    'tbl-utility':    () => renderTable(),
+    'contacts-state': () => renderContacts(),
+  };
+
+  const filterInputMap = {
+    'map-search':      () => debouncedRedraw(),
+    'tbl-search':      () => debouncedTable(),
+    'contacts-search': () => debouncedContacts(),
+  };
+
+  document.addEventListener('change', e => {
+    const key = e.target.dataset.filter;
+    if (key && filterChangeMap[key]) filterChangeMap[key]();
+  });
+
+  document.addEventListener('input', e => {
+    const key = e.target.dataset.filter;
+    if (key && filterInputMap[key]) filterInputMap[key]();
+    if (key && filterChangeMap[key] && e.target.tagName === 'INPUT') filterChangeMap[key]();
+  });
+
+  /* ── Import: file input + drag & drop ── */
+  const ffile = document.getElementById('ffile');
+  if (ffile) ffile.addEventListener('change', e => onFileIn(e));
+
+  const uzone = document.getElementById('uzone');
+  if (uzone) {
+    uzone.addEventListener('dragover', e => { e.preventDefault(); uzone.classList.add('drag'); });
+    uzone.addEventListener('dragleave', () => uzone.classList.remove('drag'));
+    uzone.addEventListener('drop', e => onDrop(e));
+  }
+
+})();
+</script>
 </body>
 </html>

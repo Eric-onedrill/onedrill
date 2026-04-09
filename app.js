@@ -1523,7 +1523,9 @@ function updateSyncTimer(){
 function cleanLoc(l){return(l||'').replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').trim()||l;}
 function projDropLabel(p){
   const ts=tickets.filter(t=>t.projectId===p.id);
-  const locs=[...new Set(ts.map(t=>cleanLoc(t.location)).filter(Boolean))].join(', ');
+  const allLocs=[...new Set(ts.map(t=>cleanLoc(t.location)).filter(Boolean))];
+  const filtLocs=allLocs.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
+  const locs=(filtLocs.length?filtLocs:allLocs).join(', ');
   return locs?locs+' ('+p.name+')':p.name;
 }
 
@@ -1555,7 +1557,8 @@ function renderProjects(){
     const pctOpen=projTotal>0?Math.round(openFtP/projTotal*100):0;
     const pctDamage=projTotal>0?Math.round(damageFtV/projTotal*100):0;
     const locations=[...new Set(ts.map(t=>cleanLoc(t.location)).filter(Boolean))];
-    const locStr=locations.join(', ')||p.state;
+    const locsFiltered=locations.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
+    const locStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
     return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">📍 ${esc(locStr)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">${esc(p.name)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
@@ -1788,7 +1791,9 @@ function enterSharedView(pid){
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
   document.getElementById('pg-shared').classList.add('active');
   const ts0=tickets.filter(t=>t.projectId===p.id);
-  const locs0=[...new Set(ts0.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))].join(', ')||p.state||'';
+  const allLocs0=[...new Set(ts0.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))];
+  const filtLocs0=allLocs0.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
+  const locs0=(filtLocs0.length?filtLocs0:allLocs0).join(', ')||p.state||'';
   document.getElementById('shared-proj-name').textContent=locs0+(locs0?' — ':'')+p.name+(p.client?' · '+p.client:'');
 
   const ts=filterTickets({projectId:p.id});
@@ -2412,7 +2417,9 @@ function renderAnalytics(){
     const con=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
     const df=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const tf=ts.reduce((s,t)=>s+(t.footage||0),0);const tot=p.totalFeet||tf||1;
-    const locs=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))].join(', ')||'';
+    const allLocsX=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))];
+    const filtLocsX=allLocsX.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
+    const locs=(filtLocsX.length?filtLocsX:allLocsX).join(', ')||'';
     const c4w_bins=[0,0,0,0];
     for(const t2 of ts){
       if(!t2.history)continue;

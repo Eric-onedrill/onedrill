@@ -130,12 +130,12 @@ function filterTickets(opts={}){
     // Superseded
     if(excludeSuperseded && isSuperseded(t)) return false;
 
-    // Status exato
-    if(status && t.status!==status) return false;
+    // Status exato (usa effectiveStatus para respeitar carência)
+    if(status && effectiveStatus(t)!==status) return false;
 
-    // Status filter (mapa checkboxes)
+    // Status filter (mapa checkboxes) — usa effectiveStatus
     if(statusFilter){
-      const sl=(t.status||'').toLowerCase();
+      const sl=effectiveStatus(t).toLowerCase();
       if(sl==='open'    && !statusFilter.open)    return false;
       if(sl==='damage'  && !statusFilter.damage)  return false;
       if(sl==='clear'   && !statusFilter.clear)   return false;
@@ -795,16 +795,19 @@ function mapFiltered(){
 
 function buildPopup(t,c){
   const proj=projects.find(p=>p.id===t.projectId);
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
+  const es=effectiveStatus(t);
+  const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace;
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
+    +(inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+(t.expireOld||t.expire_old)+'</div>':'')
     +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
     +(proj?`<div><span style="color:#9a9888">Projeto: </span>${esc(proj.name)}</div>`:'')
     +`<div><span style="color:#9a9888">Cliente: </span>${esc(t.client)}</div>`
     +(t.prime?`<div><span style="color:#9a9888">Prime: </span>${esc(t.prime)}</div>`:'')
     +`<div><span style="color:#9a9888">Footage: </span>${t.footage} ft</div>`
     +(t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${esc(t.tipo)}</div>`:'')
-    +`<div><span style="color:#9a9888">Status: </span><span style="color:${c};font-weight:700">${esc(t.status)}</span></div>`
+    +`<div><span style="color:#9a9888">Status: </span><span style="color:${scol(es)};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div><span style="color:#9a9888">Expira: </span><span${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`
     +(t.address?`<div><span style="color:#9a9888">Endereço: </span>${esc(t.address)}</div>`:'')
     +`<div style="margin-top:7px;padding-top:7px;border-top:1px solid #e2e0da;display:flex;gap:8px">`
@@ -829,7 +832,7 @@ async function renderMap(){
   clusterGroup=L.markerClusterGroup({maxClusterRadius:40,spiderfyOnMaxZoom:true,showCoverageOnHover:false,disableClusteringAtZoom:17});
 
   for(const t of mapFiltered()){
-    const c=scol(t.status),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const c=scol(effectiveStatus(t)),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
     const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
     if(coords){
       const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});
@@ -864,19 +867,22 @@ async function renderMap(){
 }
 
 function showPanel(t){
-  const c=scol(t.status);
+  const es=effectiveStatus(t);
+  const c=scol(es);
+  const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const proj=projects.find(p=>p.id===t.projectId);
   currentPanelId=t.id;
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
+  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace;
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
+    +(inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+(t.expireOld||t.expire_old)+'</div>':'')
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Cliente</span><span class="mp-val">${esc(t.client)}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentDetailId);return false;" title="Clique para editar">${t.footage} ft ✏</span></div>`
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
-    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(t.status)}</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
 }
@@ -938,14 +944,16 @@ function fitAll(){
 function renderList(){
   const f=mapFiltered();
   document.getElementById('tcount').textContent=`${f.length} ticket${f.length!==1?'s':''}`;
-  document.getElementById('tlist').innerHTML=f.length?f.map(t=>
-    `<div class="tcard s-${(t.status||'').toLowerCase()}" data-id="${t.id}" onclick="focusT(${t.id})">`
-    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${t.status.toLowerCase()}">${esc(t.status)}</span></div>`
+  document.getElementById('tlist').innerHTML=f.length?f.map(t=>{
+    const es=effectiveStatus(t);const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+    return`<div class="tcard s-${es.toLowerCase()}" data-id="${t.id}" onclick="focusT(${t.id})">`
+    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
     +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
-    +(t.pending?`<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:2px">⏳ ${esc(t.pending)}</div>`:'')
-    +`</div>`
-  ).join(''):'<div style="text-align:center;padding:28px 16px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
+    +(inGrace?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${t.expireOld||t.expire_old}</div>`:'')
+    +(t.pending&&!inGrace?`<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:2px">⏳ ${esc(t.pending)}</div>`:'')
+    +`</div>`;
+  }).join(''):'<div style="text-align:center;padding:28px 16px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
 }
 
 function focusT(id){
@@ -1050,16 +1058,20 @@ function openTicketDetail(id){
   const isExpired=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
   if(isExpired)showExpiredAlert(t);
 
-  const c=scol(t.status);
+  const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+  const es=effectiveStatus(t);
+  const c=scol(es);
   const proj=projects.find(p=>p.id===t.projectId);
   document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]+')':'');
-  document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(isInRenewalGrace(t)?' · 🔄 Graça até '+(t.expireOld||t.expire_old):'');
+  document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(inGrace?' · 🔄 Carência até '+(t.expireOld||t.expire_old):'');
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
 
   const expiredBanner=isExpired?'<div style="background:#dc2626;color:white;padding:10px 14px;border-radius:var(--r);margin-bottom:10px;text-align:center;font-weight:700;font-size:14px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — TICKET VENCIDO ('+esc(t.expire)+')</div>':'';
 
-  document.getElementById('det-info').innerHTML=expiredBanner
-    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(t.status)}${t.status_locked?' 🔒':''}</span></div>`
+  const graceBannerDet=inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Carência do ticket anterior</div><div style="font-size:11px;color:#15803d;margin-top:3px">Status efetivo: <strong>Clear</strong> até 23:59 de '+(t.expireOld||t.expire_old)+'. Utilities do ticket antigo ('+ esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+') ainda válidas.</div></div>':'';
+
+  document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet
+    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${esc(t.location)}, ${esc(t.state)}</span></div>`
@@ -1199,10 +1211,21 @@ function isInRenewalGrace(t){
   if(!t.expireOld&&!t.expire_old)return false;
   const cutover=t.expireOld||t.expire_old;
   if(!cutover||cutover==='—')return false;
-  const d=new Date(cutover);
-  return d>=new Date(new Date().toDateString());// true if old hasn't expired yet
+  return _eod(cutover)>=new Date();// true até 23:59:59 do dia de vencimento do ticket antigo
 }
 function isRenewed(t){return !!(t.oldTicket2||t.old_ticket2);}
+
+/**
+ * Status efetivo — durante período de carência de renovação,
+ * retorna 'Clear' independente do status real do ticket novo.
+ * O ticket novo herda a liberação do antigo até o vencimento.
+ */
+function effectiveStatus(t){
+  if(isRenewed(t)&&isInRenewalGrace(t)){
+    return 'Clear';
+  }
+  return t.status;
+}
 
 async function setManualStatus(newStatus){
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
@@ -1234,7 +1257,7 @@ function renderMiniMap(t){
     try{
       miniMap=L.map('mini-map',{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false});
       L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:21}).addTo(miniMap);
-      const c=scol(t.status);
+      const c=scol(effectiveStatus(t));
       if(hasPath){
         const ln=L.polyline(t.fieldPath,{color:c,weight:4,opacity:0.9}).addTo(miniMap);
         miniMap.fitBounds(ln.getBounds(),{padding:[14,14]});
@@ -1329,6 +1352,8 @@ async function renderUtils(t){
 /* ═══════════ 17. TICKET TABLE ═══════════ */
 function riskScore(t){
   if(!utilCacheLoaded)return 0;
+  // Tickets em carência de renovação → risco zero (liberados pelo ticket antigo)
+  if(isRenewed(t)&&isInRenewalGrace(t))return 0;
   let s=0;const now=Date.now();
   if(t.expire&&t.expire!=='—'){
     const diff=(_eod(t.expire)-now)/86400000;
@@ -1378,12 +1403,13 @@ function renderTable(){
         +(pendNames.length>3?`<span style="font-size:9px;color:var(--muted)">+${pendNames.length-3}</span>`:'')
         +`</div>`
       :'';
+    const es=effectiveStatus(t);const inGrace=isRenewed(t)&&isInRenewalGrace(t);
     return`<tr onclick="openTicketDetail(${t.id})">`
-      +`<td style="font-family:var(--mono);font-weight:500">${esc(t.ticket)}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 renovou '+esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+'</div>':''}</td>`
+      +`<td style="font-family:var(--mono);font-weight:500">${esc(t.ticket)}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 renovou '+esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+(inGrace?' (carência)':'')+'</div>':''}</td>`
       +`<td style="color:var(--text2);font-size:12px">${esc(t.client)}</td>`
       +`<td style="color:var(--muted);font-size:12px">${esc(t.prime||'—')}</td>`
       +`<td>${esc(t.location)}, ${esc(t.state)}</td>`
-      +`<td class="tc-${(t.status||'').toLowerCase()}">${esc(t.status)}${pendChips}</td>`
+      +`<td class="tc-${es.toLowerCase()}">${esc(es)}${inGrace?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}${!inGrace?pendChips:''}</td>`
       +`<td style="font-family:var(--mono)">${t.footage} ft</td>`
       +`<td style="font-family:var(--mono);font-size:12px">${esc(t.expire||'—')}</td>`
       +`<td style="color:var(--muted)">${esc(t.tipo||'—')}</td>`
@@ -1402,9 +1428,9 @@ function renderDash(){
   const now=Date.now();const week=7*86400000;
 
   const total=fTickets.length;
-  const openT=fTickets.filter(t=>t.status==='Open');
-  const clearT=fTickets.filter(t=>t.status==='Clear');
-  const damageT=fTickets.filter(t=>t.status==='Damage');
+  const openT=fTickets.filter(t=>effectiveStatus(t)==='Open');
+  const clearT=fTickets.filter(t=>effectiveStatus(t)==='Clear');
+  const damageT=fTickets.filter(t=>effectiveStatus(t)==='Damage');
   const open=openT.length,clear=clearT.length,damage=damageT.length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
   const openFt=openT.reduce((s,t)=>s+(t.footage||0),0);
@@ -1553,12 +1579,12 @@ function renderProjects(){
 
   const renderCard=(p)=>{
     const ts=filterTickets({projectId:p.id});
-    const openC=ts.filter(t=>t.status==='Open').length,clearC=ts.filter(t=>t.status==='Clear').length,damageC=ts.filter(t=>t.status==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
+    const openC=ts.filter(t=>effectiveStatus(t)==='Open').length,clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length,damageC=ts.filter(t=>effectiveStatus(t)==='Damage').length,closedC=ts.filter(t=>effectiveStatus(t)==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
-    const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
-    const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
-    const damageFtV=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
+    const clearFtP=ts.filter(t=>effectiveStatus(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const openFtP=ts.filter(t=>effectiveStatus(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const concluidoFt=ts.filter(t=>effectiveStatus(t)==='Closed').reduce((s,t)=>s+(t.footage||0),0);
+    const damageFtV=ts.filter(t=>effectiveStatus(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const pctConcluido=projTotal>0?Math.round(concluidoFt/projTotal*100):0;
     const pctClear=projTotal>0?Math.round(clearFtP/projTotal*100):0;
     const pctOpen=projTotal>0?Math.round(openFtP/projTotal*100):0;
@@ -1653,8 +1679,8 @@ function renderCompletedPage(){
 function openCompletedProjectDetail(pid){
   const p=projects.find(x=>x.id===pid);if(!p)return;
   const ts=tickets.filter(t=>t.projectId===pid&&!isSuperseded(t));
-  const clearC=ts.filter(t=>t.status==='Clear').length;
-  const openC=ts.filter(t=>t.status==='Open').length;
+  const clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length;
+  const openC=ts.filter(t=>effectiveStatus(t)==='Open').length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
   // Summary cards
   const summary='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">'
@@ -1665,7 +1691,7 @@ function openCompletedProjectDetail(pid){
     +'</div>';
   // Ticket table
   const tblHtml='<div style="max-height:300px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px">Ticket</th><th style="padding:4px 6px">Local</th><th style="padding:4px 6px">Status</th><th style="padding:4px 6px">Footage</th><th style="padding:4px 6px">Expira</th></tr></thead><tbody>'
-    +ts.map(t=>'<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td><td style="padding:4px 6px">'+esc((t.location||'').split(',')[0])+', '+esc(t.state)+'</td><td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'">'+esc(t.status)+'</span></td><td style="padding:4px 6px;font-family:var(--mono)">'+t.footage+'</td><td style="padding:4px 6px">'+esc(t.expire||'—')+'</td></tr>').join('')
+    +ts.map(t=>{const es=effectiveStatus(t);return'<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td><td style="padding:4px 6px">'+esc((t.location||'').split(',')[0])+', '+esc(t.state)+'</td><td style="padding:4px 6px"><span class="sbadge b-'+es.toLowerCase()+'">'+esc(es)+'</span></td><td style="padding:4px 6px;font-family:var(--mono)">'+t.footage+'</td><td style="padding:4px 6px">'+esc(t.expire||'—')+'</td></tr>';}).join('')
     +'</tbody></table></div>';
   // Buttons
   const btns='<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">'
@@ -1804,9 +1830,9 @@ function enterSharedView(pid){
   document.getElementById('shared-proj-name').textContent=locs0+(locs0?' — ':'')+p.name+(p.client?' · '+p.client:'');
 
   const ts=filterTickets({projectId:p.id});
-  const openC=ts.filter(t=>t.status==='Open').length;
-  const clearC=ts.filter(t=>t.status==='Clear').length;
-  const damageC=ts.filter(t=>t.status==='Damage').length;
+  const openC=ts.filter(t=>effectiveStatus(t)==='Open').length;
+  const clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length;
+  const damageC=ts.filter(t=>effectiveStatus(t)==='Damage').length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
   document.getElementById('shared-stats').innerHTML=`
     <div class="shared-stat"><span class="shared-stat-val">${ts.length}</span><span class="shared-stat-lbl">Total</span></div>
@@ -1890,12 +1916,15 @@ function sharedFiltered(){
 function renderSharedList(){
   const f=sharedFiltered();
   document.getElementById('shared-count').textContent=`${f.length} ticket${f.length!==1?'s':''}`;
-  document.getElementById('shared-list').innerHTML=f.length?f.map(t=>
-    `<div class="tcard s-${(t.status||'').toLowerCase()}" data-id="${t.id}" onclick="shFocusTicket(${t.id})">`
-    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${t.status.toLowerCase()}">${esc(t.status)}</span></div>`
+  document.getElementById('shared-list').innerHTML=f.length?f.map(t=>{
+    const es=effectiveStatus(t);const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+    return`<div class="tcard s-${es.toLowerCase()}" data-id="${t.id}" onclick="shFocusTicket(${t.id})">`
+    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
-    +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div></div>`
-  ).join(''):'<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
+    +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
+    +(inGrace?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${t.expireOld||t.expire_old}</div>`:'')
+    +`</div>`;
+  }).join(''):'<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
   renderSharedMap();
 }
 
@@ -1924,7 +1953,7 @@ function renderSharedMap(){
   clearSharedMapLayers();
   const f=sharedFiltered();
   for(const t of f){
-    const c=scol(t.status),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const c=scol(effectiveStatus(t)),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
     const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
     if(coords){
       const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});
@@ -2259,7 +2288,7 @@ function exportExcel(){
 }
 
 function exportUtilTickets(utilName){
-  const openTickets=filterTickets({}).filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
+  const openTickets=filterTickets({}).filter(t=>{const es=effectiveStatus(t);return es==='Open'||es==='Damage'||es==='Clear';});
   const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
   if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
   const wb=XLSX.utils.book_new();
@@ -2271,7 +2300,7 @@ function exportUtilTickets(utilName){
 
 function exportAllPending(){
   if(!utilCacheLoaded){toast('Aguarde carregar utilities','warn');return;}
-  const openTickets=filterTickets({}).filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
+  const openTickets=filterTickets({}).filter(t=>{const es=effectiveStatus(t);return es==='Open'||es==='Damage'||es==='Clear';});
   const rows=[];
   for(const t of openTickets){
     const pends=getTicketPendingUtils(t.ticket);if(!pends.length)continue;
@@ -2315,7 +2344,7 @@ function globalSearch(q){
   for(const t of tickets){
     if(results.length>=10)break;
     if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)){
-      results.push({type:'ticket',id:t.id,title:t.ticket,sub:t.client+' · '+t.location+' · '+t.status,status:t.status});
+      results.push({type:'ticket',id:t.id,title:t.ticket,sub:t.client+' · '+t.location+' · '+effectiveStatus(t),status:effectiveStatus(t)});
     }
   }
   for(const p of projects){
@@ -2393,7 +2422,7 @@ function toggleInfoPanel(){
       const last=t.history?.[t.history.length-1];
       h+='<div class="notif-item" onclick="openTicketDetail('+t.id+');toggleInfoPanel()">'
         +'<span style="font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</span> '
-        +'<span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span>'
+        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+esc(last?.action||'—')+'</div></div>';
     }
     h+='<div class="notif-section" style="margin-top:12px">ℹ️ Sistema</div><div style="font-size:12px;color:var(--text2);padding:6px 10px;line-height:1.8">🔵 Dados: Supabase<br>🟢 Sync: Automática<br>🗺 Mapa: Google Hybrid</div>';
@@ -2419,10 +2448,10 @@ function renderAnalytics(){
   const now=Date.now();const week=7*86400000;
   const ps=fP.map(p=>{
     const ts=fT.filter(t=>t.projectId===p.id);
-    const cf=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
-    const con=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
-    const df=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
+    const cf=ts.filter(t=>effectiveStatus(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const of2=ts.filter(t=>effectiveStatus(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const con=ts.filter(t=>effectiveStatus(t)==='Closed').reduce((s,t)=>s+(t.footage||0),0);
+    const df=ts.filter(t=>effectiveStatus(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const tf=ts.reduce((s,t)=>s+(t.footage||0),0);const tot=p.totalFeet||tf||1;
     const allLocsX=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))];
     const filtLocsX=allLocsX.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
@@ -2612,7 +2641,7 @@ function renderPrivateLocatorAlert(fTickets){
       return'<div style="background:white;border:1px solid #d8b4fe;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
         +'<div style="display:flex;justify-content:space-between;align-items:center">'
         +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
-        +'<span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span></div>'
+        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span></div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
         +'<div style="font-size:9px;color:#7c3aed;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
         +'</div>';
@@ -2670,7 +2699,7 @@ function renderRiskAnalytics(fT){
   const scored=active.map(t=>({t,s:riskScore(t)}));
   const crit=scored.filter(x=>x.s>=60);const high=scored.filter(x=>x.s>=35&&x.s<60);
   const med=scored.filter(x=>x.s>=15&&x.s<35);const low=scored.filter(x=>x.s<15);
-  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&_eod(t.expire)<new Date());
+  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&effectiveStatus(t)==='Open'&&_eod(t.expire)<new Date());
   const card=(label,count,color,bg,border,sub)=>'<div style="padding:14px;background:'+bg+';border:1px solid '+border+';border-radius:var(--r)"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+color+'">'+count+'</div><div style="font-size:10px;font-weight:700;color:'+color+';text-transform:uppercase;margin-top:2px">'+label+'</div>'+(sub?'<div style="font-size:10px;color:'+color+';opacity:.7;margin-top:2px">'+sub+'</div>':'')+'</div>';
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🎯 Score de Risco</div><button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">'
     +card('Crítico ≥60',crit.length,'#dc2626','#fef2f2','#fecaca',crit.length?crit.map(x=>esc(x.t.ticket)).slice(0,2).join(', ')+(crit.length>2?'…':''):'Nenhum')
@@ -2747,7 +2776,7 @@ function renderRecentActivity(fT){
   const recent=[...fT].filter(t=>t.history&&t.history.length).sort((a,b)=>(b.history[b.history.length-1]?.ts||0)-(a.history[a.history.length-1]?.ts||0)).slice(0,15);
   if(!recent.length)return'';
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">🕐 Atividade Recente</div><div style="max-height:300px;overflow-y:auto">'
-    +recent.map(t=>{const last=t.history[t.history.length-1];return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><div><span style="font-family:var(--mono);font-weight:600;font-size:12px">'+esc(t.ticket)+'</span> <span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span><div style="font-size:10px;color:var(--muted)">'+esc(last?.action||'—')+'</div></div><span style="font-size:10px;color:var(--muted);white-space:nowrap">'+fmtDt(last?.ts||0)+'</span></div>';}).join('')
+    +recent.map(t=>{const last=t.history[t.history.length-1];const es=effectiveStatus(t);return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')"><div><span style="font-family:var(--mono);font-weight:600;font-size:12px">'+esc(t.ticket)+'</span> <span class="sbadge b-'+es.toLowerCase()+'" style="font-size:9px">'+esc(es)+'</span><div style="font-size:10px;color:var(--muted)">'+esc(last?.action||'—')+'</div></div><span style="font-size:10px;color:var(--muted);white-space:nowrap">'+fmtDt(last?.ts||0)+'</span></div>';}).join('')
     +'</div></div></div>';
 }
 

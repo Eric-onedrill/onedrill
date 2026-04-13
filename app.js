@@ -41,6 +41,13 @@ function fmtDt(ts){
   return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 }
 
+/** Retorna Date no final do dia (23:59:59) — tickets vencem às 23:59, não à meia-noite */
+function _eod(dateStr){
+  const d=new Date(dateStr);
+  d.setHours(23,59,59,999);
+  return d;
+}
+
 /** Cor do status */
 function scol(s){
   const m={open:'#dc2626',clear:'#16a34a',damage:'#d97706',closed:'#1a1a18',cancel:'#6d28d9'};
@@ -788,7 +795,7 @@ function mapFiltered(){
 
 function buildPopup(t,c){
   const proj=projects.find(p=>p.id===t.projectId);
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&new Date(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
+  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
     +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
@@ -860,7 +867,7 @@ function showPanel(t){
   const c=scol(t.status);
   const proj=projects.find(p=>p.id===t.projectId);
   currentPanelId=t.id;
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&new Date(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
+  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
@@ -1040,7 +1047,7 @@ function openTicketDetail(id){
   const t=tickets.find(x=>x.id===id);if(!t)return;
   currentDetailId=id;
 
-  const isExpired=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&new Date(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
+  const isExpired=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
   if(isExpired)showExpiredAlert(t);
 
   const c=scol(t.status);
@@ -1324,7 +1331,7 @@ function riskScore(t){
   if(!utilCacheLoaded)return 0;
   let s=0;const now=Date.now();
   if(t.expire&&t.expire!=='—'){
-    const diff=(new Date(t.expire)-now)/86400000;
+    const diff=(_eod(t.expire)-now)/86400000;
     if(diff<0)s+=60;else if(diff<=2)s+=45;else if(diff<=5)s+=30;else if(diff<=10)s+=18;else if(diff<=20)s+=8;
   }
   const pends=getTicketPendingUtils(String(t.ticket).trim());
@@ -1405,7 +1412,7 @@ function renderDash(){
   const damageFt=damageT.reduce((s,t)=>s+(t.footage||0),0);
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
-  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=new Date(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&t.status!=='Closed'&&t.status!=='Cancel';});
+  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&t.status!=='Closed'&&t.status!=='Cancel';});
 
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
@@ -1482,7 +1489,7 @@ function renderDash(){
   +'</div></div>'
   +(soon.length?'<div style="max-height:200px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px;font-weight:600">Ticket</th><th style="padding:4px 6px;font-weight:600">Dias</th><th style="padding:4px 6px;font-weight:600">Local</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600">Expira</th></tr></thead><tbody>'
   +soon.sort((a,b)=>{const da=Math.round((new Date(a.expire)-now)/86400000);const db=Math.round((new Date(b.expire)-now)/86400000);return da-db;}).map(t=>{
-    const d2=Math.round((new Date(t.expire)-now)/86400000);
+    const d2=Math.ceil((_eod(t.expire)-now)/86400000);
     const urgColor=d2<=2?'var(--red)':d2<=5?'var(--amber)':'var(--text2)';
     const urgBg=d2<=2?'var(--red-bg)':d2<=5?'#fffbeb':'transparent';
     const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
@@ -1813,15 +1820,15 @@ function enterSharedView(pid){
 
   // Expiring tickets alert for field view
   const now=new Date();
-  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&new Date(t.expire)<now);
-  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=new Date(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
-  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=new Date(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
+  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<now);
+  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
+  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
 
   const hasExpired=expired.length>0;
   if(hasExpired||expiring3d.length){
     const el=document.createElement('div');el.id='field-alert-overlay';
     const bgColor=hasExpired?'rgba(220,38,38,.92)':'rgba(217,119,6,.88)';
-    const list=[...expired.map(t=>({t,label:'⛔ VENCIDO',color:'#fff'})),...expiring3d.map(t=>({t,label:'⚠ '+Math.round((new Date(t.expire)-now)/86400000)+'d',color:'#fde68a'})),...expiring7d.slice(0,3).map(t=>({t,label:Math.round((new Date(t.expire)-now)/86400000)+'d',color:'#bfdbfe'}))];
+    const list=[...expired.map(t=>({t,label:'⛔ VENCIDO',color:'#fff'})),...expiring3d.map(t=>({t,label:'⚠ '+Math.ceil((_eod(t.expire)-now)/86400000)+'d',color:'#fde68a'})),...expiring7d.slice(0,3).map(t=>({t,label:Math.ceil((_eod(t.expire)-now)/86400000)+'d',color:'#bfdbfe'}))];
     const listHtml=list.map(({t,label,color})=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.2)"><span style="font-family:var(--mono);color:white;font-weight:700">'+esc(t.ticket)+'</span><span style="color:'+color+';font-weight:700;font-size:12px">'+label+'</span></div>').join('');
     el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:20px;text-align:center">'
       +'<div style="font-size:50px;margin-bottom:12px">'+(hasExpired?'⛔':'⚠')+'</div>'
@@ -2206,7 +2213,7 @@ function exportExpiring(){
   const days=_soonDays||10;
   const f=filterTickets({}).filter(t=>{
     if(!t.expire||t.expire==='—')return false;
-    const d=new Date(t.expire);const diff=(d-Date.now())/86400000;
+    const d=_eod(t.expire);const diff=(d-Date.now())/86400000;
     return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel';
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
@@ -2334,7 +2341,7 @@ function buildNotifications(){
     const expiring=tickets.filter(t=>{
       if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel'||isSuperseded(t))return false;
       if(isRenewed(t)&&isInRenewalGrace(t))return false;
-      const d=new Date(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;
+      const d=_eod(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;
     });
     for(const t of expiring)notifs.push({icon:'⏰',text:t.ticket+' expira '+t.expire,id:t.id,type:'warn'});
     for(const t of tickets){
@@ -2663,7 +2670,7 @@ function renderRiskAnalytics(fT){
   const scored=active.map(t=>({t,s:riskScore(t)}));
   const crit=scored.filter(x=>x.s>=60);const high=scored.filter(x=>x.s>=35&&x.s<60);
   const med=scored.filter(x=>x.s>=15&&x.s<35);const low=scored.filter(x=>x.s<15);
-  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&new Date(t.expire)<new Date());
+  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&_eod(t.expire)<new Date());
   const card=(label,count,color,bg,border,sub)=>'<div style="padding:14px;background:'+bg+';border:1px solid '+border+';border-radius:var(--r)"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+color+'">'+count+'</div><div style="font-size:10px;font-weight:700;color:'+color+';text-transform:uppercase;margin-top:2px">'+label+'</div>'+(sub?'<div style="font-size:10px;color:'+color+';opacity:.7;margin-top:2px">'+sub+'</div>':'')+'</div>';
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🎯 Score de Risco</div><button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">'
     +card('Crítico ≥60',crit.length,'#dc2626','#fef2f2','#fecaca',crit.length?crit.map(x=>esc(x.t.ticket)).slice(0,2).join(', ')+(crit.length>2?'…':''):'Nenhum')

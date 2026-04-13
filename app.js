@@ -264,7 +264,8 @@ function dbToTicket(r){
     oldTicket2:r.old_ticket2||'', statusOld:r.status_old||'', expireOld:r.expire_old||'',
     notes:r.notes||'', fieldPath:r.field_path||null,
     _geocoded:(r.geocoded_lat&&r.geocoded_lon)?[r.geocoded_lat,r.geocoded_lon]:null,
-    history:r.history||[], attachments:r.attachments||[], status_locked:r.status_locked||false
+    history:r.history||[], attachments:r.attachments||[], status_locked:r.status_locked||false,
+    project_locked:r.project_locked||false
   };
 }
 function ticketToDb(t){
@@ -276,7 +277,8 @@ function ticketToDb(t){
     old_ticket2:t.oldTicket2||'', status_old:t.statusOld||'', expire_old:t.expireOld||'',
     notes:t.notes||'', field_path:t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null,
     geocoded_lat:t._geocoded?t._geocoded[0]:null, geocoded_lon:t._geocoded?t._geocoded[1]:null,
-    history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false
+    history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false,
+    project_locked:t.project_locked||false
   };
 }
 function projectToDb(p){
@@ -1093,6 +1095,9 @@ function openTicketDetail(id){
   const unlockBtn=document.getElementById('det-unlock-btn');
   if(t.status_locked){lockBadge.style.display='';unlockBtn.style.display='';}
   else{lockBadge.style.display='none';unlockBtn.style.display='none';}
+  // Project lock indicator on the Projeto button
+  const projBtn=document.getElementById('det-proj-btn');
+  if(projBtn)projBtn.innerHTML=t.project_locked?'📁 Projeto 🔒':'📁 Projeto';
   if(!isSharedView&&isAdmin){
     document.getElementById('det-edit-btn').style.display='';
     document.getElementById('det-draw-btn').style.display='';
@@ -1194,6 +1199,7 @@ async function renewTicket(){
   t.statusOld=oldStatus;
   // Atualiza para novo ticket
   t.ticket=newTicket;
+  if(t.projectId)t.project_locked=true;// trava projeto ao renovar
   t.history=t.history||[];
   t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(dup?' (mesclado)':'')+' (graça até '+oldExpire+')',color:'#7c3aed'});
   const ok=await saveTicketToDb(t);
@@ -1265,6 +1271,13 @@ async function unlockStatus(id){
   t.status_locked=false;
   const ok=await saveTicketToDb(t);
   if(ok){toast('🔓 Status desbloqueado','success');openTicketDetail(id);}
+}
+async function unlockProject(id){
+  const t=tickets.find(x=>x.id===id||x.id===currentDetailId);if(!t)return;
+  t.project_locked=false;
+  t.history.push({ts:Date.now(),action:'Projeto desbloqueado 🔓',color:'#1a6cf0'});
+  const ok=await saveTicketToDb(t);
+  if(ok){toast('🔓 Projeto desbloqueado','success');openTicketDetail(t.id);}
 }
 
 function renderMiniMap(t){
@@ -1451,9 +1464,9 @@ function renderDash(){
   const now=Date.now();const week=7*86400000;
 
   const total=fTickets.length;
-  const openT=fTickets.filter(t=>effectiveStatus(t)==='Open');
-  const clearT=fTickets.filter(t=>effectiveStatus(t)==='Clear');
-  const damageT=fTickets.filter(t=>effectiveStatus(t)==='Damage');
+  const openT=fTickets.filter(t=>t.status==='Open');
+  const clearT=fTickets.filter(t=>t.status==='Clear');
+  const damageT=fTickets.filter(t=>t.status==='Damage');
   const open=openT.length,clear=clearT.length,damage=damageT.length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
   const openFt=openT.reduce((s,t)=>s+(t.footage||0),0);
@@ -1602,12 +1615,12 @@ function renderProjects(){
 
   const renderCard=(p)=>{
     const ts=filterTickets({projectId:p.id});
-    const openC=ts.filter(t=>effectiveStatus(t)==='Open').length,clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length,damageC=ts.filter(t=>effectiveStatus(t)==='Damage').length,closedC=ts.filter(t=>effectiveStatus(t)==='Closed').length;
+    const openC=ts.filter(t=>t.status==='Open').length,clearC=ts.filter(t=>t.status==='Clear').length,damageC=ts.filter(t=>t.status==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
-    const clearFtP=ts.filter(t=>effectiveStatus(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const openFtP=ts.filter(t=>effectiveStatus(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
-    const concluidoFt=ts.filter(t=>effectiveStatus(t)==='Closed').reduce((s,t)=>s+(t.footage||0),0);
-    const damageFtV=ts.filter(t=>effectiveStatus(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);
+    const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
+    const damageFtV=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const pctConcluido=projTotal>0?Math.round(concluidoFt/projTotal*100):0;
     const pctClear=projTotal>0?Math.round(clearFtP/projTotal*100):0;
     const pctOpen=projTotal>0?Math.round(openFtP/projTotal*100):0;
@@ -1702,8 +1715,8 @@ function renderCompletedPage(){
 function openCompletedProjectDetail(pid){
   const p=projects.find(x=>x.id===pid);if(!p)return;
   const ts=tickets.filter(t=>t.projectId===pid&&!isSuperseded(t));
-  const clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length;
-  const openC=ts.filter(t=>effectiveStatus(t)==='Open').length;
+  const clearC=ts.filter(t=>t.status==='Clear').length;
+  const openC=ts.filter(t=>t.status==='Open').length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
   // Summary cards
   const summary='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">'
@@ -1804,7 +1817,7 @@ async function confirmDelProj(){
 }
 function openMoveProj(tid){
   const t=tickets.find(x=>x.id===tid);if(!t)return;
-  document.getElementById('move-proj-ticket-info').textContent=`Ticket: ${t.ticket}`;
+  document.getElementById('move-proj-ticket-info').innerHTML=`Ticket: ${t.ticket}`+(t.project_locked?'<div style="margin-top:6px;font-size:11px;padding:5px 10px;background:var(--accent-bg);border:1px solid var(--border);border-radius:var(--r);color:var(--accent)">🔒 Projeto travado — ao salvar, o novo projeto será travado também.<br><button class="btn btn-sm" onclick="unlockProject('+t.id+')" style="margin-top:4px;font-size:10px">🔓 Desbloquear projeto</button></div>':'');
   const sel=document.getElementById('move-proj-sel');
   sel.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}"${t.projectId===p.id?' selected':''}>${esc(p.name)}</option>`).join('');
   openModal('ov-move-proj');
@@ -1812,9 +1825,10 @@ function openMoveProj(tid){
 async function saveMoveProj(){
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
   t.projectId=document.getElementById('move-proj-sel').value;
-  t.history.push({ts:Date.now(),action:`Movido para projeto: ${projects.find(p=>p.id===t.projectId)?.name||'Sem projeto'}`,color:'#1a6cf0'});
+  t.project_locked=!!t.projectId;// trava se tem projeto, destrava se "Sem projeto"
+  t.history.push({ts:Date.now(),action:`Movido para projeto: ${projects.find(p=>p.id===t.projectId)?.name||'Sem projeto'}${t.project_locked?' 🔒':''}`,color:'#1a6cf0'});
   await saveTicketToDb(t);
-  closeModal('ov-move-proj');openTicketDetail(currentDetailId);syncAll();toast('Projeto atualizado!','success');
+  closeModal('ov-move-proj');openTicketDetail(currentDetailId);syncAll();toast('Projeto atualizado!'+(t.project_locked?' (travado)':''),'success');
 }
 
 function shareProject(pid){
@@ -1853,9 +1867,9 @@ function enterSharedView(pid){
   document.getElementById('shared-proj-name').textContent=locs0+(locs0?' — ':'')+p.name+(p.client?' · '+p.client:'');
 
   const ts=filterTickets({projectId:p.id});
-  const openC=ts.filter(t=>effectiveStatus(t)==='Open').length;
-  const clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length;
-  const damageC=ts.filter(t=>effectiveStatus(t)==='Damage').length;
+  const openC=ts.filter(t=>t.status==='Open').length;
+  const clearC=ts.filter(t=>t.status==='Clear').length;
+  const damageC=ts.filter(t=>t.status==='Damage').length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
   document.getElementById('shared-stats').innerHTML=`
     <div class="shared-stat"><span class="shared-stat-val">${ts.length}</span><span class="shared-stat-lbl">Total</span></div>
@@ -2067,8 +2081,10 @@ async function saveTicket(){
     const t=tickets.find(x=>x.id===editingTicketId);
     if(t){
       const old=t.status;
+      const newProjId=document.getElementById('tm-proj').value;
+      const projChanged=newProjId!==t.projectId;
       Object.assign(t,{
-        ticket:tnum,projectId:document.getElementById('tm-proj').value,
+        ticket:tnum,projectId:newProjId,
         client:document.getElementById('tm-c').value,company:document.getElementById('tm-co').value,
         location:document.getElementById('tm-l').value,state:document.getElementById('tm-st').value,
         footage:parseInt(document.getElementById('tm-f').value)||0,expire:document.getElementById('tm-e').value||'',
@@ -2076,13 +2092,14 @@ async function saveTicket(){
         tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,
         prime:document.getElementById('tm-prime').value,address:document.getElementById('tm-addr').value
       });
+      if(projChanged&&newProjId)t.project_locked=true;// trava ao trocar projeto manualmente
       if(old!==newStatus)t.history.push({ts:Date.now(),action:`Status: ${old} → ${newStatus}`,color:scol(newStatus)});
       t.history.push({ts:Date.now(),action:'Editado',color:'#9a9888'});
       await saveTicketToDb(t);savedId=t.id;
     }
     toast('Ticket atualizado!','success');
   }else{
-    const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:document.getElementById('tm-e').value||'',footage:parseInt(document.getElementById('tm-f').value)||0,client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false};
+    const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:document.getElementById('tm-e').value||'',footage:parseInt(document.getElementById('tm-f').value)||0,client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false,project_locked:!!document.getElementById('tm-proj').value};
     tickets.push(t);await saveTicketToDb(t);savedId=t.id;
     toast('Ticket criado!','success');
   }
@@ -2223,9 +2240,12 @@ async function doImport(){
       const existing=tickets.find(t=>String(t.ticket).trim()===String(r.ticket).trim());
       if(existing){
         const oldStatus=existing.status;
-        Object.assign(existing,{company:r.company,state:r.state,location:r.location,status:r.status,expire:r.expire,footage:r.footage,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,projectId:pid||existing.projectId});
-        if(oldStatus!==r.status)existing.history.push({ts:Date.now(),action:`Status: ${oldStatus} → ${r.status}`,color:scol(r.status)});
-        existing.history.push({ts:Date.now(),action:'Atualizado via Excel ✅',color:'#16a34a'});
+        // Respeita locks: não sobrescreve projeto travado nem status travado
+        const newPid=existing.project_locked?existing.projectId:(pid||existing.projectId);
+        const newStatus=existing.status_locked?existing.status:r.status;
+        Object.assign(existing,{company:r.company,state:r.state,location:r.location,status:newStatus,expire:r.expire,footage:r.footage,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,projectId:newPid});
+        if(oldStatus!==newStatus)existing.history.push({ts:Date.now(),action:`Status: ${oldStatus} → ${newStatus}`,color:scol(newStatus)});
+        existing.history.push({ts:Date.now(),action:'Atualizado via Excel ✅'+(existing.project_locked?' (projeto travado 🔒)':''),color:'#16a34a'});
         batchBuffer.push(existing);
         updated++;
         // Flush batch
@@ -2237,7 +2257,7 @@ async function doImport(){
       }
     }
 
-    const t={id:null,ticket:r.ticket,projectId:pid,company:r.company||'One Drill',state:r.state,location:r.location,status:r.status,expire:r.expire,footage:r.footage,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,notes:'',fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Importado via Excel',color:'#1a6cf0'}],attachments:[],status_locked:false};
+    const t={id:null,ticket:r.ticket,projectId:pid,company:r.company||'One Drill',state:r.state,location:r.location,status:r.status,expire:r.expire,footage:r.footage,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,notes:'',fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Importado via Excel',color:'#1a6cf0'}],attachments:[],status_locked:false,project_locked:false};
     tickets.push(t);
     batchBuffer.push(t);
     novo.push(t);
@@ -2311,7 +2331,7 @@ function exportExcel(){
 }
 
 function exportUtilTickets(utilName){
-  const openTickets=filterTickets({}).filter(t=>{const es=effectiveStatus(t);return es==='Open'||es==='Damage'||es==='Clear';});
+  const openTickets=filterTickets({}).filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
   const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
   if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
   const wb=XLSX.utils.book_new();
@@ -2323,7 +2343,7 @@ function exportUtilTickets(utilName){
 
 function exportAllPending(){
   if(!utilCacheLoaded){toast('Aguarde carregar utilities','warn');return;}
-  const openTickets=filterTickets({}).filter(t=>{const es=effectiveStatus(t);return es==='Open'||es==='Damage'||es==='Clear';});
+  const openTickets=filterTickets({}).filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
   const rows=[];
   for(const t of openTickets){
     const pends=getTicketPendingUtils(t.ticket);if(!pends.length)continue;
@@ -2471,10 +2491,10 @@ function renderAnalytics(){
   const now=Date.now();const week=7*86400000;
   const ps=fP.map(p=>{
     const ts=fT.filter(t=>t.projectId===p.id);
-    const cf=ts.filter(t=>effectiveStatus(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const of2=ts.filter(t=>effectiveStatus(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
-    const con=ts.filter(t=>effectiveStatus(t)==='Closed').reduce((s,t)=>s+(t.footage||0),0);
-    const df=ts.filter(t=>effectiveStatus(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);
+    const cf=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const of2=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const con=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
+    const df=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const tf=ts.reduce((s,t)=>s+(t.footage||0),0);const tot=p.totalFeet||tf||1;
     const allLocsX=[...new Set(ts.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))];
     const filtLocsX=allLocsX.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
@@ -2722,7 +2742,7 @@ function renderRiskAnalytics(fT){
   const scored=active.map(t=>({t,s:riskScore(t)}));
   const crit=scored.filter(x=>x.s>=60);const high=scored.filter(x=>x.s>=35&&x.s<60);
   const med=scored.filter(x=>x.s>=15&&x.s<35);const low=scored.filter(x=>x.s<15);
-  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&effectiveStatus(t)==='Open'&&_eod(t.expire)<new Date());
+  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&_eod(t.expire)<new Date());
   const card=(label,count,color,bg,border,sub)=>'<div style="padding:14px;background:'+bg+';border:1px solid '+border+';border-radius:var(--r)"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+color+'">'+count+'</div><div style="font-size:10px;font-weight:700;color:'+color+';text-transform:uppercase;margin-top:2px">'+label+'</div>'+(sub?'<div style="font-size:10px;color:'+color+';opacity:.7;margin-top:2px">'+sub+'</div>':'')+'</div>';
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🎯 Score de Risco</div><button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">'
     +card('Crítico ≥60',crit.length,'#dc2626','#fef2f2','#fecaca',crit.length?crit.map(x=>esc(x.t.ticket)).slice(0,2).join(', ')+(crit.length>2?'…':''):'Nenhum')

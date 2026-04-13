@@ -130,12 +130,12 @@ function filterTickets(opts={}){
     // Superseded
     if(excludeSuperseded && isSuperseded(t)) return false;
 
-    // Status exato (usa effectiveStatus para respeitar carência)
-    if(status && effectiveStatus(t)!==status) return false;
+    // Status exato (usa status real — effectiveStatus é só visual)
+    if(status && t.status!==status) return false;
 
-    // Status filter (mapa checkboxes) — usa effectiveStatus
+    // Status filter (mapa checkboxes) — usa status real
     if(statusFilter){
-      const sl=effectiveStatus(t).toLowerCase();
+      const sl=(t.status||'').toLowerCase();
       if(sl==='open'    && !statusFilter.open)    return false;
       if(sl==='damage'  && !statusFilter.damage)  return false;
       if(sl==='clear'   && !statusFilter.clear)   return false;
@@ -800,7 +800,7 @@ function buildPopup(t,c){
   const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace;
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
-    +(inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+(t.expireOld||t.expire_old)+'</div>':'')
+    +(inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'')
     +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
     +(proj?`<div><span style="color:#9a9888">Projeto: </span>${esc(proj.name)}</div>`:'')
     +`<div><span style="color:#9a9888">Cliente: </span>${esc(t.client)}</div>`
@@ -876,7 +876,7 @@ function showPanel(t){
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
-    +(inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+(t.expireOld||t.expire_old)+'</div>':'')
+    +(inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'')
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Cliente</span><span class="mp-val">${esc(t.client)}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
@@ -950,7 +950,7 @@ function renderList(){
     +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
     +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
-    +(inGrace?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${t.expireOld||t.expire_old}</div>`:'')
+    +(inGrace?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${graceCutoverDate(t)}</div>`:'')
     +(t.pending&&!inGrace?`<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:2px">⏳ ${esc(t.pending)}</div>`:'')
     +`</div>`;
   }).join(''):'<div style="text-align:center;padding:28px 16px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
@@ -1063,12 +1063,12 @@ function openTicketDetail(id){
   const c=scol(es);
   const proj=projects.find(p=>p.id===t.projectId);
   document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]+')':'');
-  document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(inGrace?' · 🔄 Carência até '+(t.expireOld||t.expire_old):'');
+  document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(inGrace?' · 🔄 Carência até '+graceCutoverDate(t):'');
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
 
   const expiredBanner=isExpired?'<div style="background:#dc2626;color:white;padding:10px 14px;border-radius:var(--r);margin-bottom:10px;text-align:center;font-weight:700;font-size:14px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — TICKET VENCIDO ('+esc(t.expire)+')</div>':'';
 
-  const graceBannerDet=inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Carência do ticket anterior</div><div style="font-size:11px;color:#15803d;margin-top:3px">Status efetivo: <strong>Clear</strong> até 23:59 de '+(t.expireOld||t.expire_old)+'. Utilities do ticket antigo ('+ esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+') ainda válidas.</div></div>':'';
+  const graceBannerDet=inGrace?'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Carência do ticket anterior</div><div style="font-size:11px;color:#15803d;margin-top:3px">Status efetivo: <strong>Clear</strong> até 23:59 de '+graceCutoverDate(t)+'. Utilities do ticket antigo ('+ esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+') ainda válidas.</div></div>':'';
 
   document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
@@ -1208,10 +1208,23 @@ async function renewTicket(){
   }
 }
 function isInRenewalGrace(t){
-  if(!t.expireOld&&!t.expire_old)return false;
-  const cutover=t.expireOld||t.expire_old;
+  if(!isRenewed(t))return false;
+  // 1. Tenta expireOld direto (definido na renovação manual)
+  let cutover=t.expireOld||t.expire_old||'';
+
+  // 2. Fallback: busca expiração do ticket antigo no sistema
+  if(!cutover||cutover==='—'){
+    const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    if(oldNum){
+      const oldT=tickets.find(x=>String(x.ticket).trim()===oldNum);
+      if(oldT&&oldT.expire&&oldT.expire!=='—'){
+        cutover=oldT.expire;
+      }
+    }
+  }
+
   if(!cutover||cutover==='—')return false;
-  return _eod(cutover)>=new Date();// true até 23:59:59 do dia de vencimento do ticket antigo
+  return _eod(cutover)>=new Date();// true até 23:59:59 do dia de vencimento
 }
 function isRenewed(t){return !!(t.oldTicket2||t.old_ticket2);}
 
@@ -1225,6 +1238,16 @@ function effectiveStatus(t){
     return 'Clear';
   }
   return t.status;
+}
+
+/** Retorna a data de corte da carência (para exibição) */
+function graceCutoverDate(t){
+  let d=t.expireOld||t.expire_old||'';
+  if(!d||d==='—'){
+    const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    if(oldNum){const oldT=tickets.find(x=>String(x.ticket).trim()===oldNum);if(oldT&&oldT.expire&&oldT.expire!=='—')d=oldT.expire;}
+  }
+  return d||'—';
 }
 
 async function setManualStatus(newStatus){
@@ -1313,7 +1336,7 @@ async function renderUtils(t){
     if(inGrace){
       graceBanner='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:8px 12px;margin-bottom:8px">'
         +'<div style="font-size:11px;font-weight:700;color:#16a34a">✅ LIBERADO — Utilities do ticket antigo ('+esc(oldTicketNum)+')</div>'
-        +'<div style="font-size:10px;color:#15803d;margin-top:2px">Válido até '+(t.expireOld||t.expire_old)+'. Após essa data, novas liberações serão necessárias do ticket '+esc(t.ticket)+'.</div>'
+        +'<div style="font-size:10px;color:#15803d;margin-top:2px">Válido até '+graceCutoverDate(t)+'. Após essa data, novas liberações serão necessárias do ticket '+esc(t.ticket)+'.</div>'
         +'</div>';
     }
 
@@ -1922,7 +1945,7 @@ function renderSharedList(){
     +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
     +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
-    +(inGrace?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${t.expireOld||t.expire_old}</div>`:'')
+    +(inGrace?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${graceCutoverDate(t)}</div>`:'')
     +`</div>`;
   }).join(''):'<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
   renderSharedMap();

@@ -2544,7 +2544,7 @@ function renderAnalytics(){
     const c4w_bins=[0,0,0,0];
     for(const t2 of ts){
       if(!t2.history)continue;
-      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return a2.includes('→ clear')||a2.includes('auto 811')||a2.includes('auto-clear');}).pop();
+      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')||a2.includes('auto-clear'))&&!a2.includes('revertido');}).pop();
       if(!clearEvt||!clearEvt.ts)continue;
       const wAgo=Math.floor((now-clearEvt.ts)/week);
       if(wAgo>=0&&wAgo<4)c4w_bins[wAgo]+=(t2.footage||0);
@@ -2606,9 +2606,40 @@ function renderClearedStats(fTickets){
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
   function getTicketClearDate(t){
     if(!t.history||!t.history.length)return 0;
+
+    // 1. Só conta tickets auto-cleared pelo 811 sync
+    //    Exclui: status manual, edição manual, importação
+    var hasAutoClear=false;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
-      if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){return t.history[j].ts;}
+      if((a.indexOf('auto 811')>=0||a.indexOf('auto-clear')>=0)&&a.indexOf('revertido')<0){
+        hasAutoClear=true;break;
+      }
+    }
+    if(!hasAutoClear)return 0;
+
+    // 2. Usa a data REAL da última utility que respondeu Clear (do cache)
+    if(utilCacheLoaded){
+      var tkey=String(t.ticket).trim();
+      var utils=utilCache[tkey]||[];
+      var maxTs=0;
+      for(var k=0;k<utils.length;k++){
+        if(utils[k].status==='Clear'&&utils[k].responded_at){
+          var rd=new Date(utils[k].responded_at).getTime();
+          if(!isNaN(rd)&&rd>maxTs)maxTs=rd;
+        }
+      }
+      if(maxTs>0)return maxTs;
+    }
+
+    // 3. Fallback: extrai data do texto "[AUTO 811] Clear em MM/DD/YYYY"
+    for(var j2=t.history.length-1;j2>=0;j2--){
+      var a2=(t.history[j2].action||'').toLowerCase();
+      if((a2.indexOf('auto 811')>=0||a2.indexOf('auto-clear')>=0)&&a2.indexOf('revertido')<0){
+        var m=t.history[j2].action.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+        if(m){var pd=new Date(m[1]).getTime();if(!isNaN(pd))return pd;}
+        return t.history[j2].ts;
+      }
     }
     return 0;
   }

@@ -1196,9 +1196,14 @@ async function renewTicket(){
   }
 
   let merged=false;
+  // Captura dados do ticket ATUAL (antigo) ANTES de qualquer merge
+  const oldNum=t.ticket;
+  const oldExpire=t.expire;
+  const oldStatus=t.status;
+
   if(dup){
     if(!confirm('Ticket '+newTicket+' já existe no sistema (importado pelo scraper).\n\nDeseja MESCLAR?\n• O trajeto e dados do ticket atual serão mantidos\n• O registro duplicado ('+newTicket+') será removido\n• O número será atualizado para '+newTicket))return;
-    // Copia expire do duplicado se disponível
+    // Copia expire do duplicado se disponível (expire do ticket NOVO)
     if(dup.expire&&dup.expire!=='—'&&(!t.expire||t.expire==='—'||new Date(dup.expire)>new Date(t.expire))){
       t.expire=dup.expire;
     }
@@ -1219,9 +1224,6 @@ async function renewTicket(){
   }else{
     if(!confirm('Renovar ticket?\n\nANTIGO: '+t.ticket+' (expira '+t.expire+')\nNOVO: '+newTicket+'\n\nO ticket manterá status até o vencimento do antigo.\nApós vencer, precisará de novas liberações.'))return;
   }
-  const oldNum=t.ticket;
-  const oldExpire=t.expire;
-  const oldStatus=t.status;
   // Cadeia de tickets anteriores (suporta múltiplas renovações)
   const prevChain=t.oldTicket2||t.old_ticket2||'';
   const fullChain=prevChain?oldNum+' → '+prevChain:oldNum;

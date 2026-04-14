@@ -2617,6 +2617,8 @@ function renderVelocity(fT,ps){
 
 function renderClearedStats(fTickets){
   var now=Date.now(),day1=now-864e5,day7=now-7*864e5,day30=now-30*864e5;
+  // "Hoje" = meia-noite local (não 24h rolling)
+  var todayMidnight=new Date();todayMidnight.setHours(0,0,0,0);var todayCutoff=todayMidnight.getTime();
   var cpf=_clearProjFilter||'';
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
   function getTicketClearDate(t){
@@ -2627,18 +2629,25 @@ function renderClearedStats(fTickets){
     }
     return 0;
   }
-  var c24=[],c7=[],c30=[],byU7={};
-  var seen24={},seen7={},seen30={};
+  /** Retorna YYYY-MM-DD em fuso LOCAL (não UTC) */
+  function localDateKey(ts){
+    var d=new Date(ts);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  var cToday=[],c24=[],c7=[],c30=[],byU7={};
+  var seenToday={},seen24={},seen7={},seen30={};
   for(var i=0;i<ft2.length;i++){
     var t=ft2[i];if(t.status==='Cancel')continue;
     var cd=getTicketClearDate(t);if(!cd)continue;
     var tk=t.ticket;
+    if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
     if(cd>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
     if(cd>=day7&&!seen7[tk]){c7.push(t);seen7[tk]=1;}
     if(cd>=day30&&!seen30[tk]){c30.push(t);seen30[tk]=1;}
   }
   if(utilCacheLoaded){for(var i2=0;i2<c7.length;i2++){var us=getTicketUtils(String(c7[i2].ticket).trim());for(var j=0;j<us.length;j++){if(us[j].status==='Clear'){if(!byU7[us[j].utility_name])byU7[us[j].utility_name]=0;byU7[us[j].utility_name]++;}}}}
-  var ft24=0,ft7=0,ft30=0;
+  var ftToday=0,ft24=0,ft7=0,ft30=0;
+  for(var iT=0;iT<cToday.length;iT++)ftToday+=(cToday[iT].footage||0);
   for(var i3=0;i3<c24.length;i3++)ft24+=(c24[i3].footage||0);
   for(var i4=0;i4<c7.length;i4++)ft7+=(c7[i4].footage||0);
   for(var i5=0;i5<c30.length;i5++)ft30+=(c30[i5].footage||0);
@@ -2648,13 +2657,13 @@ function renderClearedStats(fTickets){
 
   var topUtils=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,12);
 
-  // ── Bar chart: clareados por dia (últimos 7 dias) ──
+  // ── Bar chart: clareados por dia (últimos 7 dias) — FUSO LOCAL ──
   var dayBuckets={};
   var dayLabels=[];
   var dayNow=new Date();
   for(var d=6;d>=0;d--){
     var dd=new Date(dayNow);dd.setDate(dd.getDate()-d);
-    var dk=dd.toISOString().slice(0,10);
+    var dk=localDateKey(dd.getTime());
     dayBuckets[dk]=0;
     var dias=['dom','seg','ter','qua','qui','sex','sáb'];
     dayLabels.push({key:dk,label:dias[dd.getDay()]+', '+String(dd.getDate()).padStart(2,'0')});
@@ -2662,7 +2671,7 @@ function renderClearedStats(fTickets){
   for(var ib=0;ib<c7.length;ib++){
     var cdt=getTicketClearDate(c7[ib]);
     if(!cdt)continue;
-    var cdd=new Date(cdt).toISOString().slice(0,10);
+    var cdd=localDateKey(cdt);
     if(dayBuckets[cdd]!==undefined)dayBuckets[cdd]++;
   }
   var maxBar=Math.max.apply(null,dayLabels.map(function(d2){return dayBuckets[d2.key]||0;}))||1;
@@ -2688,20 +2697,20 @@ function renderClearedStats(fTickets){
     }
   }
 
-  // ── Clareados hoje ──
+  // ── Clareados hoje (meia-noite local, não 24h rolling) ──
   var todayHtml='';
-  if(c24.length){
-    todayHtml='<div style="margin-top:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Clareados hoje ('+c24.length+')</div>'
+  if(cToday.length){
+    todayHtml='<div style="margin-top:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Clareados hoje ('+cToday.length+')</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:4px">';
-    for(var it=0;it<c24.length;it++){
-      todayHtml+='<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);cursor:pointer;font-family:var(--mono)" onclick="openTicketDetail('+c24[it].id+')">'+esc(c24[it].ticket)+'</span>';
+    for(var it=0;it<cToday.length;it++){
+      todayHtml+='<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);cursor:pointer;font-family:var(--mono)" onclick="openTicketDetail('+cToday[it].id+')">'+esc(cToday[it].ticket)+'</span>';
     }
     todayHtml+='</div></div>';
   }
 
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="dash-card-title" style="margin-bottom:0">✅ Tickets Clareados</div>'+projSel+'</div>'
     +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'
-    +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c24.length+'</div><div style="font-size:10px;color:var(--green)">últimas 24h</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft24.toLocaleString()+' ft</div></div>'
+    +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+cToday.length+'</div><div style="font-size:10px;color:var(--green)">hoje</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ftToday.toLocaleString()+' ft</div></div>'
     +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green)">últimos 7 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft7.toLocaleString()+' ft</div></div>'
     +'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">'+c30.length+'</div><div style="font-size:10px;color:var(--muted)">últimos 30 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft30.toLocaleString()+' ft</div></div>'
     +'</div>'

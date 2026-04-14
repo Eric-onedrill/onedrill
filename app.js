@@ -330,7 +330,14 @@ async function saveTicketToDb(t){
   const data=ticketToDb(t);
   let res;
   if(typeof t.id==='number'&&t.id>0){
-    res=await sb.from('tickets').update(data).eq('id',t.id);
+    res=await sb.from('tickets').update(data).eq('id',t.id).select().single();
+    // Verifica se realmente gravou (RLS pode bloquear silenciosamente)
+    if(!res.error&&!res.data){
+      setSyncStatus(false,'Erro ao salvar');
+      toast('Erro: save não confirmado — verifique permissões no Supabase','danger');
+      console.error('[SaveTicket] Update returned no data — RLS may be blocking. id=',t.id);
+      return false;
+    }
   }else{
     res=await sb.from('tickets').insert(data).select().single();
     if(res.data)t.id=res.data.id;
@@ -1228,10 +1235,12 @@ async function renewTicket(){
   t.status_old=oldStatus;
   t.statusOld=oldStatus;
   // Atualiza para novo ticket
+  const savedProjectId=t.projectId;// salva referência do projeto ANTES
   t.ticket=newTicket;
   if(t.projectId)t.project_locked=true;// trava projeto ao renovar
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(merged?' (mesclado)':'')+' (graça até '+oldExpire+')',color:'#7c3aed'});
+  t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(merged?' (mesclado)':'')+' (graça até '+oldExpire+') 🔒 proj='+savedProjectId,color:'#7c3aed'});
+  console.log('[Renew] Salvando:',t.ticket,'projectId=',t.projectId,'locked=',t.project_locked);
   const ok=await saveTicketToDb(t);
   if(ok){
     toast('✅ Ticket renovado: '+oldNum+' → '+newTicket,'success');
@@ -1670,7 +1679,7 @@ function renderProjects(){
     const locations=[...new Set(ts.map(t=>cleanLoc(t.location)).filter(Boolean))];
     const locsFiltered=locations.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
     const locStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
-    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">📍 ${esc(locStr)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">${esc(p.name)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
+    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">📍 ${esc(locStr)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">${esc(p.name)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm" onclick="bulkMoveProject('${p.id}')" style="background:#7c3aed;color:white;border-color:#7c3aed">↔ Mover tickets</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
   g.innerHTML=active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>';
@@ -1869,8 +1878,40 @@ async function saveMoveProj(){
   t.projectId=document.getElementById('move-proj-sel').value;
   t.project_locked=!!t.projectId;// trava se tem projeto, destrava se "Sem projeto"
   t.history.push({ts:Date.now(),action:`Movido para projeto: ${projects.find(p=>p.id===t.projectId)?.name||'Sem projeto'}${t.project_locked?' 🔒':''}`,color:'#1a6cf0'});
-  await saveTicketToDb(t);
+  const ok=await saveTicketToDb(t);
+  if(!ok){toast('Erro ao mover — verifique permissões','danger');return;}
   closeModal('ov-move-proj');openTicketDetail(currentDetailId);syncAll();toast('Projeto atualizado!'+(t.project_locked?' (travado)':''),'success');
+}
+
+/** Move TODOS os tickets de um projeto para outro (bulk) */
+async function bulkMoveProject(fromPid){
+  const fromP=projects.find(x=>x.id===fromPid);if(!fromP)return;
+  const tks=tickets.filter(t=>t.projectId===fromPid);
+  if(!tks.length){toast('Nenhum ticket neste projeto.','warn');return;}
+  const otherProjects=projects.filter(p=>p.id!==fromPid&&p.status!=='Completed');
+  if(!otherProjects.length){toast('Nenhum outro projeto disponível.','warn');return;}
+  const opts=otherProjects.map(p=>esc(projDropLabel(p))).join('\n');
+  const target=prompt('Mover '+tks.length+' tickets de "'+fromP.name+'" para qual projeto?\n\nDigite o número ou nome:\n'+otherProjects.map((p,i)=>(i+1)+'. '+projDropLabel(p)).join('\n'));
+  if(!target)return;
+  const idx=parseInt(target);
+  const destP=idx>0&&idx<=otherProjects.length?otherProjects[idx-1]:otherProjects.find(p=>p.name.toLowerCase().includes(target.toLowerCase()));
+  if(!destP){toast('Projeto não encontrado.','danger');return;}
+  if(!confirm('Confirma mover '+tks.length+' tickets de:\n  "'+fromP.name+'"\npara:\n  "'+destP.name+'"?\n\nTodos ficarão com projeto TRAVADO 🔒'))return;
+  if(!await requireAuth())return;
+  setSyncStatus(true,'Movendo '+tks.length+' tickets...');
+  let ok=0,fail=0;
+  for(const t of tks){
+    t.projectId=destP.id;
+    t.project_locked=true;
+    t.history=t.history||[];
+    t.history.push({ts:Date.now(),action:`Bulk move: ${fromP.name} → ${destP.name} 🔒`,color:'#1a6cf0'});
+    const saved=await saveTicketToDb(t);
+    if(saved)ok++;else{fail++;t.projectId=fromPid;}// reverte local se falhou
+  }
+  syncAll();
+  if(fail===0)toast(`✅ ${ok} tickets movidos para "${destP.name}" (🔒 travados)`,'success');
+  else toast(`⚠ ${ok} movidos, ${fail} falharam — verifique permissões`,'danger');
+  setSyncStatus(true,'Concluído');
 }
 
 function shareProject(pid){

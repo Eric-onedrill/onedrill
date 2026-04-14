@@ -82,9 +82,14 @@ const debouncedContacts=debounce(()=>renderContacts(),250);
 
 /* ═══════════ 4. SUPERSEDED SET ═══════════ */
 function rebuildSupersededSet(){
-  supersededSet=new Set(
-    tickets.map(t=>String(t.oldTicket2||'').trim()).filter(Boolean)
-  );
+  supersededSet=new Set();
+  for(const t of tickets){
+    const chain=String(t.oldTicket2||'').trim();
+    if(!chain)continue;
+    // Suporta cadeias: "OLD1 → OLD2 → OLD3" → adiciona cada num individualmente
+    const parts=chain.split(/\s*→\s*/);
+    for(const p of parts){const num=p.trim();if(num)supersededSet.add(num);}
+  }
 }
 function isSuperseded(t){
   return supersededSet.has(String(t.ticket||'').trim());
@@ -1531,7 +1536,7 @@ function renderDash(){
   const damageFt=damageT.reduce((s,t)=>s+(t.footage||0),0);
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
-  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&t.status!=='Closed'&&t.status!=='Cancel';});
+  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&(t.status==='Open'||t.status==='Damage');});
 
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
@@ -1940,9 +1945,9 @@ function enterSharedView(pid){
 
   // Expiring tickets alert for field view
   const now=new Date();
-  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<now);
-  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
-  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel')return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
+  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&(t.status==='Open'||t.status==='Damage')&&!isSuperseded(t)&&_eod(t.expire)<now);
+  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
+  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
 
   const hasExpired=expired.length>0;
   if(hasExpired||expiring3d.length){
@@ -2343,7 +2348,7 @@ function exportExpiring(){
   const f=filterTickets({}).filter(t=>{
     if(!t.expire||t.expire==='—')return false;
     const d=_eod(t.expire);const diff=(d-Date.now())/86400000;
-    return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel';
+    return diff>=0&&diff<=days&&(t.status==='Open'||t.status==='Damage');
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
   const wb=XLSX.utils.book_new();
@@ -2468,7 +2473,8 @@ function buildNotifications(){
   try{
     const notifs=[];const now=Date.now(),day3=3*864e5;
     const expiring=tickets.filter(t=>{
-      if(!t.expire||t.expire==='—'||t.status==='Closed'||t.status==='Cancel'||isSuperseded(t))return false;
+      if(!t.expire||t.expire==='—'||isSuperseded(t))return false;
+      if(t.status!=='Open'&&t.status!=='Damage')return false;
       if(isRenewed(t)&&isInRenewalGrace(t))return false;
       const d=_eod(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;
     });

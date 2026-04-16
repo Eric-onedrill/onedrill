@@ -2354,14 +2354,14 @@ function exportExpiring(){
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
   const wb=XLSX.utils.book_new();
-  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
+  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes','Old Ticket #','Expire Old']];
   for(const t of f){
     const proj=projects.find(p=>p.id===t.projectId)?.name||'';
     const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
-    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);
+    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends,t.oldTicket2||'',t.expireOld||'']);
   }
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30}];
+  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30},{wch:16},{wch:12}];
   XLSX.utils.book_append_sheet(wb,ws,'Vencendo');
   XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(f.length+' tickets exportados','success');
@@ -2377,7 +2377,7 @@ function exportFiltered(){
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company]),['','','','','','','TOTAL:',totalFt,'','','','','','']];
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||'']),['','','','','','','TOTAL:',totalFt,'','','','','','','','']];
   const ws=XLSX.utils.aoa_to_sheet(tData);
   XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   XLSX.writeFile(wb,'OneDrill_Filtrado_'+new Date().toISOString().slice(0,10)+'.xlsx');
@@ -2386,7 +2386,7 @@ function exportFiltered(){
 
 function exportExcel(){
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company])];
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||''])];
   const ws=XLSX.utils.aoa_to_sheet(tData);XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   const pData=[['Nome','Cliente','Estado','Status','Total Feet','Tickets'],...projects.map(p=>[p.name,p.client,p.state,p.status,p.totalFeet,tickets.filter(t=>t.projectId===p.id).length])];
   const wp=XLSX.utils.aoa_to_sheet(pData);XLSX.utils.book_append_sheet(wb,wp,'Projetos');
@@ -2399,7 +2399,7 @@ function exportUtilTickets(utilName){
   const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
   if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
   const wb=XLSX.utils.book_new();
-  const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||''])];
+  const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto','Old Ticket #','Expire Old'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||'',t.oldTicket2||'',t.expireOld||''])];
   const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
   XLSX.writeFile(wb,'OneDrill_'+utilName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(tks.length+' tickets exportados — '+utilName,'success');
@@ -2411,11 +2411,11 @@ function exportAllPending(){
   const rows=[];
   for(const t of openTickets){
     const pends=getTicketPendingUtils(t.ticket);if(!pends.length)continue;
-    for(const p of pends)rows.push([t.ticket,p.utility_name,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(pr=>pr.id===t.projectId)?.name||'']);
+    for(const p of pends)rows.push([t.ticket,p.utility_name,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(pr=>pr.id===t.projectId)?.name||'',t.oldTicket2||'',t.expireOld||'']);
   }
   if(!rows.length){toast('Nenhuma pendência','warn');return;}
   const wb=XLSX.utils.book_new();
-  const data=[['Ticket #','Utility Pendente','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto'],...rows];
+  const data=[['Ticket #','Utility Pendente','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto','Old Ticket #','Expire Old'],...rows];
   const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Todas Pendentes');
   XLSX.writeFile(wb,'OneDrill_Pendentes_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(rows.length+' pendências exportadas','success');
@@ -2424,14 +2424,14 @@ function exportAllPending(){
 function exportPrivateLocator(){
   if(!utilCacheLoaded){toast('Aguarde carregar dados','warn');return;}
   const active=filterTickets({}).filter(t=>t.status!=='Closed'&&t.status!=='Cancel');
-  const rows=[['Ticket','Status','Local','Estado','Utility','Resposta','Expira']];
+  const rows=[['Ticket','Status','Local','Estado','Utility','Resposta','Expira','Old Ticket #','Expire Old']];
   for(const t of active){
     const tkey=String(t.ticket).trim();
     const utils=getTicketUtils(tkey);
     for(const u of utils){
       const rt=(u.response_text||'').toLowerCase();
       if(rt.includes('3h')||rt.includes('privately owned')||rt.includes('private facility owner')){
-        rows.push([t.ticket,t.status,t.location,t.state,u.utility_name,u.response_text||'',t.expire||'']);
+        rows.push([t.ticket,t.status,t.location,t.state,u.utility_name,u.response_text||'',t.expire||'',t.oldTicket2||'',t.expireOld||'']);
       }
     }
   }

@@ -1543,7 +1543,7 @@ function renderDash(){
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
       const a=(h.action||'').toLowerCase();
-      return h.ts>=start&&h.ts<end&&(status==='Open'?(a.includes('importado')||a.includes('ticket criado')):(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear')));
+      return h.ts>=start&&h.ts<end&&(status==='Open'?(a.includes('importado')||a.includes('ticket criado')):(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear'));
     })).length;
   }
   const openWk=wCount('Open',now-week,now),openPrev=wCount('Open',now-2*week,now-week);
@@ -2567,7 +2567,7 @@ function renderAnalytics(){
     const c4w_bins=[0,0,0,0];
     for(const t2 of ts){
       if(!t2.history)continue;
-      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return a2.includes('→ clear')||a2.includes('auto 811')||a2.includes('auto-clear');}).pop();
+      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')&&!a2.includes('revertido'))||a2.includes('auto-clear');}).pop();
       if(!clearEvt||!clearEvt.ts)continue;
       const wAgo=Math.floor((now-clearEvt.ts)/week);
       if(wAgo>=0&&wAgo<4)c4w_bins[wAgo]+=(t2.footage||0);
@@ -2633,7 +2633,7 @@ function renderClearedStats(fTickets){
     if(!t.history||!t.history.length)return 0;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
-      if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){return t.history[j].ts;}
+      if(a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){return t.history[j].ts;}
     }
     return 0;
   }
@@ -2771,7 +2771,7 @@ function renderWeeklyEvolution(fTickets){
     const now=Date.now(),week=7*864e5;
     const allF=dashStateVal?tickets.filter(t=>t.state===dashStateVal):tickets;
     function countInRange(start,end,matchFn){return allF.filter(t=>(t.history||[]).some(h=>h.ts>=start&&h.ts<end&&matchFn(h))).length;}
-    function isClear(h){const a=(h.action||'').toLowerCase();return a.includes('clear')&&(a.includes('→ clear')||a.includes('auto-clear')||a.includes('auto 811')||a.includes('status manual'));}
+    function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear');}
     function isOpen(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
     function isClosed(h){const a=(h.action||'').toLowerCase();return a.includes('→ closed')||a.includes('completed');}
     const weeks=[];

@@ -656,7 +656,9 @@ async function doLogout(){
 
 /* ═══════════ 11. APP SHELL ═══════════ */
 function enterApp(){
-  document.getElementById('app-shell').style.display='grid';
+  const shell=document.getElementById('app-shell');
+  shell.classList.remove('hidden');
+  shell.style.display='grid';
   document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';

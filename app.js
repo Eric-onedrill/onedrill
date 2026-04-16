@@ -1084,7 +1084,20 @@ function openTicketDetail(id){
     return'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#b45309">⚠ Carência — Ticket anterior era '+esc(oldSt)+'</div><div style="font-size:11px;color:#92400e;margin-top:3px">O ticket antigo ('+oldNum+') <strong>não estava liberado</strong>. Status mantido como <strong>'+esc(oldSt)+'</strong> até '+graceCutoverDate(t)+'. Após essa data, segue as respostas do ticket novo.</div></div>';
   })();
 
-  document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet
+  // ── WATCH & PROTECT / PRIVATE LOCATOR BANNERS ──
+  const pendingText=(t.pending||'').toUpperCase();
+  const wpBanner=pendingText.includes('WATCH & PROTECT')
+    ?'<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:var(--r);padding:12px 14px;margin-bottom:10px;cursor:pointer" onclick="alert(\'⚠️ WATCH & PROTECT\\n\\nEste ticket tem utility com instalação CRÍTICA.\\nUm representante da utility DEVE estar presente durante toda a escavação.\\n\\nNÃO inicie a escavação sem a presença do técnico.\\nSe não entrarem em contato 24h antes, ligue para o número listado no campo Pending.\')">'
+    +'<div style="font-size:13px;font-weight:700;color:#dc2626">⚠️ WATCH & PROTECT — Representante obrigatório</div>'
+    +'<div style="font-size:11px;color:#991b1b;margin-top:4px">Utility com instalação crítica exige presença de técnico durante escavação. <strong>Toque aqui para mais detalhes.</strong></div>'
+    +'</div>':'';
+  const pvtBanner=pendingText.includes('PRIVATE LOCATOR')
+    ?'<div style="background:#faf5ff;border:2px solid #d8b4fe;border-radius:var(--r);padding:12px 14px;margin-bottom:10px">'
+    +'<div style="font-size:13px;font-weight:700;color:#7c3aed">🔒 PRIVATE LOCATOR — Locator privado necessário</div>'
+    +'<div style="font-size:11px;color:#6b21a8;margin-top:4px">Este ticket tem utilities com instalações privadas (3H). Contrate um locator privado antes de escavar.</div>'
+    +'</div>':'';
+
+  document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet+wpBanner+pvtBanner
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
@@ -1628,8 +1641,9 @@ function renderDash(){
     +'</tr>';}).join('')+'</tbody></table></div>':'')
   +'</div>'
 
-  // Cleared stats, private locator, sync timer
+  // Cleared stats, W&P alert, private locator, sync timer
   +renderClearedStats(fTickets)
+  +renderWatchAndProtectAlert(fTickets)
   +renderPrivateLocatorAlert(fTickets)
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';
 
@@ -2726,6 +2740,42 @@ function renderClearedStats(fTickets){
     +'<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Clareados por dia (últimos 7 dias)</div>'+barHtml+todayHtml+'</div>'
     +'<div>'+utilListHtml+'</div>'
     +'</div>'
+    +'</div></div>';
+}
+
+function renderWatchAndProtectAlert(fTickets){
+  if(!utilCacheLoaded)return'';
+  const wpTickets=[];
+  const active=fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));
+  for(const t of active){
+    const tkey=String(t.ticket).trim();
+    const utils=getTicketUtils(tkey);
+    const wpUtils=[];
+    for(const u of utils){
+      const rt=(u.response_text||'').toLowerCase();
+      if(rt.includes('watch and protect'))wpUtils.push(u.utility_name);
+    }
+    const pending=(t.pending||'').toLowerCase();
+    if(pending.includes('watch & protect')&&!wpUtils.length)wpUtils.push('(ver pending)');
+    if(wpUtils.length)wpTickets.push({t,utils:wpUtils});
+  }
+  if(!wpTickets.length)return'';
+  return'<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+    +'<span style="font-size:12px;font-weight:700;color:#dc2626">⚠️ Watch & Protect — Representante Obrigatório ('+wpTickets.length+' ticket'+(wpTickets.length>1?'s':'')+')</span>'
+    +'</div>'
+    +'<div style="font-size:10px;color:#991b1b;margin-bottom:8px">Estes tickets têm utilities com instalação <strong>CRÍTICA</strong>. Um representante da utility <strong>DEVE</strong> estar presente durante toda a escavação. NÃO inicie sem a presença do técnico.</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+    +wpTickets.map(({t,utils})=>{
+      const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
+      return'<div style="background:white;border:1px solid #fca5a5;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center">'
+        +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
+        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span></div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
+        +'<div style="font-size:9px;color:#dc2626;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
+        +'</div>';
+    }).join('')
     +'</div></div>';
 }
 

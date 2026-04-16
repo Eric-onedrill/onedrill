@@ -3104,6 +3104,71 @@ async function manualRefresh(){
   }
 }
 
+/* ═══════════ 27.5 MODAL DETAIL — Mobile Tabs & More Menu ═══════════ */
+
+/** Troca de aba no modal de detalhes (mobile) */
+function setDetailTab(tab){
+  const modal=document.querySelector('#ov-detail .modal-detail');
+  if(!modal)return;
+  // Remove any previous tab-* class
+  modal.classList.forEach(c=>{if(c.startsWith('tab-'))modal.classList.remove(c);});
+  modal.classList.add('tab-'+tab);
+  // Update tab buttons
+  modal.querySelectorAll('.det-tab').forEach(btn=>{
+    const active=btn.dataset.tab===tab;
+    btn.classList.toggle('active',active);
+    btn.setAttribute('aria-selected',active?'true':'false');
+  });
+  // Invalida o tamanho do mapa mini quando a aba do mapa abre
+  // (Leaflet não desenha em container invisível)
+  if(tab==='mapa'&&miniMap){
+    setTimeout(()=>{try{miniMap.invalidateSize();}catch(e){}},50);
+  }
+}
+
+/** Toggle do menu "mais ações" no header mobile */
+function toggleDetMore(){
+  const actions=document.querySelector('#ov-detail .det-head-actions');
+  if(actions)actions.classList.toggle('more-open');
+}
+
+/** Toggle da seção colapsável de Status Manual */
+function toggleManualStatus(){
+  const toggle=document.querySelector('#field-status-section .fsection-toggle');
+  const body=document.getElementById('manual-status-body');
+  if(!toggle||!body)return;
+  const isOpen=body.classList.toggle('open');
+  toggle.setAttribute('aria-expanded',isOpen?'true':'false');
+}
+
+/** Reset do estado das abas e menus quando o modal abre */
+function resetDetailTabState(){
+  setDetailTab('info');
+  const actions=document.querySelector('#ov-detail .det-head-actions');
+  if(actions)actions.classList.remove('more-open');
+  const body=document.getElementById('manual-status-body');
+  const toggle=document.querySelector('#field-status-section .fsection-toggle');
+  if(body)body.classList.remove('open');
+  if(toggle)toggle.setAttribute('aria-expanded','false');
+}
+
+/* Tab click listener (event delegation) */
+document.addEventListener('click',e=>{
+  const tab=e.target.closest('.det-tab');
+  if(tab&&tab.dataset.tab)setDetailTab(tab.dataset.tab);
+});
+
+/* Hook: reseta estado das abas toda vez que openTicketDetail é chamado */
+(function hookDetailOpen(){
+  const _origOpen=window.openTicketDetail;
+  if(typeof _origOpen!=='function')return;
+  window.openTicketDetail=function(id){
+    const r=_origOpen.apply(this,arguments);
+    setTimeout(resetDetailTabState,0);
+    return r;
+  };
+})();
+
 /* ═══════════ 28. INIT ═══════════ */
 window.addEventListener('load',async()=>{
   window.addEventListener('offline',()=>{toast('⚠ Sem conexão — alterações não serão salvas','danger');setSyncStatus(false,'Offline');});

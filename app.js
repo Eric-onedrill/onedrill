@@ -1084,20 +1084,7 @@ function openTicketDetail(id){
     return'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#b45309">⚠ Carência — Ticket anterior era '+esc(oldSt)+'</div><div style="font-size:11px;color:#92400e;margin-top:3px">O ticket antigo ('+oldNum+') <strong>não estava liberado</strong>. Status mantido como <strong>'+esc(oldSt)+'</strong> até '+graceCutoverDate(t)+'. Após essa data, segue as respostas do ticket novo.</div></div>';
   })();
 
-  // ── WATCH & PROTECT / PRIVATE LOCATOR BANNERS ──
-  const pendingText=(t.pending||'').toUpperCase();
-  const wpBanner=pendingText.includes('WATCH & PROTECT')
-    ?'<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:var(--r);padding:12px 14px;margin-bottom:10px;cursor:pointer" onclick="alert(\'⚠️ WATCH & PROTECT\\n\\nEste ticket tem utility com instalação CRÍTICA.\\nUm representante da utility DEVE estar presente durante toda a escavação.\\n\\nNÃO inicie a escavação sem a presença do técnico.\\nSe não entrarem em contato 24h antes, ligue para o número listado no campo Pending.\')">'
-    +'<div style="font-size:13px;font-weight:700;color:#dc2626">⚠️ WATCH & PROTECT — Representante obrigatório</div>'
-    +'<div style="font-size:11px;color:#991b1b;margin-top:4px">Utility com instalação crítica exige presença de técnico durante escavação. <strong>Toque aqui para mais detalhes.</strong></div>'
-    +'</div>':'';
-  const pvtBanner=pendingText.includes('PRIVATE LOCATOR')
-    ?'<div style="background:#faf5ff;border:2px solid #d8b4fe;border-radius:var(--r);padding:12px 14px;margin-bottom:10px">'
-    +'<div style="font-size:13px;font-weight:700;color:#7c3aed">🔒 PRIVATE LOCATOR — Locator privado necessário</div>'
-    +'<div style="font-size:11px;color:#6b21a8;margin-top:4px">Este ticket tem utilities com instalações privadas (3H). Contrate um locator privado antes de escavar.</div>'
-    +'</div>':'';
-
-  document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet+wpBanner+pvtBanner
+  document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
@@ -1556,7 +1543,7 @@ function renderDash(){
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
       const a=(h.action||'').toLowerCase();
-      return h.ts>=start&&h.ts<end&&(status==='Open'?(a.includes('importado')||a.includes('ticket criado')):(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear'));
+      return h.ts>=start&&h.ts<end&&(status==='Open'?(a.includes('importado')||a.includes('ticket criado')):(a.includes('→ clear')||a.includes('auto 811')||a.includes('auto-clear')));
     })).length;
   }
   const openWk=wCount('Open',now-week,now),openPrev=wCount('Open',now-2*week,now-week);
@@ -1641,9 +1628,8 @@ function renderDash(){
     +'</tr>';}).join('')+'</tbody></table></div>':'')
   +'</div>'
 
-  // Cleared stats, W&P alert, private locator, sync timer
+  // Cleared stats, private locator, sync timer
   +renderClearedStats(fTickets)
-  +renderWatchAndProtectAlert(fTickets)
   +renderPrivateLocatorAlert(fTickets)
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';
 
@@ -2368,14 +2354,14 @@ function exportExpiring(){
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
   const wb=XLSX.utils.book_new();
-  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes','Old Ticket #','Expire Old']];
+  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
   for(const t of f){
     const proj=projects.find(p=>p.id===t.projectId)?.name||'';
     const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
-    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends,t.oldTicket2||'',t.expireOld||'']);
+    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);
   }
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30},{wch:16},{wch:12}];
+  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30}];
   XLSX.utils.book_append_sheet(wb,ws,'Vencendo');
   XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(f.length+' tickets exportados','success');
@@ -2391,7 +2377,7 @@ function exportFiltered(){
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||'']),['','','','','','','TOTAL:',totalFt,'','','','','','','','']];
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company]),['','','','','','','TOTAL:',totalFt,'','','','','','']];
   const ws=XLSX.utils.aoa_to_sheet(tData);
   XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   XLSX.writeFile(wb,'OneDrill_Filtrado_'+new Date().toISOString().slice(0,10)+'.xlsx');
@@ -2400,7 +2386,7 @@ function exportFiltered(){
 
 function exportExcel(){
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||''])];
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company])];
   const ws=XLSX.utils.aoa_to_sheet(tData);XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   const pData=[['Nome','Cliente','Estado','Status','Total Feet','Tickets'],...projects.map(p=>[p.name,p.client,p.state,p.status,p.totalFeet,tickets.filter(t=>t.projectId===p.id).length])];
   const wp=XLSX.utils.aoa_to_sheet(pData);XLSX.utils.book_append_sheet(wb,wp,'Projetos');
@@ -2413,7 +2399,7 @@ function exportUtilTickets(utilName){
   const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
   if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
   const wb=XLSX.utils.book_new();
-  const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto','Old Ticket #','Expire Old'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||'',t.oldTicket2||'',t.expireOld||''])];
+  const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||''])];
   const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Pendentes');
   XLSX.writeFile(wb,'OneDrill_'+utilName.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(tks.length+' tickets exportados — '+utilName,'success');
@@ -2425,11 +2411,11 @@ function exportAllPending(){
   const rows=[];
   for(const t of openTickets){
     const pends=getTicketPendingUtils(t.ticket);if(!pends.length)continue;
-    for(const p of pends)rows.push([t.ticket,p.utility_name,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(pr=>pr.id===t.projectId)?.name||'',t.oldTicket2||'',t.expireOld||'']);
+    for(const p of pends)rows.push([t.ticket,p.utility_name,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(pr=>pr.id===t.projectId)?.name||'']);
   }
   if(!rows.length){toast('Nenhuma pendência','warn');return;}
   const wb=XLSX.utils.book_new();
-  const data=[['Ticket #','Utility Pendente','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto','Old Ticket #','Expire Old'],...rows];
+  const data=[['Ticket #','Utility Pendente','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto'],...rows];
   const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,'Todas Pendentes');
   XLSX.writeFile(wb,'OneDrill_Pendentes_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(rows.length+' pendências exportadas','success');
@@ -2438,14 +2424,14 @@ function exportAllPending(){
 function exportPrivateLocator(){
   if(!utilCacheLoaded){toast('Aguarde carregar dados','warn');return;}
   const active=filterTickets({}).filter(t=>t.status!=='Closed'&&t.status!=='Cancel');
-  const rows=[['Ticket','Status','Local','Estado','Utility','Resposta','Expira','Old Ticket #','Expire Old']];
+  const rows=[['Ticket','Status','Local','Estado','Utility','Resposta','Expira']];
   for(const t of active){
     const tkey=String(t.ticket).trim();
     const utils=getTicketUtils(tkey);
     for(const u of utils){
       const rt=(u.response_text||'').toLowerCase();
       if(rt.includes('3h')||rt.includes('privately owned')||rt.includes('private facility owner')){
-        rows.push([t.ticket,t.status,t.location,t.state,u.utility_name,u.response_text||'',t.expire||'',t.oldTicket2||'',t.expireOld||'']);
+        rows.push([t.ticket,t.status,t.location,t.state,u.utility_name,u.response_text||'',t.expire||'']);
       }
     }
   }
@@ -2581,7 +2567,7 @@ function renderAnalytics(){
     const c4w_bins=[0,0,0,0];
     for(const t2 of ts){
       if(!t2.history)continue;
-      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')&&!a2.includes('revertido'))||a2.includes('auto-clear');}).pop();
+      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return a2.includes('→ clear')||a2.includes('auto 811')||a2.includes('auto-clear');}).pop();
       if(!clearEvt||!clearEvt.ts)continue;
       const wAgo=Math.floor((now-clearEvt.ts)/week);
       if(wAgo>=0&&wAgo<4)c4w_bins[wAgo]+=(t2.footage||0);
@@ -2647,7 +2633,7 @@ function renderClearedStats(fTickets){
     if(!t.history||!t.history.length)return 0;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
-      if(a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){return t.history[j].ts;}
+      if(a.indexOf('\u2192 clear')>=0||a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){return t.history[j].ts;}
     }
     return 0;
   }
@@ -2743,42 +2729,6 @@ function renderClearedStats(fTickets){
     +'</div></div>';
 }
 
-function renderWatchAndProtectAlert(fTickets){
-  if(!utilCacheLoaded)return'';
-  const wpTickets=[];
-  const active=fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));
-  for(const t of active){
-    const tkey=String(t.ticket).trim();
-    const utils=getTicketUtils(tkey);
-    const wpUtils=[];
-    for(const u of utils){
-      const rt=(u.response_text||'').toLowerCase();
-      if(rt.includes('watch and protect'))wpUtils.push(u.utility_name);
-    }
-    const pending=(t.pending||'').toLowerCase();
-    if(pending.includes('watch & protect')&&!wpUtils.length)wpUtils.push('(ver pending)');
-    if(wpUtils.length)wpTickets.push({t,utils:wpUtils});
-  }
-  if(!wpTickets.length)return'';
-  return'<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:14px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:700;color:#dc2626">⚠️ Watch & Protect — Representante Obrigatório ('+wpTickets.length+' ticket'+(wpTickets.length>1?'s':'')+')</span>'
-    +'</div>'
-    +'<div style="font-size:10px;color:#991b1b;margin-bottom:8px">Estes tickets têm utilities com instalação <strong>CRÍTICA</strong>. Um representante da utility <strong>DEVE</strong> estar presente durante toda a escavação. NÃO inicie sem a presença do técnico.</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
-    +wpTickets.map(({t,utils})=>{
-      const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
-      return'<div style="background:white;border:1px solid #fca5a5;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center">'
-        +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
-        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span></div>'
-        +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
-        +'<div style="font-size:9px;color:#dc2626;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
-        +'</div>';
-    }).join('')
-    +'</div></div>';
-}
-
 function renderPrivateLocatorAlert(fTickets){
   if(!utilCacheLoaded)return'';
   const pvtTickets=[];
@@ -2821,7 +2771,7 @@ function renderWeeklyEvolution(fTickets){
     const now=Date.now(),week=7*864e5;
     const allF=dashStateVal?tickets.filter(t=>t.state===dashStateVal):tickets;
     function countInRange(start,end,matchFn){return allF.filter(t=>(t.history||[]).some(h=>h.ts>=start&&h.ts<end&&matchFn(h))).length;}
-    function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear');}
+    function isClear(h){const a=(h.action||'').toLowerCase();return a.includes('clear')&&(a.includes('→ clear')||a.includes('auto-clear')||a.includes('auto 811')||a.includes('status manual'));}
     function isOpen(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
     function isClosed(h){const a=(h.action||'').toLowerCase();return a.includes('→ closed')||a.includes('completed');}
     const weeks=[];

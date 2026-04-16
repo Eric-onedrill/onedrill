@@ -534,38 +534,28 @@
 
 <!-- MODAL: Ticket Detail -->
 <div class="overlay" id="ov-detail">
-  <div class="modal wide modal-detail">
+  <div class="modal wide">
     <div class="modal-head">
-      <div class="det-head-title">
+      <div>
         <div class="mtitle" id="det-title"></div>
         <div class="det-subtitle" id="det-sub"></div>
       </div>
       <div class="det-head-actions">
-        <button class="btn btn-sm btn-draw hidden det-action-secondary" id="det-draw-btn" data-action="go-draw-field">✏️ Desenhar</button>
-        <button class="btn btn-sm btn-accent det-action-secondary" id="det-proj-btn" data-action="open-move-proj">📁 Projeto</button>
-        <button class="btn btn-sm hidden det-action-secondary" id="det-edit-btn" data-action="edit-current-ticket">Editar</button>
-        <button class="btn btn-sm hidden det-action-secondary" id="det-renew-btn" onclick="renewTicket()" style="background:#7c3aed;color:white;border-color:#7c3aed">🔄 Renovar</button>
+        <button class="btn btn-sm btn-draw hidden" id="det-draw-btn" data-action="go-draw-field">✏️ Desenhar</button>
+        <button class="btn btn-sm btn-accent" id="det-proj-btn" data-action="open-move-proj">📁 Projeto</button>
+        <button class="btn btn-sm hidden" id="det-edit-btn" data-action="edit-current-ticket">Editar</button>
+        <button class="btn btn-sm hidden" id="det-renew-btn" onclick="renewTicket()" style="background:#7c3aed;color:white;border-color:#7c3aed">🔄 Renovar</button>
         <button class="btn btn-sm" data-action="navigate-from-detail">🗺 Navegar</button>
-        <button class="btn btn-sm det-more-btn" data-action="toggle-det-more" aria-label="Mais ações">⋯</button>
         <button class="modal-close" data-close="ov-detail">×</button>
       </div>
     </div>
-
-    <!-- Mobile-only tabs bar -->
-    <div class="det-tabs" role="tablist">
-      <button class="det-tab active" data-tab="info" role="tab" aria-selected="true">Info</button>
-      <button class="det-tab" data-tab="811" role="tab">811</button>
-      <button class="det-tab" data-tab="mapa" role="tab">Mapa</button>
-      <button class="det-tab" data-tab="historico" role="tab">Histórico</button>
-    </div>
-
     <div class="det-grid">
-      <div class="det-col det-col--left">
-        <div class="fsection fsection--first" data-tab-panel="info">
+      <div>
+        <div class="fsection fsection--first">
           <div class="fsection-lbl">Informações</div>
           <div id="det-info"></div>
         </div>
-        <div class="fsection" data-tab-panel="811">
+        <div class="fsection">
           <div class="fsection-header">
             <div class="fsection-lbl fsection-lbl--inline">Utilities 811</div>
             <span class="util-summary" id="util-summary"></span>
@@ -574,35 +564,32 @@
             <div class="util-loading">Carregando...</div>
           </div>
         </div>
-        <div class="fsection fsection--collapsible" id="field-status-section" data-tab-panel="info">
-          <button class="fsection-toggle" data-action="toggle-manual-status" aria-expanded="false">
-            <span class="fsection-lbl fsection-lbl--inline">Status Manual</span>
+        <div class="fsection" id="field-status-section">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Status Manual</div>
             <span class="locked-badge hidden" id="det-lock-badge">🔒 Travado</span>
-            <span class="fsection-toggle-arrow">▶</span>
-          </button>
-          <div class="fsection-collapsible-body" id="manual-status-body">
-            <div class="manual-status-hint">Ao definir manualmente, a automação 811 não vai sobrescrever.</div>
-            <div class="manual-status-grid">
-              <button class="btn btn-status-clear" data-manual-status="Clear">✅ Clear</button>
-              <button class="btn btn-status-closed" data-manual-status="Closed">✔ Completed</button>
-              <button class="btn btn-status-open" data-manual-status="Open">🔴 Open</button>
-              <button class="btn btn-status-damage" data-manual-status="Damage">⚠ Damage</button>
-            </div>
-            <button class="btn btn-unlock-status hidden" id="det-unlock-btn" data-action="unlock-status">🔓 Desbloquear automação</button>
           </div>
+          <div class="manual-status-hint">Ao definir manualmente, a automação 811 não vai sobrescrever.</div>
+          <div class="manual-status-grid">
+            <button class="btn btn-status-clear" data-manual-status="Clear">✅ Clear</button>
+            <button class="btn btn-status-closed" data-manual-status="Closed">✔ Completed</button>
+            <button class="btn btn-status-open" data-manual-status="Open">🔴 Open</button>
+            <button class="btn btn-status-damage" data-manual-status="Damage">⚠ Damage</button>
+          </div>
+          <button class="btn btn-unlock-status hidden" id="det-unlock-btn" data-action="unlock-status">🔓 Desbloquear automação</button>
         </div>
       </div>
-      <div class="det-col det-col--right">
-        <div class="fsection fsection--first" data-tab-panel="mapa">
+      <div>
+        <div class="fsection fsection--first">
           <div class="fsection-header">
             <div class="fsection-lbl fsection-lbl--inline">Mapa do ticket</div>
             <button class="btn btn-sm" data-action="open-full-map">Ver no mapa →</button>
           </div>
           <div id="mini-map-container"></div>
         </div>
-        <div class="fsection" data-tab-panel="historico">
-          <div class="fsection-header">
-            <div class="fsection-lbl fsection-lbl--inline">Histórico</div>
+        <div class="fsection">
+          <div class="fsection-header" onclick="var el=document.getElementById('det-hist');var ar=this.querySelector('.hist-arrow');if(el.style.display==='none'){el.style.display='';ar.textContent='▼';}else{el.style.display='none';ar.textContent='▶';}" style="cursor:pointer">
+            <div class="fsection-lbl fsection-lbl--inline">Histórico <span class="hist-arrow" style="font-size:10px;color:var(--muted)">▼</span></div>
           </div>
           <div class="det-hist-scroll" id="det-hist"></div>
         </div>
@@ -687,8 +674,6 @@
     'navigate-from-detail':  () => openNavigation(currentDetailId),
     'open-full-map':         () => openFullMap(currentDetailId),
     'unlock-status':         () => unlockStatus(currentDetailId),
-    'toggle-det-more':       () => toggleDetMore(),
-    'toggle-manual-status':  () => toggleManualStatus(),
   };
 
   document.addEventListener('click', e => {

@@ -651,6 +651,7 @@ async function doLogout(){
   document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('pg-dash').classList.add('active');
+  document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('login-screen').style.display='flex';
 }
 
@@ -2013,6 +2014,7 @@ function exitSharedView(){
   history.replaceState(null,'',window.location.pathname);
   const fb=document.getElementById('field-expiring-banner');if(fb)fb.remove();
   const fa=document.getElementById('field-alert-overlay');if(fa)fa.remove();
+  document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('login-screen').style.display='flex';
 }
 
@@ -3113,7 +3115,7 @@ window.addEventListener('load',async()=>{
   document.querySelector('#loading-screen div:last-child').textContent='Conectando ao Supabase...';
   const ok=await initSupabase();
   document.getElementById('loading-screen').style.display='none';
-  if(!ok){document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
+  if(!ok){document.getElementById('login-screen').classList.remove('hidden');document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
   if(checkProjectUrl())return;
   try{
     const{data:{session}}=await sb.auth.getSession();
@@ -3123,5 +3125,6 @@ window.addEventListener('load',async()=>{
       return;
     }
   }catch(e){console.log('[Auth] No session:',e);}
+  document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('login-screen').style.display='flex';
 });

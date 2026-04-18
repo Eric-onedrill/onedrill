@@ -808,9 +808,11 @@ function buildPopup(t,c){
   const proj=projects.find(p=>p.id===t.projectId);
   const es=effectiveStatus(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace;
+  const isStale=expireIsStale(t);
+  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
+    +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data não confirmada</div>':'')
     +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
     +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
     +(proj?`<div><span style="color:#9a9888">Projeto: </span>${esc(proj.name)}</div>`:'')
@@ -881,12 +883,14 @@ function showPanel(t){
   const es=effectiveStatus(t);
   const c=scol(es);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+  const isStale=expireIsStale(t);
   const proj=projects.find(p=>p.id===t.projectId);
   currentPanelId=t.id;
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace;
+  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
+    +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:6px 10px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data de vencimento ainda não confirmada</div>':'')
     +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Cliente</span><span class="mp-val">${esc(t.client)}</span></div>`
@@ -894,7 +898,7 @@ function showPanel(t){
     +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentPanelId);return false;" title="Clique para editar">${t.footage} ft ✏</span></div>`
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
-    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`;
+    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
 }
 
@@ -1066,7 +1070,8 @@ function openTicketDetail(id){
   const t=tickets.find(x=>x.id===id);if(!t)return;
   currentDetailId=id;
 
-  const isExpired=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t));
+  const isStale=expireIsStale(t);
+  const isExpired=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t))&&!isStale;
   if(isExpired)showExpiredAlert(t);
 
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
@@ -1078,6 +1083,10 @@ function openTicketDetail(id){
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
 
   const expiredBanner=isExpired?'<div style="background:#dc2626;color:white;padding:10px 14px;border-radius:var(--r);margin-bottom:10px;text-align:center;font-weight:700;font-size:14px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — TICKET VENCIDO ('+esc(t.expire)+')</div>':'';
+
+  // Ticket renovado cujo scraper 811 ainda não confirmou a data nova no portal.
+  // Mostra aviso em vez de banner vermelho — evita falso "VENCIDO".
+  const staleBanner=(isStale&&!inGrace)?'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#b45309">⏳ Aguardando sync do portal 811</div><div style="font-size:11px;color:#92400e;margin-top:3px">A data de vencimento exibida é do <strong>ticket anterior</strong> e ainda não foi confirmada pelo portal. O scraper 811 vai atualizar automaticamente no próximo ciclo.</div></div>':'';
 
   const graceBannerDet=(()=>{
     if(!inGrace)return'';
@@ -1100,7 +1109,7 @@ function openTicketDetail(id){
     +'<div style="font-size:11px;color:#6b21a8;margin-top:4px">Este ticket tem utilities com instalações privadas (3H). Contrate um locator privado antes de escavar.</div>'
     +'</div>':'';
 
-  document.getElementById('det-info').innerHTML=expiredBanner+graceBannerDet+wpBanner+pvtBanner
+  document.getElementById('det-info').innerHTML=expiredBanner+staleBanner+graceBannerDet+wpBanner+pvtBanner
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
@@ -1109,7 +1118,7 @@ function openTicketDetail(id){
     +`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${esc(t.job||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${esc(t.address||'—')}</span></div>`
-    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExpired?' ⚠ VENCIDO':''}</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale?' style="color:#b45309"':'')}>${isStale?'⏳ aguardando sync 811':esc(t.expire||'—')}${isExpired?' ⚠ VENCIDO':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>`
     +(t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${esc(t.notes)}</div>`:'')
     +(hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>`
@@ -1252,40 +1261,75 @@ async function renewTicket(){
   t.statusOld=oldStatus;
   // Atualiza para novo ticket
   t.ticket=newTicket;
+  // Zera t.expire pra forçar o scraper 811 a buscar a data REAL do ticket novo.
+  // Sem isso, o expire fica com a data do antigo e, assim que a graça termina,
+  // dispara falso banner de "VENCIDO". filter_tickets_for_sync detecta expire
+  // vazio e prioriza esse ticket no próximo scrape.
+  t.expire='';
   if(t.projectId)t.project_locked=true;// trava projeto ao renovar
   t.history=t.history||[];
   t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(merged?' (mesclado)':'')+' (graça até '+oldExpire+')',color:'#7c3aed'});
   const ok=await saveTicketToDb(t);
   if(ok){
-    toast('✅ Ticket renovado: '+oldNum+' → '+newTicket,'success');
+    toast('✅ Ticket renovado: '+oldNum+' → '+newTicket+' — aguardando sync 811 pra confirmar vencimento','success');
     closeModal('ov-detail');syncAll();
     setTimeout(()=>openTicketDetail(t.id),300);
   }else{
-    t.ticket=oldNum;t.old_ticket2=prevChain;t.oldTicket2=prevChain;t.expire_old='';t.expireOld='';t.status_old='';t.statusOld='';
+    // Rollback completo incluindo expire (que foi zerado acima)
+    t.ticket=oldNum;t.old_ticket2=prevChain;t.oldTicket2=prevChain;t.expire_old='';t.expireOld='';t.status_old='';t.statusOld='';t.expire=oldExpire;
     t.history.pop();
     toast('Erro ao salvar renovação. Tente dar Refresh (⟳) e tentar novamente.','danger');
   }
 }
 function isInRenewalGrace(t){
   if(!isRenewed(t))return false;
-  // 1. Tenta expireOld direto (definido na renovação manual)
+  let cutoverMs=0;
+
+  // 1. expireOld direto (definido na renovação manual)
   let cutover=t.expireOld||t.expire_old||'';
+  if(cutover&&cutover!=='—')cutoverMs=_eod(cutover).getTime();
 
   // 2. Fallback: busca expiração do ticket antigo no sistema
-  if(!cutover||cutover==='—'){
+  if(!cutoverMs){
     const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
     if(oldNum){
       const oldT=tickets.find(x=>String(x.ticket).trim()===oldNum);
-      if(oldT&&oldT.expire&&oldT.expire!=='—'){
-        cutover=oldT.expire;
-      }
+      if(oldT&&oldT.expire&&oldT.expire!=='—')cutoverMs=_eod(oldT.expire).getTime();
     }
   }
 
-  if(!cutover||cutover==='—')return false;
-  return _eod(cutover)>=new Date();// true até 23:59:59 do dia de vencimento
+  // 3. Graça MÍNIMA: N dias a partir da renovação — dá tempo do scraper 811
+  //    buscar a data real do ticket novo no portal. Sem isso, tickets renovados
+  //    no dia do vencimento do antigo têm graça zero e disparam falso "VENCIDO"
+  //    assim que o antigo expira (porque t.expire foi herdado e não atualizado).
+  const RENEWAL_MIN_GRACE_DAYS=10;
+  const renewedEntry=(t.history||[]).find(h=>(h.action||'').includes('[RENOVAÇÃO]'));
+  if(renewedEntry&&renewedEntry.ts){
+    const minGraceMs=renewedEntry.ts+RENEWAL_MIN_GRACE_DAYS*86400000;
+    if(minGraceMs>cutoverMs)cutoverMs=minGraceMs;
+  }
+
+  if(!cutoverMs)return false;
+  return cutoverMs>=Date.now();// true até 23:59:59 do cutover
 }
 function isRenewed(t){return !!(t.oldTicket2||t.old_ticket2);}
+
+/**
+ * Ticket renovado cujo expire AINDA NÃO foi atualizado pelo scraper 811.
+ * expire == expireOld significa que renewTicket herdou a data do antigo
+ * e o portal ainda não forneceu a data real do ticket novo.
+ * Nesses casos, NÃO confiar em t.expire pra alertar vencimento — é um
+ * valor "stale" (obsoleto), herança da renovação, não verdade do portal.
+ */
+function expireIsStale(t){
+  if(!isRenewed(t))return false;
+  const eo=String(t.expireOld||t.expire_old||'').trim();
+  const en=String(t.expire||'').trim();
+  // Se expire foi zerado pela renovação OU é idêntico ao do antigo,
+  // o scraper ainda não atualizou.
+  if(!en||en==='—')return true;
+  return !!eo&&eo===en;
+}
 
 /**
  * Status efetivo — durante período de carência de renovação,
@@ -1471,7 +1515,7 @@ function riskScore(t){
     if(oldSt==='clear')return 0;
   }
   let s=0;const now=Date.now();
-  if(t.expire&&t.expire!=='—'){
+  if(t.expire&&t.expire!=='—'&&!expireIsStale(t)){
     const diff=(_eod(t.expire)-now)/86400000;
     if(diff<0)s+=60;else if(diff<=2)s+=45;else if(diff<=5)s+=30;else if(diff<=10)s+=18;else if(diff<=20)s+=8;
   }
@@ -1554,7 +1598,7 @@ function renderDash(){
   const damageFt=damageT.reduce((s,t)=>s+(t.footage||0),0);
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
-  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&(t.status==='Open'||t.status==='Damage');});
+  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&(t.status==='Open'||t.status==='Damage');});
 
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
@@ -1964,9 +2008,9 @@ function enterSharedView(pid){
 
   // Expiring tickets alert for field view
   const now=new Date();
-  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&(t.status==='Open'||t.status==='Damage')&&!isSuperseded(t)&&_eod(t.expire)<now);
-  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
-  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
+  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&(t.status==='Open'||t.status==='Damage')&&!isSuperseded(t)&&_eod(t.expire)<now&&!expireIsStale(t));
+  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
+  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
 
   const hasExpired=expired.length>0;
   if(hasExpired||expiring3d.length){
@@ -2367,6 +2411,7 @@ function exportExpiring(){
   const days=_soonDays||10;
   const f=filterTickets({}).filter(t=>{
     if(!t.expire||t.expire==='—')return false;
+    if(expireIsStale(t))return false;
     const d=_eod(t.expire);const diff=(d-Date.now())/86400000;
     return diff>=0&&diff<=days&&(t.status==='Open'||t.status==='Damage');
   });
@@ -2496,6 +2541,7 @@ function buildNotifications(){
       if(!t.expire||t.expire==='—'||isSuperseded(t))return false;
       if(t.status!=='Open'&&t.status!=='Damage')return false;
       if(isRenewed(t)&&isInRenewalGrace(t))return false;
+      if(expireIsStale(t))return false;
       const d=_eod(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;
     });
     for(const t of expiring)notifs.push({icon:'⏰',text:t.ticket+' expira '+t.expire,id:t.id,type:'warn'});
@@ -2870,7 +2916,7 @@ function renderRiskAnalytics(fT){
   const scored=active.map(t=>({t,s:riskScore(t)}));
   const crit=scored.filter(x=>x.s>=60);const high=scored.filter(x=>x.s>=35&&x.s<60);
   const med=scored.filter(x=>x.s>=15&&x.s<35);const low=scored.filter(x=>x.s<15);
-  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&_eod(t.expire)<new Date());
+  const exp=active.filter(t=>t.expire&&t.expire!=='—'&&t.status==='Open'&&_eod(t.expire)<new Date()&&!expireIsStale(t));
   const card=(label,count,color,bg,border,sub)=>'<div style="padding:14px;background:'+bg+';border:1px solid '+border+';border-radius:var(--r)"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+color+'">'+count+'</div><div style="font-size:10px;font-weight:700;color:'+color+';text-transform:uppercase;margin-top:2px">'+label+'</div>'+(sub?'<div style="font-size:10px;color:'+color+';opacity:.7;margin-top:2px">'+sub+'</div>':'')+'</div>';
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="dash-card-title" style="margin:0">🎯 Score de Risco</div><button class="btn btn-sm" onclick="nav(\'tickets\');setTimeout(()=>{sortCol=\'risk\';sortAsc=false;renderTable();},100)" style="font-size:11px">Tabela por risco →</button></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">'
     +card('Crítico ≥60',crit.length,'#dc2626','#fef2f2','#fecaca',crit.length?crit.map(x=>esc(x.t.ticket)).slice(0,2).join(', ')+(crit.length>2?'…':''):'Nenhum')

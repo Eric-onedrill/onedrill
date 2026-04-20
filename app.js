@@ -260,13 +260,36 @@ function dbToProject(r){
     _manual:r.is_manual||false
   };
 }
+/** Normaliza valores de expire vindos do banco/portal pra 'MM/DD/YYYY' ou ''.
+ * Lida com legado poluído (ex: "04/15/26 Time: 23:59", "05/13/26 Time: 23:59ET"),
+ * ano 2 dígitos, sufixos de timezone. Espelho exato do normalize_expire() em 811_sync.py.
+ * Se não conseguir parsear, retorna ''.
+ */
+function normalizeExpire(s){
+  if(!s)return'';
+  s=String(s).trim();
+  if(s==='—'||s==='-'||s==='N/A'||s==='null'||s==='None')return'';
+  // Mesmas limpezas do Python:
+  let c=s.replace(/\s+at\s+/gi,' ');
+  c=c.replace(/\s*Time\s*:\s*/gi,' ');
+  c=c.replace(/\s*(ET|EST|EDT|CT|CST|CDT|PT|PST|PDT|MT|MST|MDT|UTC|GMT)\b/gi,'');
+  c=c.replace(/\s+/g,' ').trim();
+  // Pega MM/DD/YY ou MM/DD/YYYY
+  const m=c.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(!m)return'';
+  let mo=parseInt(m[1],10),day=parseInt(m[2],10),yr=parseInt(m[3],10);
+  if(yr<100)yr+=2000;
+  if(mo<1||mo>12||day<1||day>31)return'';
+  return String(mo).padStart(2,'0')+'/'+String(day).padStart(2,'0')+'/'+yr;
+}
+
 function dbToTicket(r){
   return{
     id:r.id, ticket:r.ticket, projectId:r.project_id||'', company:r.company||'',
     state:r.state||'', location:r.location||'', status:r.status||'Open',
-    expire:r.expire||'', footage:r.footage||0, client:r.client||'', prime:r.prime||'',
+    expire:normalizeExpire(r.expire||''), footage:r.footage||0, client:r.client||'', prime:r.prime||'',
     job:r.job||'', tipo:r.tipo||'', address:r.address||'', pending:r.pending||'',
-    oldTicket2:r.old_ticket2||'', statusOld:r.status_old||'', expireOld:r.expire_old||'',
+    oldTicket2:r.old_ticket2||'', statusOld:r.status_old||'', expireOld:normalizeExpire(r.expire_old||''),
     notes:r.notes||'', fieldPath:r.field_path||null,
     _geocoded:(r.geocoded_lat&&r.geocoded_lon)?[r.geocoded_lat,r.geocoded_lon]:null,
     history:r.history||[], attachments:r.attachments||[], status_locked:r.status_locked||false,
@@ -1223,9 +1246,11 @@ async function renewTicket(){
   }
 
   let merged=false;
-  // Captura dados do ticket ATUAL (antigo) ANTES de qualquer merge
+  // Captura dados do ticket ATUAL (antigo) ANTES de qualquer merge.
+  // NORMALIZA o expire aqui — evita propagar formato poluído (ex: "04/15/26 Time: 23:59")
+  // pro expire_old do ticket novo.
   const oldNum=t.ticket;
-  const oldExpire=t.expire;
+  const oldExpire=normalizeExpire(t.expire);
   const oldStatus=t.status;
 
   if(dup){

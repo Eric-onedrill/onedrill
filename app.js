@@ -666,7 +666,7 @@ function enterApp(){
   const logoutBtn=document.getElementById('btn-logout');
   if(logoutBtn)logoutBtn.style.display='';
   const adminEls=['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'];
-  adminEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=isAdmin?'':'none';});
+  adminEls.forEach(id=>{const e=document.getElementById(id);if(e){if(isAdmin)e.classList.remove('hidden');else e.classList.add('hidden');}});
   if(!isAdmin){const fss=document.getElementById('field-status-section');if(fss)fss.style.display='none';}
   syncAll();renderDash();
   loadLastSync();
@@ -1136,14 +1136,16 @@ function openTicketDetail(id){
   const projBtn=document.getElementById('det-proj-btn');
   if(projBtn)projBtn.innerHTML=t.project_locked?'📁 Projeto 🔒':'📁 Projeto';
   if(!isSharedView&&isAdmin){
-    document.getElementById('det-edit-btn').style.display='';
-    document.getElementById('det-draw-btn').style.display='';
-    document.getElementById('det-renew-btn').style.display=(t.status!=='Closed'&&t.status!=='Cancel')?'':'none';
+    document.getElementById('det-edit-btn').classList.remove('hidden');
+    document.getElementById('det-draw-btn').classList.remove('hidden');
+    const renewBtn=document.getElementById('det-renew-btn');
+    if(t.status!=='Closed'&&t.status!=='Cancel')renewBtn.classList.remove('hidden');
+    else renewBtn.classList.add('hidden');
     document.getElementById('field-status-section').style.display='';
   }else{
-    document.getElementById('det-edit-btn').style.display='none';
-    document.getElementById('det-draw-btn').style.display='none';
-    document.getElementById('det-renew-btn').style.display='none';
+    document.getElementById('det-edit-btn').classList.add('hidden');
+    document.getElementById('det-draw-btn').classList.add('hidden');
+    document.getElementById('det-renew-btn').classList.add('hidden');
     document.getElementById('field-status-section').style.display='none';
   }
   renderHistory(t);renderMiniMap(t);renderUtils(t);openModal('ov-detail');
@@ -1598,7 +1600,7 @@ function renderDash(){
   const damageFt=damageT.reduce((s,t)=>s+(t.footage||0),0);
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
-  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd&&(t.status==='Open'||t.status==='Damage');});
+  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
 
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
@@ -2008,9 +2010,9 @@ function enterSharedView(pid){
 
   // Expiring tickets alert for field view
   const now=new Date();
-  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&(t.status==='Open'||t.status==='Damage')&&!isSuperseded(t)&&_eod(t.expire)<now&&!expireIsStale(t));
-  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
-  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status!=='Open'&&t.status!=='Damage')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
+  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t)&&_eod(t.expire)<now&&!expireIsStale(t));
+  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
+  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
 
   const hasExpired=expired.length>0;
   if(hasExpired||expiring3d.length){
@@ -2413,7 +2415,7 @@ function exportExpiring(){
     if(!t.expire||t.expire==='—')return false;
     if(expireIsStale(t))return false;
     const d=_eod(t.expire);const diff=(d-Date.now())/86400000;
-    return diff>=0&&diff<=days&&(t.status==='Open'||t.status==='Damage');
+    return diff>=0&&diff<=days&&t.status!=='Closed'&&t.status!=='Cancel';
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
   const wb=XLSX.utils.book_new();
@@ -2539,7 +2541,7 @@ function buildNotifications(){
     const notifs=[];const now=Date.now(),day3=3*864e5;
     const expiring=tickets.filter(t=>{
       if(!t.expire||t.expire==='—'||isSuperseded(t))return false;
-      if(t.status!=='Open'&&t.status!=='Damage')return false;
+      if(t.status==='Closed'||t.status==='Cancel')return false;
       if(isRenewed(t)&&isInRenewalGrace(t))return false;
       if(expireIsStale(t))return false;
       const d=_eod(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;

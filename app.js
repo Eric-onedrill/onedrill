@@ -1365,7 +1365,34 @@ async function setManualStatus(newStatus){
   const old=t.status;const wasLocked=t.status_locked;
   t.status=newStatus;t.status_locked=true;
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:`Status manual: ${old} → ${newStatus} 🔒`,color:scol(newStatus)});
+
+  // Determina ts do evento: pra Clear manual, usa data da última resposta real
+  // (Clear/Private/Marked) entre as utilities — assim o ticket é contabilizado
+  // no dashboard na data em que o último locator respondeu, não na hora do clique.
+  let evtTs=Date.now();
+  let actionTxt=`Status manual: ${old} → ${newStatus} 🔒`;
+  if(newStatus==='Clear'){
+    // Durante graça, olhar respostas do ticket antigo (mesma regra do effectiveStatus/renderUtils)
+    const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+    const oldTicketNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
+    const queryTicket=inGrace&&oldTicketNum?oldTicketNum:String(t.ticket||'').trim();
+    const resps=utilCache[queryTicket]||[];
+    let lastResponded=0;
+    for(const u of resps){
+      if(u.status!=='Clear'&&u.status!=='Private'&&u.status!=='Marked')continue;
+      const raw=u.responded_at;if(!raw)continue;
+      const ms=new Date(raw).getTime();
+      if(!isNaN(ms)&&ms>lastResponded)lastResponded=ms;
+    }
+    if(lastResponded>0){
+      evtTs=lastResponded;
+      const d=new Date(lastResponded);
+      const dateLabel=String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'/'+d.getFullYear();
+      actionTxt=`Status manual → Clear em ${dateLabel} 🔒 (última resposta 811)`;
+    }
+  }
+
+  t.history.push({ts:evtTs,action:actionTxt,color:scol(newStatus)});
   const ok=await saveTicketToDb(t);
   if(ok){toast(`✅ Status: ${old} → ${newStatus} (travado)`,'success');openTicketDetail(currentDetailId);syncAll();}
   else{t.status=old;t.status_locked=wasLocked;t.history.pop();toast(`Erro ao salvar — status revertido para ${old}`,'danger');}
@@ -1594,7 +1621,12 @@ function renderDash(){
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
       const a=(h.action||'').toLowerCase();
-      return h.ts>=start&&h.ts<end&&(status==='Open'?(a.includes('importado')||a.includes('ticket criado')):(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear'));
+      if(h.ts<start||h.ts>=end)return false;
+      if(status==='Open')return a.includes('importado')||a.includes('ticket criado');
+      // Clear: auto-clear, auto 811 (não revertido), ou clear manual
+      return a.includes('auto-clear')
+        ||(a.includes('auto 811')&&!a.includes('revertido'))
+        ||(a.includes('status manual')&&a.includes('→ clear'));
     })).length;
   }
   const openWk=wCount('Open',now-week,now),openPrev=wCount('Open',now-2*week,now-week);
@@ -2622,7 +2654,7 @@ function renderAnalytics(){
     const c4w_bins=[0,0,0,0];
     for(const t2 of ts){
       if(!t2.history)continue;
-      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')&&!a2.includes('revertido'))||a2.includes('auto-clear');}).pop();
+      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')&&!a2.includes('revertido'))||a2.includes('auto-clear')||(a2.includes('status manual')&&a2.includes('→ clear'));}).pop();
       if(!clearEvt||!clearEvt.ts)continue;
       const wAgo=Math.floor((now-clearEvt.ts)/week);
       if(wAgo>=0&&wAgo<4)c4w_bins[wAgo]+=(t2.footage||0);
@@ -2688,7 +2720,11 @@ function renderClearedStats(fTickets){
     if(!t.history||!t.history.length)return 0;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
-      if(a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)){return t.history[j].ts;}
+      // Reconhece: auto-clear, auto 811 (não revertido), ou clear manual
+      var isAutoClear=a.indexOf('auto-clear')>=0;
+      var isAuto811=a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0;
+      var isManualClear=a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0;
+      if(isAutoClear||isAuto811||isManualClear){return t.history[j].ts;}
     }
     return 0;
   }
@@ -2862,7 +2898,7 @@ function renderWeeklyEvolution(fTickets){
     const now=Date.now(),week=7*864e5;
     const allF=dashStateVal?tickets.filter(t=>t.state===dashStateVal):tickets;
     function countInRange(start,end,matchFn){return allF.filter(t=>(t.history||[]).some(h=>h.ts>=start&&h.ts<end&&matchFn(h))).length;}
-    function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear');}
+    function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear')||(a.includes('status manual')&&a.includes('→ clear'));}
     function isOpen(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
     function isClosed(h){const a=(h.action||'').toLowerCase();return a.includes('→ closed')||a.includes('completed');}
     const weeks=[];

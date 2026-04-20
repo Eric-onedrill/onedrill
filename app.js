@@ -1300,19 +1300,8 @@ function isInRenewalGrace(t){
     }
   }
 
-  // 3. Graça MÍNIMA: N dias a partir da renovação — dá tempo do scraper 811
-  //    buscar a data real do ticket novo no portal. Sem isso, tickets renovados
-  //    no dia do vencimento do antigo têm graça zero e disparam falso "VENCIDO"
-  //    assim que o antigo expira (porque t.expire foi herdado e não atualizado).
-  const RENEWAL_MIN_GRACE_DAYS=10;
-  const renewedEntry=(t.history||[]).find(h=>(h.action||'').includes('[RENOVAÇÃO]'));
-  if(renewedEntry&&renewedEntry.ts){
-    const minGraceMs=renewedEntry.ts+RENEWAL_MIN_GRACE_DAYS*86400000;
-    if(minGraceMs>cutoverMs)cutoverMs=minGraceMs;
-  }
-
   if(!cutoverMs)return false;
-  return cutoverMs>=Date.now();// true até 23:59:59 do cutover
+  return cutoverMs>=Date.now();// true até 23:59:59 do cutover (expire_old)
 }
 function isRenewed(t){return !!(t.oldTicket2||t.old_ticket2);}
 

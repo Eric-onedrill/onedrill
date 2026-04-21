@@ -832,7 +832,7 @@ function buildPopup(t,c){
   const es=effectiveStatus(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const isStale=expireIsStale(t);
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  const isExp=t.expire&&t.expire!=='—'&&(es==='Open'||es==='Damage')&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data não confirmada</div>':'')
@@ -909,7 +909,7 @@ function showPanel(t){
   const isStale=expireIsStale(t);
   const proj=projects.find(p=>p.id===t.projectId);
   currentPanelId=t.id;
-  const isExp=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  const isExp=t.expire&&t.expire!=='—'&&(es==='Open'||es==='Damage')&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
@@ -1094,12 +1094,15 @@ function openTicketDetail(id){
   currentDetailId=id;
 
   const isStale=expireIsStale(t);
-  const isExpired=t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&_eod(t.expire)<new Date()&&!(isRenewed(t)&&isInRenewalGrace(t))&&!isStale;
-  if(isExpired)showExpiredAlert(t);
-
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const es=effectiveStatus(t);
   const c=scol(es);
+  // isExpired: só dispara banner vermelho "NÃO TRABALHAR" se status efetivo é
+  // Open ou Damage. Ticket Clear (mesmo com expire passado) não precisa alerta
+  // alarmante — o trabalho já está liberado.
+  const isExpired=t.expire&&t.expire!=='—'&&(es==='Open'||es==='Damage')&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  if(isExpired)showExpiredAlert(t);
+
   const proj=projects.find(p=>p.id===t.projectId);
   document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]+')':'');
   document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(inGrace?' · 🔄 Carência até '+graceCutoverDate(t):'');
@@ -1357,7 +1360,15 @@ function effectiveStatus(t){
   if(t.status_locked)return t.status;
 
   if(isRenewed(t)&&isInRenewalGrace(t)){
-    // 1. Checa as respostas REAIS das utilities do ticket antigo (fonte de verdade)
+    // REGRA RIGOROSA: se o ticket NOVO tem utilities Pending, força Open.
+    // Não adianta mostrar Clear baseado no antigo se o novo já mostra pendências —
+    // isso seria perigoso (falso "pode trabalhar").
+    if(utilCacheLoaded){
+      const newKey=String(t.ticket||'').trim();
+      const newUtils=utilCache[newKey]||[];
+      if(newUtils.some(u=>u.status==='Pending'))return 'Open';
+    }
+    // Sem Pending no novo — aplicar lógica de graça: checa antigo.
     if(utilCacheLoaded){
       const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
       if(oldNum){
@@ -1368,7 +1379,7 @@ function effectiveStatus(t){
         }
       }
     }
-    // 2. Fallback: status armazenado do ticket antigo
+    // Fallback: status armazenado do ticket antigo
     const oldStatus=t.statusOld||t.status_old||'';
     return oldStatus||t.status;
   }
@@ -2054,9 +2065,16 @@ function enterSharedView(pid){
   renderSharedList();
   initSharedMap(p);
 
-  // Expiring tickets alert for field view
+  // Expiring tickets alert for field view.
+  // "expired" = ticket com Open/Damage efetivo e expire passado (precisa alerta).
+  // Clear mesmo com expire passado não precisa do alerta (trabalho liberado).
   const now=new Date();
-  const expired=ts.filter(t=>t.expire&&t.expire!=='—'&&t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t)&&_eod(t.expire)<now&&!expireIsStale(t));
+  const expired=ts.filter(t=>{
+    if(!t.expire||t.expire==='—'||isSuperseded(t)||expireIsStale(t))return false;
+    const es=effectiveStatus(t);
+    if(es!=='Open'&&es!=='Damage')return false;
+    return _eod(t.expire)<now;
+  });
   const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
   const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
 

@@ -74,6 +74,8 @@ let supersededSet=new Set();
 let miniMap=null;
 let _expAlertEl=null;
 let _t2; // toast timer
+let _autoRefreshId=null; // fix bug #2: guardar ID do setInterval de auto-refresh pra limpar antes de recriar
+let _syncTimerId=null;   // fix bug #3: guardar ID do setTimeout de updateSyncTimer pra evitar cascata
 
 // Debounced renderers
 const debouncedRedraw=debounce(()=>redrawAll(),250);
@@ -274,6 +276,12 @@ function normalizeExpire(s){
   c=c.replace(/\s*Time\s*:\s*/gi,' ');
   c=c.replace(/\s*(ET|EST|EDT|CT|CST|CDT|PT|PST|PDT|MT|MST|MDT|UTC|GMT)\b/gi,'');
   c=c.replace(/\s+/g,' ').trim();
+  // Tenta ISO primeiro (YYYY-MM-DD): "2026-05-13" → "05/13/2026"
+  const iso=c.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(iso){
+    const yr=parseInt(iso[1],10),mo=parseInt(iso[2],10),day=parseInt(iso[3],10);
+    if(mo>=1&&mo<=12&&day>=1&&day<=31)return String(mo).padStart(2,'0')+'/'+String(day).padStart(2,'0')+'/'+yr;
+  }
   // Pega MM/DD/YY ou MM/DD/YYYY
   const m=c.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
   if(!m)return'';
@@ -298,12 +306,15 @@ function dbToTicket(r){
   };
 }
 function ticketToDb(t){
+  // GUARDA ÚNICA de escrita: normaliza expire/expire_old antes de gravar no banco.
+  // Todos os caminhos de save passam por aqui (import Excel, edit, renew, Clear manual,
+  // save de trajeto, batch upsert) — garante que o banco NUNCA recebe formato poluído.
   return{
     ticket:t.ticket, project_id:t.projectId||null, company:t.company||'',
     state:t.state||'', location:t.location||'', status:t.status||'Open',
-    expire:t.expire||'', footage:t.footage||0, client:t.client||'', prime:t.prime||'',
+    expire:normalizeExpire(t.expire||''), footage:t.footage||0, client:t.client||'', prime:t.prime||'',
     job:t.job||'', tipo:t.tipo||'', address:t.address||'', pending:t.pending||'',
-    old_ticket2:t.oldTicket2||'', status_old:t.statusOld||'', expire_old:t.expireOld||'',
+    old_ticket2:t.oldTicket2||'', status_old:t.statusOld||'', expire_old:normalizeExpire(t.expireOld||''),
     notes:t.notes||'', field_path:t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null,
     geocoded_lat:t._geocoded?t._geocoded[0]:null, geocoded_lon:t._geocoded?t._geocoded[1]:null,
     history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false,
@@ -670,6 +681,10 @@ function enterViewer(){isAdmin=false;role='viewer';document.getElementById('logi
 
 async function doLogout(){
   await sb.auth.signOut();
+  // Fix bug #2: limpar auto-refresh e sync timer ao fazer logout.
+  // Evita que o interval continue rodando (e tentando fetchar dados) após logout.
+  if(_autoRefreshId){clearInterval(_autoRefreshId);_autoRefreshId=null;}
+  if(_syncTimerId){clearTimeout(_syncTimerId);_syncTimerId=null;}
   isAdmin=false;role='viewer';
   document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -697,7 +712,12 @@ function enterApp(){
   loadContacts().then(()=>renderContacts());
 
   // Auto-refresh
-  setInterval(async()=>{
+  // Fix bug #2: limpa interval anterior antes de criar novo.
+  // enterApp() pode ser chamado várias vezes (login, viewer, share fallback, sessão restaurada).
+  // Sem este clearInterval, cada chamada empilha um novo setInterval → race conditions e
+  // múltiplos fetches paralelos do banco sobrescrevendo tickets/projects.
+  if(_autoRefreshId){clearInterval(_autoRefreshId);_autoRefreshId=null;}
+  _autoRefreshId=setInterval(async()=>{
     if(fieldDrawing){console.log('[AutoRefresh] Pulado — desenho em andamento');return;}
     if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}
     try{
@@ -1769,7 +1789,10 @@ function updateSyncTimer(){
     if(pill)pill.textContent='● Último sync '+hm+(diff>0?' · próximo em '+diff+' min':'');
     if(tEl)tEl.textContent=diff>0?'sync automático em ~'+diff+' min':'sync em andamento ou aguardando...';
   }
-  setTimeout(updateSyncTimer,60000);
+  // Fix bug #3: limpa timeout anterior antes de criar novo.
+  // Evita cascata exponencial quando renderDash/loadLastSync chamam essa função.
+  if(_syncTimerId)clearTimeout(_syncTimerId);
+  _syncTimerId=setTimeout(updateSyncTimer,60000);
 }
 
 /* ═══════════ 19. PROJECTS ═══════════ */
@@ -1858,7 +1881,7 @@ function renderCompletedPage(){
   const years=Object.keys(tree).sort((a,b)=>b-a);
   for(const year of years){
     html+='<div style="margin-bottom:16px">'
-      +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\' none\';this.querySelector(\'.yr-arrow\').textContent=this.nextElementSibling.style.display===\'none\'?\'▶\':\'▼\'" style="cursor:pointer;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);display:flex;align-items:center;gap:8px">'
+      +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\'none\';this.querySelector(\'.yr-arrow\').textContent=this.nextElementSibling.style.display===\'none\'?\'▶\':\'▼\'" style="cursor:pointer;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);display:flex;align-items:center;gap:8px">'
       +'<span class="yr-arrow" style="font-size:10px;color:var(--muted)">▼</span>'
       +'<span style="font-size:14px;font-weight:700;font-family:var(--mono)">'+year+'</span>'
       +'</div>'
@@ -1866,7 +1889,7 @@ function renderCompletedPage(){
     const clients=Object.keys(tree[year]).sort();
     for(const client of clients){
       html+='<div style="margin-bottom:8px">'
-        +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\' none\';this.querySelector(\'.cl-arrow\').textContent=this.nextElementSibling.style.display===\'none\'?\'▶\':\'▼\'" style="cursor:pointer;padding:6px 10px;display:flex;align-items:center;gap:8px">'
+        +'<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\'none\';this.querySelector(\'.cl-arrow\').textContent=this.nextElementSibling.style.display===\'none\'?\'▶\':\'▼\'" style="cursor:pointer;padding:6px 10px;display:flex;align-items:center;gap:8px">'
         +'<span class="cl-arrow" style="font-size:9px;color:var(--muted)">▼</span>'
         +'<span style="font-size:12px;font-weight:600;color:var(--text)">🏢 '+esc(client)+'</span>'
         +'</div>'
@@ -2267,6 +2290,13 @@ function editCurrentTicket(){
 async function saveTicket(){
   const tnum=document.getElementById('tm-t').value.trim();
   if(!tnum){toast('Preencha o número.','danger');return;}
+  // Valida data de expiração: se preenchida mas não parseável, avisa.
+  const rawExpire=document.getElementById('tm-e').value.trim();
+  const normalizedExpire=normalizeExpire(rawExpire);
+  if(rawExpire && !normalizedExpire){
+    toast('Data de expiração inválida. Use MM/DD/AAAA (ex: 05/13/2026).','danger');
+    return;
+  }
   const newStatus=document.getElementById('tm-s').value;
   let savedId=null;
   if(editingTicketId){
@@ -2279,7 +2309,7 @@ async function saveTicket(){
         ticket:tnum,projectId:newProjId,
         client:document.getElementById('tm-c').value,company:document.getElementById('tm-co').value,
         location:document.getElementById('tm-l').value,state:document.getElementById('tm-st').value,
-        footage:parseInt(document.getElementById('tm-f').value)||0,expire:document.getElementById('tm-e').value||'',
+        footage:parseInt(document.getElementById('tm-f').value)||0,expire:normalizedExpire,
         notes:document.getElementById('tm-notes').value,status:newStatus,
         tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,
         prime:document.getElementById('tm-prime').value,address:document.getElementById('tm-addr').value
@@ -2291,7 +2321,7 @@ async function saveTicket(){
     }
     toast('Ticket atualizado!','success');
   }else{
-    const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:document.getElementById('tm-e').value||'',footage:parseInt(document.getElementById('tm-f').value)||0,client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false,project_locked:!!document.getElementById('tm-proj').value};
+    const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:normalizedExpire,footage:parseInt(document.getElementById('tm-f').value)||0,client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false,project_locked:!!document.getElementById('tm-proj').value};
     tickets.push(t);await saveTicketToDb(t);savedId=t.id;
     toast('Ticket criado!','success');
   }
@@ -2362,9 +2392,10 @@ function readFile(file){
         if(sl==='clear')status='Clear';else if(sl==='open')status='Open';
         else if(sl==='closed'||sl==='close')status='Closed';else if(sl==='damage')status='Damage';
         else if(sl==='cancel')status='Cancel';else if(rawStatus)status=rawStatus;
-        const rawExpOld=getCell(row,idx.expireOld);let expireOld='';
-        if(rawExpOld){try{const d=new Date(rawExpOld);expireOld=isNaN(d.getTime())?rawExpOld:d.toLocaleDateString('en-US');}catch{expireOld=rawExpOld;}}
-        return{ticket,company:getCell(row,idx.company)||'One Drill',state:getCell(row,idx.state),location:getCell(row,idx.location),status,expire:getCell(row,idx.expire),footage:parseFloat(getCell(row,idx.footage))||0,client:getCell(row,idx.client),prime:getCell(row,idx.prime),job:getCell(row,idx.job),tipo:getCell(row,idx.tipo),address:getCell(row,idx.address),projectName:getCell(row,idx.project),pending:getCell(row,idx.pending),oldTicket2:getCell(row,idx.oldTicket2),statusOld:getCell(row,idx.statusOld),expireOld};
+        // Normaliza expire (formato do Excel pode vir como Date → "4/15/2026" sem zero) e expireOld
+        const expire=normalizeExpire(getCell(row,idx.expire));
+        const expireOld=normalizeExpire(getCell(row,idx.expireOld));
+        return{ticket,company:getCell(row,idx.company)||'One Drill',state:getCell(row,idx.state),location:getCell(row,idx.location),status,expire,footage:parseFloat(getCell(row,idx.footage))||0,client:getCell(row,idx.client),prime:getCell(row,idx.prime),job:getCell(row,idx.job),tipo:getCell(row,idx.tipo),address:getCell(row,idx.address),projectName:getCell(row,idx.project),pending:getCell(row,idx.pending),oldTicket2:getCell(row,idx.oldTicket2),statusOld:getCell(row,idx.statusOld),expireOld};
       }).filter(Boolean);
       if(!parsed.length){toast('Nenhuma linha válida.','danger');return;}
       const cols=['ticket','client','prime','status','footage','tipo'];
@@ -2384,6 +2415,16 @@ async function doImport(){
   if(!parsed.length)return;
   if(!await requireAuth())return;
   const mode=document.querySelector('input[name="importmode"]:checked')?.value||'replace';
+  // Fix bug #6: modo "Substituir tudo" é IRREVERSÍVEL — apaga todos os tickets
+  // (inclusive trajetos desenhados manualmente). Exige confirmação explícita
+  // digitando o texto exato. Se cancelar, retorna ANTES de qualquer modificação.
+  if(mode==='replace'){
+    const confirmText=prompt('⚠️ ATENÇÃO — O modo "Substituir tudo" vai APAGAR TODOS os tickets do banco (inclusive trajetos desenhados). Esta ação é IRREVERSÍVEL.\n\nDigite APAGAR TUDO (em maiúsculas) para confirmar:');
+    if(confirmText!=='APAGAR TUDO'){
+      toast('Importação cancelada — nenhum dado foi alterado.','info');
+      return;
+    }
+  }
   const pw=document.getElementById('progwrap'),pf=document.getElementById('progfill'),pt=document.getElementById('progtxt');
   pw.style.display='block';document.getElementById('bimport').disabled=true;setSyncStatus(true,'Importando...');
 

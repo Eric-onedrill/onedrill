@@ -41,11 +41,29 @@ function fmtDt(ts){
   return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 }
 
-/** Retorna Date no final do dia (23:59:59) — tickets vencem às 23:59, não à meia-noite */
+/** Retorna Date no final do dia (23:59:59) — tickets vencem às 23:59, não à meia-noite.
+ *  Fix bug #11: parse explícito MM/DD/YYYY em vez de depender de new Date(string), que é
+ *  unreliable em Safari antigo/mobile e pode retornar Invalid Date com format MM/DD/YYYY.
+ *  O sistema inteiro usa MM/DD/YYYY nos tickets (padrão US), então tratamos como primário
+ *  e só caímos pro parser nativo como fallback (ISO, etc).
+ */
 function _eod(dateStr){
-  const d=new Date(dateStr);
-  d.setHours(23,59,59,999);
-  return d;
+  if(!dateStr)return new Date(NaN);
+  const s=String(dateStr).trim();
+  // Primário: MM/DD/YYYY ou MM/DD/YY (formato que o sistema usa em todos os tickets)
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m){
+    const mo=parseInt(m[1],10), dy=parseInt(m[2],10);
+    let yr=parseInt(m[3],10);
+    if(yr<100)yr+=2000;
+    if(mo>=1&&mo<=12&&dy>=1&&dy<=31){
+      return new Date(yr, mo-1, dy, 23, 59, 59, 999);
+    }
+  }
+  // Fallback: parser nativo pra ISO, etc
+  const d=new Date(s);
+  if(!isNaN(d.getTime())){ d.setHours(23,59,59,999); return d; }
+  return new Date(NaN);
 }
 
 /** Cor do status */
@@ -160,11 +178,15 @@ function filterTickets(opts={}){
     if(state && t.state!==state) return false;
 
     // Busca textual
-    if(sr && !t.ticket.toLowerCase().includes(sr)
+    // Fix bug #7: (t.ticket||'') pra evitar crash se ticket vier null/undefined do banco.
+    // Também inclui job e notes na busca (bug #22): supervisor que busca "Job #4521" ou nota.
+    if(sr && !(t.ticket||'').toLowerCase().includes(sr)
           && !(t.client||'').toLowerCase().includes(sr)
           && !(t.location||'').toLowerCase().includes(sr)
           && !(t.address||'').toLowerCase().includes(sr)
-          && !(t.prime||'').toLowerCase().includes(sr)) return false;
+          && !(t.prime||'').toLowerCase().includes(sr)
+          && !(t.job||'').toLowerCase().includes(sr)
+          && !(t.notes||'').toLowerCase().includes(sr)) return false;
 
     // Utility filter
     if(utility){
@@ -1655,6 +1677,20 @@ function sortBy(col){sortAsc=sortCol===col?!sortAsc:true;sortCol=col;renderTable
 function editFromTbl(id){currentDetailId=id;editCurrentTicket();}
 
 /* ═══════════ 18. DASHBOARD ═══════════ */
+
+/**
+ * Fix bug #9: renderiza a página ativa (Dashboard OU Analytics).
+ * Usado pelos selects de filtro em renderClearedStats, renderProgressoFootage e
+ * renderClearTimeMetrics — essas funções são chamadas em AMBAS as páginas.
+ * Sem isso, trocar filtro no Analytics re-renderizava o Dashboard (invisível),
+ * e o usuário via "filtro não funciona".
+ */
+function refreshDashOrAnalytics(){
+  const ap=document.querySelector('.page.active')?.id;
+  if(ap==='pg-analytics')renderAnalytics();
+  else renderDash();
+}
+
 function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
@@ -2566,7 +2602,9 @@ function exportExcel(){
 
 function exportUtilTickets(utilName){
   const openTickets=filterTickets({}).filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
-  const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(t.ticket);return pends.some(p=>p.utility_name===utilName);});
+  // Fix bug #8: String(...).trim() consistente com o resto do código.
+  // Sem isso, tickets vindos de Excel com espaços extras não batem com o cache (que é trimado).
+  const tks=openTickets.filter(t=>{const pends=getTicketPendingUtils(String(t.ticket).trim());return pends.some(p=>p.utility_name===utilName);});
   if(!tks.length){toast('Nenhum ticket pendente para '+utilName,'warn');return;}
   const wb=XLSX.utils.book_new();
   const data=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Projeto','Old Ticket #','Expire Old'],...tks.map(t=>[t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(p=>p.id===t.projectId)?.name||'',t.oldTicket2||'',t.expireOld||''])];
@@ -2580,7 +2618,8 @@ function exportAllPending(){
   const openTickets=filterTickets({}).filter(t=>t.status==='Open'||t.status==='Damage'||t.status==='Clear');
   const rows=[];
   for(const t of openTickets){
-    const pends=getTicketPendingUtils(t.ticket);if(!pends.length)continue;
+    // Fix bug #8: String(...).trim() consistente (mesma razão do export individual acima)
+    const pends=getTicketPendingUtils(String(t.ticket).trim());if(!pends.length)continue;
     for(const p of pends)rows.push([t.ticket,p.utility_name,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,projects.find(pr=>pr.id===t.projectId)?.name||'',t.oldTicket2||'',t.expireOld||'']);
   }
   if(!rows.length){toast('Nenhuma pendência','warn');return;}
@@ -2620,7 +2659,8 @@ function globalSearch(q){
   const results=[];
   for(const t of tickets){
     if(results.length>=10)break;
-    if(t.ticket.toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)){
+    // Fix bug #7: (t.ticket||'') evita crash se ticket vier null. Adiciona job também (bug #22).
+    if((t.ticket||'').toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)||(t.job||'').toLowerCase().includes(q)){
       results.push({type:'ticket',id:t.id,title:t.ticket,sub:t.client+' · '+t.location+' · '+effectiveStatus(t),status:effectiveStatus(t)});
     }
   }
@@ -2836,7 +2876,7 @@ function renderClearedStats(fTickets){
   for(var i5=0;i5<c30.length;i5++)ft30+=(c30[i5].footage||0);
 
   var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p2){return p2.status!=='Completed';}).map(function(p2){return'<option value="'+p2.id+'"'+(cpf===p2.id?' selected':'')+'>'+esc(projDropLabel(p2))+'</option>';}).join('');
-  var projSel='<select class="fi" onchange="_clearProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+  var projSel='<select class="fi" onchange="_clearProjFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
 
   var topUtils=Object.entries(byU7).sort(function(a,b){return b[1]-a[1];}).slice(0,12);
 
@@ -3005,7 +3045,7 @@ function renderProgressoFootage(fTickets,projStats){
   try{
     const pf=window._progProjFilter||'';
     const projOpts='<option value="">Todos (agrupado)</option>'+projStats.map(p=>'<option value="'+p.id+'"'+(pf===p.id?' selected':'')+'>'+(p.locs?esc(p.locs)+' ('+esc(p.name)+')':esc(p.name))+'</option>').join('');
-    const projSel='<select class="fi" onchange="_progProjFilter=this.value;renderDash()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+    const projSel='<select class="fi" onchange="_progProjFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
     function mkGrid(d){return'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.totalFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">'+d.clearFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+d.pctClear+'%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">'+d.openFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto '+d.pctOpen+'%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+d.damageFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+d.pctDamage+'%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.concluidoFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+d.pctConcluido+'%</div></div></div><div class="prog-bar"><div style="width:'+d.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(d.pctOpen,100-d.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(d.pctDamage,100-d.pctClear-d.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(d.pctConcluido,100-d.pctClear-d.pctOpen-d.pctDamage)+'%;background:var(--text)"></div></div>';}
     let content='';
     if(!pf){
@@ -3071,7 +3111,7 @@ function renderClearTimeMetrics(fTickets){
   utilAvg.sort(function(a,b){return b.avg-a.avg;});
   if(!utilAvg.length)return'';
   var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=='Completed';}).map(function(p){return'<option value="'+p.id+'"'+(mpf===p.id?' selected':'')+'>'+esc(projDropLabel(p))+'</option>';}).join('');
-  var projSel='<select class="fi" onchange="_metricProjFilter=this.value;renderDash()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+  var projSel='<select class="fi" onchange="_metricProjFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
   var globalAvg=utilAvg.reduce(function(s,u){return s+u.avg*u.count;},0)/utilAvg.reduce(function(s,u){return s+u.count;},0);
   var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear</div><div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px;font-weight:700;font-family:var(--mono);color:'+(globalAvg<=3?'var(--green)':globalAvg<=6?'var(--amber)':'var(--red)')+'">'+globalAvg.toFixed(1)+' dias</span>'+projSel+'</div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">';
@@ -3096,7 +3136,7 @@ function renderUtilSummaryHtml(){
   const sorted=Object.entries(allUtils).sort((a,b)=>b[1]-a[1]);
   if(!sorted.length)return'';
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📡 Utilities Pendentes (global)</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">'
-    +sorted.slice(0,15).map(([name,count])=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)"><span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px" title="'+esc(name)+'">'+esc(name)+'</span><div style="display:flex;gap:6px;align-items:center"><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:var(--red)">'+count+'</span><button class="btn btn-sm" onclick="exportUtilTickets(\''+esc(name).replace(/'/g,"\\'")+'\')" style="font-size:9px;padding:2px 6px">↓</button></div></div>').join('')
+    +sorted.slice(0,15).map(([name,count])=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)"><span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px" title="'+esc(name)+'">'+esc(name)+'</span><div style="display:flex;gap:6px;align-items:center"><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:var(--red)">'+count+'</span><button class="btn btn-sm" onclick="exportUtilTickets(decodeURIComponent(\''+encodeURIComponent(name).replace(/\x27/g,"%27")+'\'))" style="font-size:9px;padding:2px 6px">↓</button></div></div>').join('')
     +'</div><button class="btn btn-sm" onclick="exportAllPending()" style="margin-top:8px;font-size:11px">↓ Exportar todas pendências</button></div></div>';
 }
 

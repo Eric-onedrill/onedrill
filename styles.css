@@ -902,7 +902,45 @@ body {
 
 .btn-unlock-status {
   width: 100%;
-  margin-top: 6px;
+  /* Dentro do grid .manual-status-grid, ocupa as 2 colunas (linha inteira) */
+  grid-column: 1 / -1;
+}
+
+/* Estado desabilitado (sem lock ativo) — feedback visual de "nada pra fazer agora" */
+.btn-unlock-status:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(50%);
+}
+.btn-unlock-status:disabled:hover {
+  /* Sem hover-effect quando disabled */
+  transform: none;
+  box-shadow: none;
+}
+
+/* Fase 1 refactor Damage: botão "Registrar dano" e badge do contador */
+.btn-damage-register {
+  width: 100%;
+  background: var(--amber-bg);
+  color: var(--amber);
+  border-color: var(--amber-border);
+  font-weight: 700;
+}
+.btn-damage-register:hover {
+  background: var(--amber);
+  color: white;
+}
+
+.damage-count-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+  line-height: 1.4;
 }
 
 

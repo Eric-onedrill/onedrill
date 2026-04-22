@@ -346,6 +346,10 @@
               <option value="">Todos</option>
               <option>FL</option>
               <option>IN</option>
+              <option>IL</option>
+            </select>
+            <select class="fi fi--auto-width" id="contacts-county-filter" data-filter="contacts-county" disabled title="Selecione um estado primeiro">
+              <option value="">Todos counties</option>
             </select>
             <button class="btn btn-sm" data-action="export-contacts">↓ Excel</button>
             <button class="btn btn-primary btn-sm hidden" id="btn-add-contact" data-action="new-contact">+ Contato</button>
@@ -608,10 +612,13 @@
         <div class="fsection" id="field-damage-section">
           <div class="fsection-header">
             <div class="fsection-lbl fsection-lbl--inline">Danos reportados</div>
-            <span class="damage-count-badge hidden" id="det-damage-badge">⚠ 0</span>
+            <span class="damage-count-wrap hidden" id="det-damage-badge-wrap">
+              <span class="damage-count-badge" id="det-damage-badge">⚠ 0</span>
+            </span>
           </div>
           <div class="manual-status-hint">Registre danos reportados. Independe do status — o ticket continua o fluxo normal.</div>
-          <button class="btn btn-damage-register" id="det-damage-btn" data-action="register-damage">⚠ Registrar dano</button>
+          <div id="det-damage-list" class="damage-list"></div>
+          <button class="btn btn-damage-register" id="det-damage-btn" data-action="register-damage" style="margin-top:8px">⚠ Registrar dano</button>
         </div>
       </div>
       <div>
@@ -770,7 +777,8 @@
     'tbl-proj':       () => renderTable(),
     'tbl-client':     () => renderTable(),
     'tbl-utility':    () => renderTable(),
-    'contacts-state': () => renderContacts(),
+    'contacts-state': () => { repopulateCountyDropdown(); renderContacts(); },
+    'contacts-county':() => renderContacts(),
   };
 
   const filterInputMap = {

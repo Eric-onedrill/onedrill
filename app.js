@@ -365,6 +365,7 @@ function dbToTicket(r){
     _geocoded:(r.geocoded_lat&&r.geocoded_lon)?[r.geocoded_lat,r.geocoded_lon]:null,
     history:r.history||[], attachments:r.attachments||[], status_locked:r.status_locked||false,
     project_locked:r.project_locked||false,
+    damageCount:r.damage_count||0,// Fase 1 do refactor Damage: contador separado do status
     created_at:r.created_at||null
   };
 }
@@ -381,7 +382,8 @@ function ticketToDb(t){
     notes:t.notes||'', field_path:t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null,
     geocoded_lat:t._geocoded?t._geocoded[0]:null, geocoded_lon:t._geocoded?t._geocoded[1]:null,
     history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false,
-    project_locked:t.project_locked||false
+    project_locked:t.project_locked||false,
+    damage_count:Math.max(0,parseInt(t.damageCount)||0)// Fase 1 refactor Damage: força integer não-negativo
   };
 }
 function projectToDb(p){
@@ -1243,11 +1245,49 @@ function openTicketDetail(id){
 
   const lockBadge=document.getElementById('det-lock-badge');
   const unlockBtn=document.getElementById('det-unlock-btn');
-  if(t.status_locked){lockBadge.style.display='';unlockBtn.style.display='';}
-  else{lockBadge.style.display='none';unlockBtn.style.display='none';}
+  // Badge "🔒 Travado" só aparece quando realmente travado
+  if(t.status_locked){lockBadge.style.display='';}
+  else{lockBadge.style.display='none';}
+  // Botão de desbloqueio: sempre visível pra admin, habilitado apenas quando há lock ativo.
+  // Feedback visual (disabled + opacity) indica pro admin que "não há bloqueio ativo agora".
+  if(!isSharedView&&isAdmin){
+    unlockBtn.style.display='';
+    unlockBtn.disabled=!t.status_locked;
+    unlockBtn.title=t.status_locked
+      ? 'Remove trava manual — sincronização 811 volta a atualizar status'
+      : 'Nenhum bloqueio ativo';
+  }else{
+    unlockBtn.style.display='none';
+  }
   // Project lock indicator on the Projeto button
   const projBtn=document.getElementById('det-proj-btn');
   if(projBtn)projBtn.innerHTML=t.project_locked?'📁 Projeto 🔒':'📁 Projeto';
+  // Seção de Danos (Fase 1 refactor): badge mostra contador atual, botão só admin.
+  const damageBadge=document.getElementById('det-damage-badge');
+  const damageSection=document.getElementById('field-damage-section');
+  const damageBtn=document.getElementById('det-damage-btn');
+  const dmgCount=parseInt(t.damageCount)||0;
+  if(damageBadge){
+    if(dmgCount>0){
+      damageBadge.textContent='⚠ '+dmgCount+(dmgCount===1?' dano':' danos');
+      damageBadge.classList.remove('hidden');
+    }else{
+      damageBadge.classList.add('hidden');
+    }
+  }
+  // Seção visível pra admin logado. Em share view, só aparece se tem damage (info pública).
+  if(damageSection){
+    if(isSharedView){
+      damageSection.style.display=dmgCount>0?'':'none';
+    }else{
+      damageSection.style.display='';
+    }
+  }
+  // Botão de registrar só pra admin
+  if(damageBtn){
+    damageBtn.style.display=(!isSharedView&&isAdmin)?'':'none';
+  }
+
   if(!isSharedView&&isAdmin){
     document.getElementById('det-edit-btn').classList.remove('hidden');
     document.getElementById('det-draw-btn').classList.remove('hidden');
@@ -1526,9 +1566,25 @@ async function setManualStatus(newStatus){
 }
 async function unlockStatus(id){
   const t=tickets.find(x=>x.id===id);if(!t)return;
+  // Auth: só admin (feature request explícito — botão já tá oculto pra não-admin,
+  // mas revalida aqui pra defesa em profundidade contra chamada direta no console)
+  if(!isAdmin){toast('Apenas admin pode desbloquear status','warn');return;}
+  // Idempotência: se não tá travado, não faz nada (evita escrita desnecessária no banco)
+  if(!t.status_locked){toast('Status já está em modo automático','info');return;}
+  // Confirm leve pra feedback do que vai acontecer
+  if(!confirm('Desbloquear automação 811?\n\nO status "'+t.status+'" será mantido por enquanto,\nmas a próxima sincronização 811 poderá sobrescrever conforme as utilities responderem.'))return;
+  const wasLocked=t.status_locked;
   t.status_locked=false;
+  t.history=t.history||[];// Fix bug #20: garante array antes de push
+  t.history.push({ts:Date.now(),action:'Automação 811 desbloqueada 🔓',color:'#1a6cf0'});
   const ok=await saveTicketToDb(t);
-  if(ok){toast('🔓 Status desbloqueado','success');openTicketDetail(id);}
+  if(ok){toast('🔓 Automação desbloqueada — 811 volta a atualizar o status','success');openTicketDetail(id);}
+  else{
+    // Rollback
+    t.status_locked=wasLocked;
+    t.history.pop();
+    toast('Erro ao salvar — tente dar refresh e novamente','danger');
+  }
 }
 async function unlockProject(id){
   const t=tickets.find(x=>x.id===id||x.id===currentDetailId);if(!t)return;
@@ -1537,6 +1593,58 @@ async function unlockProject(id){
   t.history.push({ts:Date.now(),action:'Projeto desbloqueado 🔓',color:'#1a6cf0'});
   const ok=await saveTicketToDb(t);
   if(ok){toast('🔓 Projeto desbloqueado','success');openTicketDetail(t.id);}
+}
+
+// ═══════════ DAMAGE TRACKING (Fase 1 do refactor) ═══════════
+// Damage é um contador independente do status. Um ticket pode ter damage_count>0
+// e continuar Open/Clear/Closed normalmente — o fluxo de trabalho segue como
+// se nada tivesse acontecido, mas o dado fica registrado pro analytics.
+function openDamageModal(id){
+  const t=tickets.find(x=>x.id===id);if(!t)return;
+  if(!isAdmin){toast('Apenas admin pode registrar danos','warn');return;}
+  // Preenche info do ticket no modal
+  const infoEl=document.getElementById('damage-ticket-info');
+  if(infoEl){
+    const prev=parseInt(t.damageCount)||0;
+    infoEl.innerHTML='Ticket <strong style="font-family:var(--mono)">'+esc(t.ticket)+'</strong> — '+esc(t.location||'')+(prev>0?' · <span style="color:#b45309">Já tem '+prev+' dano(s) registrado(s)</span>':'');
+  }
+  // Limpa inputs
+  document.getElementById('damage-utility').value='';
+  document.getElementById('damage-description').value='';
+  openModal('ov-damage');
+}
+
+async function confirmRegisterDamage(){
+  const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
+  if(!isAdmin){toast('Apenas admin pode registrar danos','warn');return;}
+  const utility=(document.getElementById('damage-utility').value||'').trim();
+  const description=(document.getElementById('damage-description').value||'').trim();
+
+  // Incrementa contador
+  const prev=parseInt(t.damageCount)||0;
+  t.damageCount=prev+1;
+
+  // Adiciona ao histórico — timestamp + utility + descrição
+  t.history=t.history||[];
+  let actionTxt='⚠ Dano registrado';
+  if(utility)actionTxt+=' — '+utility;
+  if(description)actionTxt+=': '+description;
+  actionTxt+=' (total: '+t.damageCount+')';
+  t.history.push({ts:Date.now(),action:actionTxt,color:'#d97706'});
+
+  // Salva
+  const ok=await saveTicketToDb(t);
+  if(ok){
+    toast('⚠ Dano registrado — total: '+t.damageCount,'success');
+    closeModal('ov-damage');
+    openTicketDetail(currentDetailId);
+    syncAll();
+  }else{
+    // Rollback
+    t.damageCount=prev;
+    t.history.pop();
+    toast('Erro ao salvar — tente dar refresh e novamente','danger');
+  }
 }
 
 function renderMiniMap(t){

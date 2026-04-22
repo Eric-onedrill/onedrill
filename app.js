@@ -304,6 +304,18 @@ function normalizeExpire(s){
     const yr=parseInt(iso[1],10),mo=parseInt(iso[2],10),day=parseInt(iso[3],10);
     if(mo>=1&&mo<=12&&day>=1&&day<=31)return String(mo).padStart(2,'0')+'/'+String(day).padStart(2,'0')+'/'+yr;
   }
+  // Fix bug #24: paridade com Python — suporte a "May 13, 2026" e "Jan 5, 2026".
+  // Sem isso, importações/migrações com esse formato resultavam em string vazia (data perdida).
+  const MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12,
+                january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  const mm=c.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/);
+  if(mm){
+    const moNum=MONTHS[mm[1].toLowerCase()];
+    if(moNum){
+      const day=parseInt(mm[2],10),yr=parseInt(mm[3],10);
+      if(day>=1&&day<=31)return String(moNum).padStart(2,'0')+'/'+String(day).padStart(2,'0')+'/'+yr;
+    }
+  }
   // Pega MM/DD/YY ou MM/DD/YYYY
   const m=c.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
   if(!m)return'';
@@ -312,6 +324,35 @@ function normalizeExpire(s){
   if(mo<1||mo>12||day<1||day>31)return'';
   return String(mo).padStart(2,'0')+'/'+String(day).padStart(2,'0')+'/'+yr;
 }
+
+// Fix bug #24: testes de paridade JS ↔ Python.
+// Expectativas aqui devem bater EXATAMENTE com os outputs do normalize_expire do 811_sync.py.
+// Se alguém mudar uma implementação sem atualizar a outra, esses testes disparam um warning
+// no console ao carregar o app. Abre ?dev=1 na URL pra ver os resultados detalhados.
+(function testNormalizeExpireParity(){
+  const cases=[
+    ['05/13/2026','05/13/2026'], ['5/13/2026','05/13/2026'],
+    ['05/13/26','05/13/2026'],   ['5/13/26','05/13/2026'],
+    ['2026-05-13','05/13/2026'], ['2026-5-13','05/13/2026'],
+    ['May 13, 2026','05/13/2026'], ['Jan 5, 2026','01/05/2026'],
+    ['December 31, 2025','12/31/2025'], ['Feb 29, 2024','02/29/2024'],
+    ['05/13/2026 11:59 PM','05/13/2026'], ['05/13/2026 23:59','05/13/2026'],
+    ['05/13/26 23:59ET','05/13/2026'], ['05/13/2026 Time: 23:59','05/13/2026'],
+    ['05/13/2026 at 23:59','05/13/2026'],
+    ['',''], ['—',''], ['-',''], ['N/A',''], ['None',''], ['null',''],
+    ['lixo que não é data',''], ['13/05/2026',''],
+  ];
+  const fails=[];
+  for(const[inp,exp]of cases){
+    const got=normalizeExpire(inp);
+    if(got!==exp)fails.push({inp,exp,got});
+  }
+  if(fails.length){
+    console.warn('[normalizeExpire parity] ⚠️ '+fails.length+' casos divergindo do Python:',fails);
+  }else if(new URLSearchParams(location.search).get('dev')==='1'){
+    console.log('[normalizeExpire parity] ✅ '+cases.length+' casos OK (paridade JS ↔ Python)');
+  }
+})();
 
 function dbToTicket(r){
   return{
@@ -1330,12 +1371,13 @@ async function renewTicket(){
   // Cadeia de tickets anteriores (suporta múltiplas renovações)
   const prevChain=t.oldTicket2||t.old_ticket2||'';
   const fullChain=prevChain?oldNum+' → '+prevChain:oldNum;
-  // Salva dados antigos
-  t.old_ticket2=fullChain;
+  // Fix bug #16 (dualidade camelCase/snake_case): escreve SÓ em camelCase.
+  // ticketToDb converte pra snake_case na hora do save. Antes, o código escrevia nos
+  // DOIS formatos por paranoia, mas snake_case era ignorado por ticketToDb — código morto
+  // que confundia manutenção. Leituras mantêm fallback defensivo (t.oldTicket2 || t.old_ticket2)
+  // pra proteger contra subscribes raw do Supabase que pulam dbToTicket.
   t.oldTicket2=fullChain;
-  t.expire_old=oldExpire;
   t.expireOld=oldExpire;
-  t.status_old=oldStatus;
   t.statusOld=oldStatus;
   // Atualiza para novo ticket
   t.ticket=newTicket;
@@ -1354,7 +1396,8 @@ async function renewTicket(){
     setTimeout(()=>openTicketDetail(t.id),300);
   }else{
     // Rollback completo incluindo expire (que foi zerado acima)
-    t.ticket=oldNum;t.old_ticket2=prevChain;t.oldTicket2=prevChain;t.expire_old='';t.expireOld='';t.status_old='';t.statusOld='';t.expire=oldExpire;
+    // Fix bug #16: rollback também em camelCase só — ticketToDb é a guarda única.
+    t.ticket=oldNum;t.oldTicket2=prevChain;t.expireOld='';t.statusOld='';t.expire=oldExpire;
     t.history.pop();
     toast('Erro ao salvar renovação. Tente dar Refresh (⟳) e tentar novamente.','danger');
   }

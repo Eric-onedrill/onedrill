@@ -544,7 +544,7 @@
         <button class="btn btn-sm btn-draw hidden" id="det-draw-btn" data-action="go-draw-field">✏️ Desenhar</button>
         <button class="btn btn-sm btn-accent" id="det-proj-btn" data-action="open-move-proj">📁 Projeto</button>
         <button class="btn btn-sm hidden" id="det-edit-btn" data-action="edit-current-ticket">Editar</button>
-        <button class="btn btn-sm hidden" id="det-renew-btn" onclick="renewTicket()" style="background:#7c3aed;color:white;border-color:#7c3aed">🔄 Renovar</button>
+        <button class="btn btn-sm hidden" id="det-renew-btn" data-action="renew-ticket" style="background:#7c3aed;color:white;border-color:#7c3aed">🔄 Renovar</button>
         <button class="btn btn-sm" data-action="navigate-from-detail">🗺 Navegar</button>
         <button class="modal-close" data-close="ov-detail">×</button>
       </div>
@@ -671,6 +671,7 @@
     'go-draw-field':         () => goDrawField(currentDetailId),
     'open-move-proj':        () => openMoveProj(currentDetailId),
     'edit-current-ticket':   () => editCurrentTicket(),
+    'renew-ticket':          () => renewTicket(),
     'navigate-from-detail':  () => openNavigation(currentDetailId),
     'open-full-map':         () => openFullMap(currentDetailId),
     'unlock-status':         () => unlockStatus(currentDetailId),

@@ -93,6 +93,10 @@ let _clearedExpand=null;
 // Exclusivo com _clearedExpand — só um dos dois fica aberto por vez.
 let _clearedExpandDay=null;
 let utilContacts=[],editingContactId=null;
+// Fase 3 do filtro county: cobertura utility × county (auto-derivada pelo Python)
+let utilCoverage=[];
+// County pré-selecionado quando usuário abre a aba Contatos vindo de um ticket específico
+let _contactsPreselectCounty='';
 let supersededSet=new Set();
 let miniMap=null;
 let _expAlertEl=null;
@@ -371,6 +375,7 @@ function dbToTicket(r){
     history:r.history||[], attachments:r.attachments||[], status_locked:r.status_locked||false,
     project_locked:r.project_locked||false,
     damageCount:r.damage_count||0,// Fase 1 do refactor Damage: contador separado do status
+    county:r.county||'',// Fase 1 filtro county: auto-derivado pelo Python via base cidade→county
     created_at:r.created_at||null
   };
 }
@@ -388,7 +393,8 @@ function ticketToDb(t){
     geocoded_lat:t._geocoded?t._geocoded[0]:null, geocoded_lon:t._geocoded?t._geocoded[1]:null,
     history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false,
     project_locked:t.project_locked||false,
-    damage_count:Math.max(0,parseInt(t.damageCount)||0)// Fase 1 refactor Damage: força integer não-negativo
+    damage_count:Math.max(0,parseInt(t.damageCount)||0),// Fase 1 refactor Damage: força integer não-negativo
+    county:t.county||''// Fase 1 filtro county
   };
 }
 function projectToDb(p){
@@ -598,18 +604,89 @@ async function loadContacts(){
   }catch(e){console.error('Contacts load error:',e);utilContacts=[];}
 }
 
+// Carrega tabela utility_county_coverage (auto-derivada pela Fase 2 do Python).
+// Usada pra saber quais utilities atendem cada county.
+async function loadUtilCoverage(){
+  try{
+    let allData=[];
+    let offset=0;
+    const pageSize=1000;
+    while(true){
+      const{data,error}=await sb
+        .from('utility_county_coverage')
+        .select('utility_name,county,state,response_count')
+        .order('response_count',{ascending:false})
+        .range(offset,offset+pageSize-1);
+      if(error){
+        // Tabela pode não existir ainda (Fase 2 SQL não rodou). Falha silenciosa — UI lida.
+        console.warn('[Coverage] load error:',error.message);
+        break;
+      }
+      if(!data||!data.length)break;
+      allData=allData.concat(data);
+      if(data.length<pageSize)break;
+      offset+=pageSize;
+    }
+    utilCoverage=allData;
+    console.log('[Coverage]',utilCoverage.length,'cobertas utility×county carregadas');
+  }catch(e){console.error('Coverage load error:',e);utilCoverage=[];}
+}
+
+// Preenche dropdown de county baseado no state selecionado.
+// Lê counties únicos da tabela utility_county_coverage filtrados pelo state.
+// Se _contactsPreselectCounty tá setado (usuário veio de um ticket), pré-seleciona.
+function repopulateCountyDropdown(){
+  const stateSel=document.getElementById('contacts-state-filter');
+  const countySel=document.getElementById('contacts-county-filter');
+  if(!stateSel||!countySel)return;
+  const st=stateSel.value||'';
+  if(!st){
+    // Sem state → county desabilitado
+    countySel.innerHTML='<option value="">Todos counties</option>';
+    countySel.disabled=true;
+    countySel.title='Selecione um estado primeiro';
+    return;
+  }
+  // Counties únicos daquele state, ordenados alfabeticamente
+  const counties=[...new Set(utilCoverage.filter(c=>c.state===st).map(c=>c.county).filter(Boolean))].sort();
+  countySel.disabled=false;
+  countySel.title='';
+  let options='<option value="">Todos counties</option>';
+  for(const c of counties){
+    options+='<option value="'+esc(c)+'">'+esc(c)+'</option>';
+  }
+  countySel.innerHTML=options;
+  // Pré-seleção (só uma vez)
+  if(_contactsPreselectCounty&&counties.indexOf(_contactsPreselectCounty)>=0){
+    countySel.value=_contactsPreselectCounty;
+    _contactsPreselectCounty='';// consume
+  }
+}
+
 function renderContacts(){
   const grid=document.getElementById('contacts-grid');if(!grid)return;
   const sr=(document.getElementById('contacts-search')?.value||'').toLowerCase();
   const sf=document.getElementById('contacts-state-filter')?.value||'';
+  const cf=document.getElementById('contacts-county-filter')?.value||'';
+  // Se county foi selecionado, calcula set de utility_names que atendem esse county (daquele state)
+  let allowedUtilities=null;
+  if(cf&&sf){
+    allowedUtilities=new Set(
+      utilCoverage
+        .filter(c=>c.state===sf&&c.county===cf)
+        .map(c=>(c.utility_name||'').toUpperCase())
+    );
+  }
   let f=utilContacts.filter(c=>{
     if(sf&&(c.state||'')!==sf)return false;
     if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;
+    if(allowedUtilities&&!allowedUtilities.has((c.utility_name||'').toUpperCase()))return false;
     return true;
   });
   if(!f.length){
-    grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'
-      +(utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'')+'</div>';
+    const hint=cf?'<br><span style="font-size:11px">Nenhum contato de utility que atenda '+esc(cf)+' County, '+esc(sf)+'.</span>':
+      (utilContacts.length===0?' Execute <code>python 811_sync.py --contacts --state FL</code> para importar.':'');
+    grid.innerHTML='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Nenhum contato encontrado.'+hint+'</div>';
     return;
   }
   const byUtil={};
@@ -783,6 +860,7 @@ function enterApp(){
   loadLastSync();
   loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
   loadContacts().then(()=>renderContacts());
+  loadUtilCoverage();// Fase 3 filtro county — independente, não bloqueia
 
   // Auto-refresh
   // Fix bug #2: limpa interval anterior antes de criar novo.
@@ -823,6 +901,23 @@ function nav(page){
   if(page==='contacts')renderContacts();
   if(page==='analytics')renderAnalytics();
   if(page==='completed')renderCompletedPage();
+}
+
+// Navega pra aba Contatos já pré-filtrando state+county do ticket atual.
+// Usada pelo link clicável do campo "County" no modal de detalhes.
+function gotoContactsForCounty(county,state){
+  if(!county||!state)return;
+  closeModal('ov-detail');
+  // Seta state primeiro, daí county é pré-selecionado automaticamente pelo repopulate
+  const stateSel=document.getElementById('contacts-state-filter');
+  if(stateSel)stateSel.value=state;
+  _contactsPreselectCounty=county;
+  nav('contacts');
+  // repopulate é chamado pelo listener de change do state, mas como setamos programaticamente,
+  // precisamos chamar manualmente
+  repopulateCountyDropdown();
+  renderContacts();
+  toast('📞 Filtro: '+county+' County, '+state,'info');
 }
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
@@ -1234,6 +1329,7 @@ function openTicketDetail(id){
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${esc(t.location)}, ${esc(t.state)}</span></div>`
+    +(t.county?`<div class="mp-row"><span class="mp-key">County</span><span class="mp-val" style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="gotoContactsForCounty('${esc(t.county).replace(/'/g,"\\\\'")}','${esc(t.state)}');return false;" title="Ver contatos que atendem ${esc(t.county)} County">📞 ${esc(t.county)} County</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val">${t.footage} ft</span></div>`
     +`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${esc(t.job||'—')}</span></div>`
@@ -1269,15 +1365,25 @@ function openTicketDetail(id){
   if(projBtn)projBtn.innerHTML=t.project_locked?'📁 Projeto 🔒':'📁 Projeto';
   // Seção de Danos (Fase 1 refactor): badge mostra contador atual, botão só admin.
   const damageBadge=document.getElementById('det-damage-badge');
+  const damageBadgeWrap=document.getElementById('det-damage-badge-wrap');
+  const damageDecrementBtn=document.getElementById('det-damage-decrement');
   const damageSection=document.getElementById('field-damage-section');
   const damageBtn=document.getElementById('det-damage-btn');
   const dmgCount=parseInt(t.damageCount)||0;
-  if(damageBadge){
+  if(damageBadge&&damageBadgeWrap){
     if(dmgCount>0){
       damageBadge.textContent='⚠ '+dmgCount+(dmgCount===1?' dano':' danos');
-      damageBadge.classList.remove('hidden');
+      damageBadgeWrap.classList.remove('hidden');
     }else{
-      damageBadge.classList.add('hidden');
+      damageBadgeWrap.classList.add('hidden');
+    }
+  }
+  // Botão de decremento: aparece só se admin E tem damage a remover
+  if(damageDecrementBtn){
+    if(!isSharedView&&isAdmin&&dmgCount>0){
+      damageDecrementBtn.classList.remove('hidden');
+    }else{
+      damageDecrementBtn.classList.add('hidden');
     }
   }
   // Seção visível pra admin logado. Em share view, só aparece se tem damage (info pública).
@@ -1643,6 +1749,33 @@ async function confirmRegisterDamage(){
     toast('⚠ Dano registrado — total: '+t.damageCount,'success');
     closeModal('ov-damage');
     openTicketDetail(currentDetailId);
+    syncAll();
+  }else{
+    // Rollback
+    t.damageCount=prev;
+    t.history.pop();
+    toast('Erro ao salvar — tente dar refresh e novamente','danger');
+  }
+}
+
+// Decremento simples do damage_count. Útil pra corrigir registros criados por engano.
+// Mantém histórico: adiciona uma entrada "dano removido" ao invés de apagar o registro original
+// — auditoria é preservada.
+async function decrementDamage(id){
+  const t=tickets.find(x=>x.id===id);if(!t)return;
+  if(!isAdmin){toast('Apenas admin pode remover danos','warn');return;}
+  const prev=parseInt(t.damageCount)||0;
+  if(prev<=0){toast('Nenhum dano registrado para remover','info');return;}
+  if(!confirm('Remover 1 dano deste ticket?\n\nContador atual: '+prev+'\nApós remover: '+(prev-1)+'\n\nO histórico do registro original será mantido como auditoria.'))return;
+
+  t.damageCount=prev-1;
+  t.history=t.history||[];
+  t.history.push({ts:Date.now(),action:'⚠ Dano removido (total: '+t.damageCount+')',color:'#6b7280'});
+
+  const ok=await saveTicketToDb(t);
+  if(ok){
+    toast('Dano removido — total: '+t.damageCount,'success');
+    openTicketDetail(id);
     syncAll();
   }else{
     // Rollback
@@ -2980,8 +3113,161 @@ function renderAnalytics(){
     +renderClearTimeMetrics(fT)
     +renderUtilSummaryHtml()
     +renderRecentActivity(fT)
-    +renderSyncHealthCard();
+    +renderSyncHealthCard()
+    +renderDamageAnalytics(fT,fP);
   loadLastSync();
+}
+
+// ═══════════ DAMAGE ANALYTICS (Fase 3 do refactor Damage) ═══════════
+// 6 métricas pedidas pelo usuário:
+//   1. Total empresa (soma de damage_count)
+//   2. Por estado
+//   3. Por projeto
+//   4. % empresa por footage (footage de tickets com damage / footage total)
+//   5. % por estado por footage
+//   6. % por projeto por footage
+//
+// Conta damages de TODOS os tickets (inclui Closed/Cancel) porque damage é histórico.
+function renderDamageAnalytics(fT,fP){
+  // 1. Total empresa — soma de damage_count, considera TODOS tickets do scope (não respeita filtro de state/scope pra métrica empresa)
+  // Mas pra coerência com os outros analytics que usam fT, vou usar fT (que já respeita o dropdown de estado).
+  // O label deixa claro: "Empresa" significa "todos os tickets do escopo atual".
+  const allT=fT;// tickets do escopo atual (inclui Closed/Cancel — damage é histórico)
+  const withDmg=allT.filter(t=>(parseInt(t.damageCount)||0)>0);
+  const totalDmg=allT.reduce((s,t)=>s+(parseInt(t.damageCount)||0),0);
+  const ticketsWithDmgCount=withDmg.length;
+  const allFootage=allT.reduce((s,t)=>s+(t.footage||0),0);
+  const footageWithDmg=withDmg.reduce((s,t)=>s+(t.footage||0),0);
+  const pctAllFt=allFootage>0?(footageWithDmg/allFootage*100):0;
+
+  // 2. Por estado
+  const byState={};
+  for(const t of allT){
+    const st=t.state||'—';
+    if(!byState[st])byState[st]={damageCount:0,tickets:0,ticketsWithDmg:0,footage:0,footageWithDmg:0};
+    byState[st].tickets++;
+    byState[st].footage+=(t.footage||0);
+    const dc=parseInt(t.damageCount)||0;
+    if(dc>0){
+      byState[st].damageCount+=dc;
+      byState[st].ticketsWithDmg++;
+      byState[st].footageWithDmg+=(t.footage||0);
+    }
+  }
+  // 3. Por projeto
+  const byProj={};
+  for(const t of allT){
+    const pid=t.projectId||'';
+    if(!pid)continue;// skip tickets sem projeto
+    if(!byProj[pid])byProj[pid]={damageCount:0,tickets:0,ticketsWithDmg:0,footage:0,footageWithDmg:0};
+    byProj[pid].tickets++;
+    byProj[pid].footage+=(t.footage||0);
+    const dc=parseInt(t.damageCount)||0;
+    if(dc>0){
+      byProj[pid].damageCount+=dc;
+      byProj[pid].ticketsWithDmg++;
+      byProj[pid].footageWithDmg+=(t.footage||0);
+    }
+  }
+
+  // Cards do topo
+  const cardsHtml='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
+    +'<div style="padding:14px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r);text-align:center">'
+    +'<div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+totalDmg+'</div>'
+    +'<div style="font-size:11px;color:var(--amber);text-transform:uppercase;letter-spacing:.03em">Total de danos</div>'
+    +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px">em '+ticketsWithDmgCount+' ticket(s)</div>'
+    +'</div>'
+    +'<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center">'
+    +'<div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--text)">'+footageWithDmg.toLocaleString()+' ft</div>'
+    +'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">Footage afetado</div>'
+    +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px">de '+allFootage.toLocaleString()+' ft total</div>'
+    +'</div>'
+    +'<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center">'
+    +'<div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--text)">'+pctAllFt.toFixed(2)+'%</div>'
+    +'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">% pelo footage</div>'
+    +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:3px">footage com dano ÷ total</div>'
+    +'</div>'
+    +'</div>';
+
+  // Tabela por estado
+  const stateRows=Object.entries(byState)
+    .filter(([_,d])=>d.damageCount>0)
+    .sort((a,b)=>b[1].damageCount-a[1].damageCount);
+  const stateTable=stateRows.length?'<div style="margin-bottom:14px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Por estado</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">'
+    +'<thead><tr style="background:var(--bg-alt,var(--bg));border-bottom:2px solid var(--border)">'
+    +'<th style="padding:8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Estado</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Danos</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Tickets c/ dano</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Footage afetado</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Footage total</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">% ft</th>'
+    +'</tr></thead><tbody>'
+    +stateRows.map(([st,d])=>{
+      const pct=d.footage>0?(d.footageWithDmg/d.footage*100):0;
+      return'<tr style="border-bottom:1px solid var(--border)">'
+        +'<td style="padding:6px 8px;font-weight:700">'+esc(st)+'</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--amber);font-weight:700">'+d.damageCount+'</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+d.ticketsWithDmg+'</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+d.footageWithDmg.toLocaleString()+' ft</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--muted)">'+d.footage.toLocaleString()+' ft</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--amber);font-weight:700">'+pct.toFixed(2)+'%</td>'
+        +'</tr>';
+    }).join('')
+    +'</tbody></table></div>':'';
+
+  // Tabela por projeto
+  const projRows=Object.entries(byProj)
+    .filter(([_,d])=>d.damageCount>0)
+    .map(([pid,d])=>{
+      const p=projects.find(pp=>pp.id===pid);
+      return{name:p?p.name:'(projeto removido)',client:p?p.client:'',state:p?p.state:'',data:d};
+    })
+    .sort((a,b)=>b.data.damageCount-a.data.damageCount);
+  const projTable=projRows.length?'<div>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Por projeto</div>'
+    +'<div style="overflow-x:auto;max-height:400px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead style="position:sticky;top:0;background:var(--bg);z-index:1">'
+    +'<tr style="border-bottom:2px solid var(--border)">'
+    +'<th style="padding:8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Projeto</th>'
+    +'<th style="padding:8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Estado</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Danos</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Tickets c/ dano</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Footage afetado</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Footage total</th>'
+    +'<th style="padding:8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">% ft</th>'
+    +'</tr></thead><tbody>'
+    +projRows.map(r=>{
+      const d=r.data;
+      const pct=d.footage>0?(d.footageWithDmg/d.footage*100):0;
+      return'<tr style="border-bottom:1px solid var(--border)">'
+        +'<td style="padding:6px 8px;font-weight:600">'+esc(r.name)+(r.client?'<span style="font-size:10px;color:var(--muted);margin-left:6px">'+esc(r.client)+'</span>':'')+'</td>'
+        +'<td style="padding:6px 8px;font-size:11px;color:var(--muted)">'+esc(r.state||'—')+'</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--amber);font-weight:700">'+d.damageCount+'</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+d.ticketsWithDmg+'</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+d.footageWithDmg.toLocaleString()+' ft</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--muted)">'+d.footage.toLocaleString()+' ft</td>'
+        +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--amber);font-weight:700">'+pct.toFixed(2)+'%</td>'
+        +'</tr>';
+    }).join('')
+    +'</tbody></table></div></div>':'';
+
+  // Estado vazio — se nada de damage foi registrado ainda
+  if(totalDmg===0){
+    return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">'
+      +'<div class="dash-card-title" style="margin-bottom:10px">⚠ Damages</div>'
+      +'<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Nenhum dano registrado no escopo atual.<br><span style="font-size:11px">Registre danos pelo botão "⚠ Registrar dano" no modal de cada ticket.</span></div>'
+      +'</div></div>';
+  }
+
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">'
+    +'<div class="dash-card-title" style="margin-bottom:10px">⚠ Damages <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:6px">(inclui tickets Closed/Cancel)</span></div>'
+    +cardsHtml
+    +stateTable
+    +projTable
+    +'</div></div>';
 }
 
 function renderVelocity(fT,ps){

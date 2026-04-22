@@ -87,6 +87,11 @@ let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
 let _soonDays=10,_metricProjFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='',_analyticsScope='all';
+// Qual card expandiu os tickets clareados: 'today' | '7d' | '30d' | null
+let _clearedExpand=null;
+// Qual dia do bar chart expandiu (formato YYYY-MM-DD) | null.
+// Exclusivo com _clearedExpand — só um dos dois fica aberto por vez.
+let _clearedExpandDay=null;
 let utilContacts=[],editingContactId=null;
 let supersededSet=new Set();
 let miniMap=null;
@@ -3068,14 +3073,23 @@ function renderClearedStats(fTickets){
   var maxBar=Math.max.apply(null,dayLabels.map(function(d2){return dayBuckets[d2.key]||0;}))||1;
   var barHtml='<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding-top:20px">';
   for(var ib2=0;ib2<dayLabels.length;ib2++){
-    var dv=dayBuckets[dayLabels[ib2].key]||0;
+    var dLbl=dayLabels[ib2];
+    var dv=dayBuckets[dLbl.key]||0;
     var bh=Math.max(dv/maxBar*100,2);
-    barHtml+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">'
-      +'<div style="font-size:10px;font-weight:700;color:var(--green)">'+( dv||'')+'</div>'
+    // Só dias com >0 tickets são clicáveis (não faz sentido expandir vazio)
+    var isClickable=dv>0;
+    var isActive=_clearedExpandDay===dLbl.key;
+    var clickAttr=isClickable?' onclick="toggleClearedDay(\''+dLbl.key+'\')" style="cursor:pointer;padding:2px;border-radius:4px;'+(isActive?'background:var(--green-bg);box-shadow:0 0 0 2px var(--green);':'')+'" onmouseover="this.style.opacity=.85" onmouseout="this.style.opacity=1" title="Clique para ver os '+dv+' ticket(s)"':' style="padding:2px"';
+    barHtml+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"'+clickAttr+'>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--green)">'+(dv||'')+'</div>'
       +'<div style="width:100%;height:'+bh+'px;background:var(--green);border-radius:3px 3px 0 0;min-height:2px"></div>'
-      +'<div style="font-size:9px;color:var(--muted);white-space:nowrap">'+dayLabels[ib2].label+'</div></div>';
+      +'<div style="font-size:9px;color:var(--muted);white-space:nowrap">'+dLbl.label+'</div></div>';
   }
   barHtml+='</div>';
+  // Se tem dia selecionado, adiciona a seção expandida logo abaixo do chart
+  if(_clearedExpandDay){
+    barHtml+=_renderClearedDayExpand(_clearedExpandDay,c7);
+  }
 
   // ── Utility list (vertical) ──
   var utilListHtml='';
@@ -3101,15 +3115,266 @@ function renderClearedStats(fTickets){
 
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="dash-card-title" style="margin-bottom:0">✅ Tickets Clareados</div>'+projSel+'</div>'
     +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'
-    +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+cToday.length+'</div><div style="font-size:10px;color:var(--green)">hoje</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ftToday.toLocaleString()+' ft</div></div>'
-    +'<div style="padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">'+c7.length+'</div><div style="font-size:10px;color:var(--green)">últimos 7 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft7.toLocaleString()+' ft</div></div>'
-    +'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">'+c30.length+'</div><div style="font-size:10px;color:var(--muted)">últimos 30 dias</div><div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft30.toLocaleString()+' ft</div></div>'
+    +_renderClearedCard('today',cToday.length,ftToday,'hoje',_clearedExpand==='today')
+    +_renderClearedCard('7d',c7.length,ft7,'últimos 7 dias',_clearedExpand==='7d')
+    +_renderClearedCard('30d',c30.length,ft30,'últimos 30 dias',_clearedExpand==='30d')
     +'</div>'
+    +_renderClearedExpand(_clearedExpand,cToday,c7,c30)
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px">'
     +'<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Clareados por dia (últimos 7 dias)</div>'+barHtml+todayHtml+'</div>'
     +'<div>'+utilListHtml+'</div>'
     +'</div>'
     +'</div></div>';
+}
+
+// ═══════════ CLEARED CARDS: toggle + expand inline (footage desc + export) ═══════════
+// Renderiza um dos 3 cards (hoje/7d/30d) clicável. Card ativo ganha borda mais grossa.
+function _renderClearedCard(key,count,ft,label,isActive){
+  var isHoje=(key==='today');
+  var isHighlight=(isHoje||key==='7d');
+  var bg=isHighlight?'var(--green-bg)':'var(--bg)';
+  var borderColor=isHighlight?'var(--green-border)':'var(--border)';
+  var txtColor=isHighlight?'var(--green)':'var(--text)';
+  var labelColor=isHighlight?'var(--green)':'var(--muted)';
+  var activeStyle=isActive?'box-shadow:0 0 0 2px var(--green);transform:translateY(-1px);':'';
+  return'<div onclick="toggleClearedExpand(\''+key+'\')" style="padding:12px;background:'+bg+';border:1px solid '+borderColor+';border-radius:var(--r);text-align:center;cursor:pointer;transition:all .15s;'+activeStyle+'" onmouseover="this.style.opacity=.85" onmouseout="this.style.opacity=1">'
+    +'<div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+txtColor+'">'+count+'</div>'
+    +'<div style="font-size:10px;color:'+labelColor+'">'+esc(label)+'</div>'
+    +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft.toLocaleString()+' ft</div>'
+    +'<div style="font-size:9px;color:var(--muted);margin-top:4px">'+(isActive?'▲ clique p/ recolher':'▼ clique p/ expandir')+'</div>'
+    +'</div>';
+}
+
+// Toggle: clica de novo no mesmo → fecha. Clica em outro → troca.
+// Mutex com _clearedExpandDay: abrir card fecha dia expandido (e vice-versa).
+function toggleClearedExpand(key){
+  _clearedExpand=(_clearedExpand===key)?null:key;
+  if(_clearedExpand)_clearedExpandDay=null;// fecha dia se tinha aberto
+  refreshDashOrAnalytics();
+}
+
+// Toggle do dia do bar chart — segue mesmo padrão dos cards.
+function toggleClearedDay(dayKey){
+  _clearedExpandDay=(_clearedExpandDay===dayKey)?null:dayKey;
+  if(_clearedExpandDay)_clearedExpand=null;// fecha card se tinha aberto
+  refreshDashOrAnalytics();
+}
+
+// Seção expandida: tabela dos tickets do período selecionado, ordenada por footage DESC.
+function _renderClearedExpand(key,cToday,c7,c30){
+  if(!key)return'';
+  var list=key==='today'?cToday:key==='7d'?c7:c30;
+  var periodLabel=key==='today'?'hoje':key==='7d'?'últimos 7 dias':'últimos 30 dias';
+  if(!list.length){
+    return'<div style="margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center;color:var(--muted);font-size:12px">Nenhum ticket clareado '+esc(periodLabel)+'.</div>';
+  }
+  // Ordena por footage desc (tie-breaker: ticket asc)
+  var sorted=list.slice().sort(function(a,b){
+    var fa=a.footage||0,fb=b.footage||0;
+    if(fb!==fa)return fb-fa;
+    return String(a.ticket||'').localeCompare(String(b.ticket||''));
+  });
+  var totalFt=0;for(var x=0;x<sorted.length;x++)totalFt+=(sorted[x].footage||0);
+  // Tabela
+  var rows='';
+  for(var i=0;i<sorted.length;i++){
+    var t=sorted[i];
+    var projName=(projects.find(function(p){return p.id===t.projectId;})||{}).name||'—';
+    var clearTs=_getTicketClearDateForExpand(t);
+    var clearDateStr='—';
+    if(clearTs){
+      var dd=new Date(clearTs);
+      clearDateStr=String(dd.getMonth()+1).padStart(2,'0')+'/'+String(dd.getDate()).padStart(2,'0')+'/'+dd.getFullYear();
+    }
+    rows+='<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+t.id+')" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'\'">'
+      +'<td style="padding:6px 8px;font-family:var(--mono);font-size:11px">'+esc(t.ticket||'')+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px">'+esc(t.state||'')+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px">'+esc(t.location||'')+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px">'+esc(projName)+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px;font-family:var(--mono);color:var(--green);font-weight:700;text-align:right">'+(t.footage||0).toLocaleString()+' ft</td>'
+      +'<td style="padding:6px 8px;font-size:11px;font-family:var(--mono);color:var(--muted)">'+esc(clearDateStr)+'</td>'
+      +'</tr>';
+  }
+  return'<div style="margin-top:12px;padding:12px;background:var(--bg-alt,var(--bg));border:1px solid var(--green-border);border-radius:var(--r)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em">Tickets clareados '+esc(periodLabel)+' ('+sorted.length+' · '+totalFt.toLocaleString()+' ft total)</div>'
+    +'<button class="btn btn-sm" onclick="exportClearedTickets(\''+key+'\')" style="font-size:11px">📊 Exportar Excel</button>'
+    +'</div>'
+    +'<div style="overflow-x:auto;max-height:400px;overflow-y:auto">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    +'<thead style="position:sticky;top:0;background:var(--bg);z-index:1">'
+    +'<tr style="border-bottom:2px solid var(--border)">'
+    +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Ticket</th>'
+    +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Estado</th>'
+    +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Location</th>'
+    +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Projeto</th>'
+    +'<th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Footage ↓</th>'
+    +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Liberado em</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'</table></div></div>';
+}
+
+// Helper standalone pra extração de data — duplica lógica de getTicketClearDate que é local à função.
+// Precisa ser acessível fora do escopo original do renderDashboard.
+function _getTicketClearDateForExpand(t){
+  if(!t.history||!t.history.length)return 0;
+  for(var j=t.history.length-1;j>=0;j--){
+    var a=(t.history[j].action||'').toLowerCase();
+    var isAutoClear=a.indexOf('auto-clear')>=0;
+    var isAuto811=a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0;
+    var isManualClear=a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0;
+    if(isAutoClear||isAuto811||isManualClear){return t.history[j].ts;}
+  }
+  return 0;
+}
+
+// Converte timestamp → YYYY-MM-DD em fuso LOCAL (match com localDateKey do renderDashboard).
+function _localDateKeyForExpand(ts){
+  var d=new Date(ts);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// Seção expandida de um DIA específico do bar chart.
+// Filtra c7 pelos tickets cuja data de clear bate no dayKey (YYYY-MM-DD local).
+function _renderClearedDayExpand(dayKey,c7){
+  if(!dayKey)return'';
+  var list=[];
+  var seen={};
+  for(var i=0;i<c7.length;i++){
+    var t=c7[i];
+    var cd=_getTicketClearDateForExpand(t);if(!cd)continue;
+    if(_localDateKeyForExpand(cd)!==dayKey)continue;
+    if(seen[t.ticket])continue;
+    seen[t.ticket]=1;
+    list.push(t);
+  }
+  // Label amigável do dia ("qui, 16/04/2026")
+  var parts=dayKey.split('-');
+  var dt=new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2]));
+  var diasSemana=['dom','seg','ter','qua','qui','sex','sáb'];
+  var dayLabel=diasSemana[dt.getDay()]+', '+String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0')+'/'+dt.getFullYear();
+
+  if(!list.length){
+    return'<div style="margin-top:10px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);text-align:center;color:var(--muted);font-size:11px">Nenhum ticket clareado em '+esc(dayLabel)+'.</div>';
+  }
+  // Ordena por footage desc
+  list.sort(function(a,b){
+    var fa=a.footage||0,fb=b.footage||0;
+    if(fb!==fa)return fb-fa;
+    return String(a.ticket||'').localeCompare(String(b.ticket||''));
+  });
+  var totalFt=0;for(var x=0;x<list.length;x++)totalFt+=(list[x].footage||0);
+  var rows='';
+  for(var i2=0;i2<list.length;i2++){
+    var tk=list[i2];
+    var projName=(projects.find(function(p){return p.id===tk.projectId;})||{}).name||'—';
+    rows+='<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openTicketDetail('+tk.id+')" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'\'">'
+      +'<td style="padding:5px 8px;font-family:var(--mono);font-size:11px">'+esc(tk.ticket||'')+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+esc(tk.state||'')+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+esc(tk.location||'')+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+esc(projName)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);color:var(--green);font-weight:700;text-align:right">'+(tk.footage||0).toLocaleString()+' ft</td>'
+      +'</tr>';
+  }
+  return'<div style="margin-top:10px;padding:10px;background:var(--bg-alt,var(--bg));border:1px solid var(--green-border);border-radius:var(--r)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em">📅 '+esc(dayLabel)+' ('+list.length+' · '+totalFt.toLocaleString()+' ft)</div>'
+    +'<button class="btn btn-sm" onclick="exportClearedDay(\''+dayKey+'\')" style="font-size:11px">📊 Exportar Excel</button>'
+    +'</div>'
+    +'<div style="overflow-x:auto;max-height:280px;overflow-y:auto">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    +'<thead style="position:sticky;top:0;background:var(--bg);z-index:1">'
+    +'<tr style="border-bottom:2px solid var(--border)">'
+    +'<th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Ticket</th>'
+    +'<th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Estado</th>'
+    +'<th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Location</th>'
+    +'<th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text2);text-transform:uppercase">Projeto</th>'
+    +'<th style="padding:5px 8px;text-align:right;font-size:10px;color:var(--text2);text-transform:uppercase">Footage ↓</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'</table></div></div>';
+}
+
+// Exporta tickets de um dia específico.
+function exportClearedDay(dayKey){
+  var cpf=_clearProjFilter||'';
+  var source=cpf?tickets.filter(function(t){return t.projectId===cpf;}):tickets;
+  var list=[],seen={};
+  for(var i=0;i<source.length;i++){
+    var t=source[i];if(t.status==='Cancel')continue;
+    var cd=_getTicketClearDateForExpand(t);if(!cd)continue;
+    if(_localDateKeyForExpand(cd)!==dayKey)continue;
+    if(seen[t.ticket])continue;
+    seen[t.ticket]=1;
+    list.push(t);
+  }
+  if(!list.length){toast('Nenhum ticket clareado nesse dia','warn');return;}
+  list.sort(function(a,b){return(b.footage||0)-(a.footage||0);});
+
+  var rows=[['Ticket','Cliente','Prime','Estado','Location','Projeto','Footage','Liberado em','Expira','Tipo','Endereço']];
+  for(var r=0;r<list.length;r++){
+    var tk=list[r];
+    var projName=(projects.find(function(p){return p.id===tk.projectId;})||{}).name||'';
+    var cdRT=_getTicketClearDateForExpand(tk);
+    var cdStr='';
+    if(cdRT){
+      var dd=new Date(cdRT);
+      cdStr=String(dd.getMonth()+1).padStart(2,'0')+'/'+String(dd.getDate()).padStart(2,'0')+'/'+dd.getFullYear();
+    }
+    rows.push([tk.ticket||'',tk.client||'',tk.prime||'',tk.state||'',tk.location||'',projName,tk.footage||0,cdStr,tk.expire||'',tk.tipo||'',tk.address||'']);
+  }
+  var wb=XLSX.utils.book_new();
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,ws,'Clareados '+dayKey);
+  XLSX.writeFile(wb,'OneDrill_Clareados_'+dayKey+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(list.length+' tickets exportados','success');
+}
+
+// Exporta lista de tickets clareados do período atual pra Excel.
+// Reusa pattern de exportUtilTickets — com coluna "Liberado em" extra.
+function exportClearedTickets(key){
+  // Recalcula as listas (não guardamos em estado porque poderia ficar stale)
+  var now=Date.now();
+  var today=new Date();today.setHours(0,0,0,0);
+  var todayCutoff=today.getTime();
+  var day7=now-7*86400000;
+  var day30=now-30*86400000;
+  var cpf=_clearProjFilter||'';
+  var source=cpf?tickets.filter(function(t){return t.projectId===cpf;}):tickets;
+
+  var list=[],seen={};
+  var cutoff=key==='today'?todayCutoff:key==='7d'?day7:day30;
+  for(var i=0;i<source.length;i++){
+    var t=source[i];if(t.status==='Cancel')continue;
+    var cd=_getTicketClearDateForExpand(t);
+    if(!cd||cd<cutoff)continue;
+    if(seen[t.ticket])continue;
+    seen[t.ticket]=1;
+    list.push(t);
+  }
+  if(!list.length){toast('Nenhum ticket clareado no período','warn');return;}
+  // Ordena por footage desc
+  list.sort(function(a,b){return(b.footage||0)-(a.footage||0);});
+
+  var periodLabel=key==='today'?'Hoje':key==='7d'?'7dias':'30dias';
+  var rows=[['Ticket','Cliente','Prime','Estado','Location','Projeto','Footage','Liberado em','Expira','Tipo','Endereço']];
+  for(var r=0;r<list.length;r++){
+    var tk=list[r];
+    var projName=(projects.find(function(p){return p.id===tk.projectId;})||{}).name||'';
+    var cdRT=_getTicketClearDateForExpand(tk);
+    var cdStr='';
+    if(cdRT){
+      var dd=new Date(cdRT);
+      cdStr=String(dd.getMonth()+1).padStart(2,'0')+'/'+String(dd.getDate()).padStart(2,'0')+'/'+dd.getFullYear();
+    }
+    rows.push([tk.ticket||'',tk.client||'',tk.prime||'',tk.state||'',tk.location||'',projName,tk.footage||0,cdStr,tk.expire||'',tk.tipo||'',tk.address||'']);
+  }
+  var wb=XLSX.utils.book_new();
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,ws,'Clareados '+periodLabel);
+  XLSX.writeFile(wb,'OneDrill_Clareados_'+periodLabel+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(list.length+' tickets exportados','success');
 }
 
 function renderWatchAndProtectAlert(fTickets){

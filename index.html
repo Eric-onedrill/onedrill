@@ -508,6 +508,33 @@
   </div>
 </div>
 
+<!-- MODAL: Register damage (Fase 1 do refactor Damage) -->
+<div class="overlay" id="ov-damage">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div class="mtitle">⚠ Registrar dano</div>
+      <button class="modal-close" data-close="ov-damage">×</button>
+    </div>
+    <div class="del-proj-info" id="damage-ticket-info"></div>
+    <div class="fsection">
+      <label class="fsection-lbl" for="damage-utility">Utility afetada (opcional)</label>
+      <input type="text" class="fi" id="damage-utility" placeholder="Ex: DUKE ENERGY, AT&T, COMCAST...">
+    </div>
+    <div class="fsection">
+      <label class="fsection-lbl" for="damage-description">Descrição do dano (opcional)</label>
+      <textarea class="fi" id="damage-description" rows="3" placeholder="Ex: Gas line hit during drill, reparado em 2h..."></textarea>
+    </div>
+    <div class="del-proj-warning">
+      ⚠️ O contador de danos será incrementado e registrado no histórico.<br>
+      O <strong>status do ticket não muda</strong> — ele segue o fluxo normal.
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-damage">Cancelar</button>
+      <button class="btn btn-danger" data-action="confirm-register-damage">Registrar dano</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Contact -->
 <div class="overlay" id="ov-contact">
   <div class="modal narrow">
@@ -575,8 +602,16 @@
             <button class="btn btn-status-closed" data-manual-status="Closed">✔ Completed</button>
             <button class="btn btn-status-open" data-manual-status="Open">🔴 Open</button>
             <button class="btn btn-status-damage" data-manual-status="Damage">⚠ Damage</button>
+            <button class="btn btn-unlock-status" id="det-unlock-btn" data-action="unlock-status" disabled title="Nenhum bloqueio ativo">🔓 Desbloquear automação</button>
           </div>
-          <button class="btn btn-unlock-status hidden" id="det-unlock-btn" data-action="unlock-status">🔓 Desbloquear automação</button>
+        </div>
+        <div class="fsection" id="field-damage-section">
+          <div class="fsection-header">
+            <div class="fsection-lbl fsection-lbl--inline">Danos reportados</div>
+            <span class="damage-count-badge hidden" id="det-damage-badge">⚠ 0</span>
+          </div>
+          <div class="manual-status-hint">Registre danos reportados. Independe do status — o ticket continua o fluxo normal.</div>
+          <button class="btn btn-damage-register" id="det-damage-btn" data-action="register-damage">⚠ Registrar dano</button>
         </div>
       </div>
       <div>
@@ -675,6 +710,8 @@
     'navigate-from-detail':  () => openNavigation(currentDetailId),
     'open-full-map':         () => openFullMap(currentDetailId),
     'unlock-status':         () => unlockStatus(currentDetailId),
+    'register-damage':       () => openDamageModal(currentDetailId),
+    'confirm-register-damage': () => confirmRegisterDamage(),
   };
 
   document.addEventListener('click', e => {

@@ -97,6 +97,10 @@ let utilContacts=[],editingContactId=null;
 let utilCoverage=[];
 // County pré-selecionado quando usuário abre a aba Contatos vindo de um ticket específico
 let _contactsPreselectCounty='';
+// Cache dos damages do ticket atualmente aberto no modal (ticket_damages rows)
+let _currentDamages=[];
+// ID do damage em edição (null = registrar novo)
+let _editingDamageId=null;
 let supersededSet=new Set();
 let miniMap=null;
 let _expAlertEl=null;
@@ -1363,33 +1367,40 @@ function openTicketDetail(id){
   // Project lock indicator on the Projeto button
   const projBtn=document.getElementById('det-proj-btn');
   if(projBtn)projBtn.innerHTML=t.project_locked?'📁 Projeto 🔒':'📁 Projeto';
-  // Seção de Danos (Fase 1 refactor): badge mostra contador atual, botão só admin.
+  // Seção de Danos v2: lista de registros individuais (ticket_damages)
   const damageBadge=document.getElementById('det-damage-badge');
   const damageBadgeWrap=document.getElementById('det-damage-badge-wrap');
-  const damageDecrementBtn=document.getElementById('det-damage-decrement');
   const damageSection=document.getElementById('field-damage-section');
   const damageBtn=document.getElementById('det-damage-btn');
-  const dmgCount=parseInt(t.damageCount)||0;
-  if(damageBadge&&damageBadgeWrap){
-    if(dmgCount>0){
-      damageBadge.textContent='⚠ '+dmgCount+(dmgCount===1?' dano':' danos');
-      damageBadgeWrap.classList.remove('hidden');
-    }else{
-      damageBadgeWrap.classList.add('hidden');
+  const damageListEl=document.getElementById('det-damage-list');
+
+  // Carrega damages do banco (async — se falhar, lista vazia sem quebrar o modal)
+  loadTicketDamages(t.id).then(function(){
+    const count=(_currentDamages||[]).length;
+    // Sincroniza damageCount local (defensivo — caso tabela e contador estejam fora de sync)
+    if(t.damageCount!==count){
+      t.damageCount=count;
     }
-  }
-  // Botão de decremento: aparece só se admin E tem damage a remover
-  if(damageDecrementBtn){
-    if(!isSharedView&&isAdmin&&dmgCount>0){
-      damageDecrementBtn.classList.remove('hidden');
-    }else{
-      damageDecrementBtn.classList.add('hidden');
+    // Badge
+    if(damageBadge&&damageBadgeWrap){
+      if(count>0){
+        damageBadge.textContent='⚠ '+count+(count===1?' dano':' danos');
+        damageBadgeWrap.classList.remove('hidden');
+      }else{
+        damageBadgeWrap.classList.add('hidden');
+      }
     }
-  }
+    // Lista
+    if(damageListEl){
+      damageListEl.innerHTML=renderDamagesList();
+    }
+  });
+
   // Seção visível pra admin logado. Em share view, só aparece se tem damage (info pública).
+  const dmgCountSync=parseInt(t.damageCount)||0;
   if(damageSection){
     if(isSharedView){
-      damageSection.style.display=dmgCount>0?'':'none';
+      damageSection.style.display=dmgCountSync>0?'':'none';
     }else{
       damageSection.style.display='';
     }
@@ -1706,82 +1717,154 @@ async function unlockProject(id){
   if(ok){toast('🔓 Projeto desbloqueado','success');openTicketDetail(t.id);}
 }
 
-// ═══════════ DAMAGE TRACKING (Fase 1 do refactor) ═══════════
-// Damage é um contador independente do status. Um ticket pode ter damage_count>0
-// e continuar Open/Clear/Closed normalmente — o fluxo de trabalho segue como
-// se nada tivesse acontecido, mas o dado fica registrado pro analytics.
-function openDamageModal(id){
+// ═══════════ DAMAGE TRACKING v2 (tabela separada ticket_damages) ═══════════
+// Damage é um registro individual na tabela ticket_damages com (utility, description,
+// reported_by). damage_count no ticket é mantido sincronizado (soma dos registros).
+// Permite editar, remover e ver detalhes de cada dano individualmente.
+
+// Carrega os damages do ticket. Chamada dentro de openTicketDetail.
+async function loadTicketDamages(ticketId){
+  try{
+    const{data,error}=await sb
+      .from('ticket_damages')
+      .select('id,seq,utility,description,reported_by,created_at')
+      .eq('ticket_id',ticketId)
+      .order('seq',{ascending:true});
+    if(error){
+      console.warn('[Damages] load error:',error.message);
+      _currentDamages=[];
+      return;
+    }
+    _currentDamages=data||[];
+  }catch(e){
+    console.error('[Damages] load error:',e);
+    _currentDamages=[];
+  }
+}
+
+// Renderiza a lista de damages dentro da seção "Danos reportados" do modal.
+// Retorna HTML. Chamada do openTicketDetail.
+function renderDamagesList(){
+  if(!_currentDamages.length){
+    return'<div style="color:var(--muted);font-size:11px;padding:6px 0">Nenhum dano registrado.</div>';
+  }
+  return _currentDamages.map(function(d){
+    const dt=d.created_at?new Date(d.created_at):null;
+    const dateStr=dt?
+      String(dt.getMonth()+1).padStart(2,'0')+'/'+String(dt.getDate()).padStart(2,'0')+' '+
+      String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0'):'—';
+    const showActions=!isSharedView&&isAdmin;
+    const actionsHtml=showActions?
+      '<div style="display:flex;gap:4px;flex-shrink:0">'
+      +'<button class="btn btn-sm" onclick="openDamageModal(currentDetailId,'+d.id+')" style="font-size:10px;padding:2px 6px" title="Editar dano">✏</button>'
+      +'<button class="btn btn-sm btn-danger" onclick="deleteDamage('+d.id+')" style="font-size:10px;padding:2px 6px" title="Remover dano">🗑</button>'
+      +'</div>':'';
+    const titleLine='<div style="font-size:11px;color:var(--text2);font-weight:600">#'+d.seq+' · '+esc(dateStr)+(d.reported_by?' · <span style="color:var(--muted);font-weight:400">por '+esc(d.reported_by)+'</span>':'')+'</div>';
+    const utilityLine=d.utility?'<div style="font-size:12px;font-weight:700;color:var(--amber);margin-top:2px">'+esc(d.utility)+'</div>':'';
+    const descLine=d.description?'<div style="font-size:11px;color:var(--text);margin-top:2px;white-space:pre-wrap;word-break:break-word">'+esc(d.description)+'</div>':'';
+    return'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="flex:1;min-width:0">'+titleLine+utilityLine+descLine+'</div>'
+      +actionsHtml
+      +'</div>';
+  }).join('');
+}
+
+// Abre modal pra registrar (damageId=null) ou editar (damageId setado).
+function openDamageModal(id,damageId){
   const t=tickets.find(x=>x.id===id);if(!t)return;
   if(!isAdmin){toast('Apenas admin pode registrar danos','warn');return;}
-  // Preenche info do ticket no modal
+  _editingDamageId=damageId||null;
+  const editing=!!_editingDamageId;
+  const existing=editing?_currentDamages.find(d=>d.id===_editingDamageId):null;
+
+  // Título do modal
+  const titleEl=document.querySelector('#ov-damage .mtitle');
+  if(titleEl)titleEl.textContent=editing?'⚠ Editar dano #'+(existing?existing.seq:''):'⚠ Registrar dano';
+
+  // Label do botão confirmar
+  const confirmBtn=document.querySelector('#ov-damage [data-action="confirm-register-damage"]');
+  if(confirmBtn)confirmBtn.textContent=editing?'Salvar alterações':'Registrar dano';
+
+  // Info do ticket
   const infoEl=document.getElementById('damage-ticket-info');
   if(infoEl){
-    const prev=parseInt(t.damageCount)||0;
-    infoEl.innerHTML='Ticket <strong style="font-family:var(--mono)">'+esc(t.ticket)+'</strong> — '+esc(t.location||'')+(prev>0?' · <span style="color:#b45309">Já tem '+prev+' dano(s) registrado(s)</span>':'');
+    const totalNow=(_currentDamages||[]).length;
+    infoEl.innerHTML='Ticket <strong style="font-family:var(--mono)">'+esc(t.ticket)+'</strong> — '+esc(t.location||'')+(totalNow>0&&!editing?' · <span style="color:#b45309">Já tem '+totalNow+' dano(s) registrado(s)</span>':'');
   }
-  // Limpa inputs
-  document.getElementById('damage-utility').value='';
-  document.getElementById('damage-description').value='';
+  // Preenche inputs (com valores atuais se editando, vazio se novo)
+  document.getElementById('damage-utility').value=editing&&existing?existing.utility||'':'';
+  document.getElementById('damage-description').value=editing&&existing?existing.description||'':'';
   openModal('ov-damage');
 }
 
+// Salva: INSERT se _editingDamageId==null, UPDATE se setado.
 async function confirmRegisterDamage(){
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
   if(!isAdmin){toast('Apenas admin pode registrar danos','warn');return;}
   const utility=(document.getElementById('damage-utility').value||'').trim();
   const description=(document.getElementById('damage-description').value||'').trim();
+  const editing=!!_editingDamageId;
 
-  // Incrementa contador
-  const prev=parseInt(t.damageCount)||0;
-  t.damageCount=prev+1;
-
-  // Adiciona ao histórico — timestamp + utility + descrição
-  t.history=t.history||[];
-  let actionTxt='⚠ Dano registrado';
-  if(utility)actionTxt+=' — '+utility;
-  if(description)actionTxt+=': '+description;
-  actionTxt+=' (total: '+t.damageCount+')';
-  t.history.push({ts:Date.now(),action:actionTxt,color:'#d97706'});
-
-  // Salva
-  const ok=await saveTicketToDb(t);
-  if(ok){
-    toast('⚠ Dano registrado — total: '+t.damageCount,'success');
+  try{
+    if(editing){
+      // UPDATE — só utility e description mudam, seq/created_at/reported_by mantém
+      const{error}=await sb.from('ticket_damages').update({
+        utility:utility,
+        description:description
+      }).eq('id',_editingDamageId);
+      if(error)throw error;
+      toast('Dano atualizado','success');
+    }else{
+      // INSERT — calcula próximo seq (max+1 dos damages atuais do ticket)
+      const nextSeq=(_currentDamages.length>0?Math.max(..._currentDamages.map(d=>d.seq||0)):0)+1;
+      const reportedBy=(typeof userEmail!=='undefined'&&userEmail)?userEmail:
+                       (typeof currentUserEmail!=='undefined'&&currentUserEmail)?currentUserEmail:'';
+      const{error}=await sb.from('ticket_damages').insert({
+        ticket_id:t.id,
+        seq:nextSeq,
+        utility:utility,
+        description:description,
+        reported_by:reportedBy
+      });
+      if(error)throw error;
+      // Incrementa damage_count no ticket (mantido sincronizado pro analytics)
+      t.damageCount=(parseInt(t.damageCount)||0)+1;
+      await saveTicketToDb(t);
+      toast('⚠ Dano registrado — #'+nextSeq,'success');
+    }
+    _editingDamageId=null;
     closeModal('ov-damage');
+    // Recarrega damages e re-renderiza modal
+    await loadTicketDamages(t.id);
     openTicketDetail(currentDetailId);
     syncAll();
-  }else{
-    // Rollback
-    t.damageCount=prev;
-    t.history.pop();
-    toast('Erro ao salvar — tente dar refresh e novamente','danger');
+  }catch(e){
+    console.error('[Damages] save error:',e);
+    toast('Erro ao salvar — tente novamente','danger');
   }
 }
 
-// Decremento simples do damage_count. Útil pra corrigir registros criados por engano.
-// Mantém histórico: adiciona uma entrada "dano removido" ao invés de apagar o registro original
-// — auditoria é preservada.
-async function decrementDamage(id){
-  const t=tickets.find(x=>x.id===id);if(!t)return;
+// Remove um dano (hard delete). Decrementa damage_count do ticket.
+async function deleteDamage(damageId){
+  const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
   if(!isAdmin){toast('Apenas admin pode remover danos','warn');return;}
-  const prev=parseInt(t.damageCount)||0;
-  if(prev<=0){toast('Nenhum dano registrado para remover','info');return;}
-  if(!confirm('Remover 1 dano deste ticket?\n\nContador atual: '+prev+'\nApós remover: '+(prev-1)+'\n\nO histórico do registro original será mantido como auditoria.'))return;
-
-  t.damageCount=prev-1;
-  t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'⚠ Dano removido (total: '+t.damageCount+')',color:'#6b7280'});
-
-  const ok=await saveTicketToDb(t);
-  if(ok){
-    toast('Dano removido — total: '+t.damageCount,'success');
-    openTicketDetail(id);
+  const dmg=_currentDamages.find(d=>d.id===damageId);
+  if(!dmg){toast('Dano não encontrado','warn');return;}
+  const label='#'+dmg.seq+(dmg.utility?' — '+dmg.utility:'');
+  if(!confirm('Remover dano '+label+'?\n\nEssa ação é permanente e não pode ser desfeita.'))return;
+  try{
+    const{error}=await sb.from('ticket_damages').delete().eq('id',damageId);
+    if(error)throw error;
+    // Decrementa damage_count
+    t.damageCount=Math.max(0,(parseInt(t.damageCount)||0)-1);
+    await saveTicketToDb(t);
+    toast('Dano removido','success');
+    await loadTicketDamages(t.id);
+    openTicketDetail(currentDetailId);
     syncAll();
-  }else{
-    // Rollback
-    t.damageCount=prev;
-    t.history.pop();
-    toast('Erro ao salvar — tente dar refresh e novamente','danger');
+  }catch(e){
+    console.error('[Damages] delete error:',e);
+    toast('Erro ao remover — tente novamente','danger');
   }
 }
 

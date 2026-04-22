@@ -122,6 +122,8 @@
    3. Base & Typography
    ────────────────────────────────────────────── */
 
+/* Fix bug #18: html e body consolidados. Antes: 2 regras separadas — html/body com sizing,
+   depois body com tipografia. Agora: 1 regra pra html/body (sizing) + 1 pra body (específico). */
 html,
 body {
   width: 100%;

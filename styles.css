@@ -943,6 +943,34 @@ body {
   line-height: 1.4;
 }
 
+/* Wrap do badge + botão decrement (Fase 1.5) */
+.damage-count-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.damage-decrement-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: all .15s;
+}
+.damage-decrement-btn:hover {
+  background: var(--amber);
+  color: white;
+}
+
 
 /* ──────────────────────────────────────────────
    12. Badges (shared base + variants)

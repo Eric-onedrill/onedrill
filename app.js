@@ -2474,10 +2474,17 @@ async function doImport(){
   pw.style.display='block';document.getElementById('bimport').disabled=true;setSyncStatus(true,'Importando...');
 
   // Save projects first
+  // Fix bug #12: helper pra gerar ID de projeto de forma consistente.
+  // Antes: 'p'+projId cru deixava passar espaços, quebras de linha, aspas no id,
+  // causando colisões (dois projetos "ABC " e "ABC" geram o mesmo id 'pABC '
+  // vs match sendo feito contra 'pABC'). Normaliza nome antes de prefixar.
+  const _mkProjectId=(name)=>'p'+String(name||'').trim().replace(/\s+/g,' ');
   for(const[projId,ft]of Object.entries(parsedProjectTotals)){
     const pc=parsedProjectCoords[projId]||null;
-    let p=projects.find(x=>x.name===projId||x.id===projId);
-    if(!p){p={id:'p'+projId,name:projId,client:'',state:'',status:'Active',desc:'',totalFeet:ft,centerCoords:pc,_manual:false};projects.push(p);}
+    const normalizedName=String(projId||'').trim();
+    const normalizedId=_mkProjectId(projId);
+    let p=projects.find(x=>x.name===normalizedName||x.id===normalizedId);
+    if(!p){p={id:normalizedId,name:normalizedName,client:'',state:'',status:'Active',desc:'',totalFeet:ft,centerCoords:pc,_manual:false};projects.push(p);}
     else{if(!p.totalFeet)p.totalFeet=ft;if(!p.centerCoords)p.centerCoords=pc;}
     await saveProjectToDb(p);
   }
@@ -2499,17 +2506,18 @@ async function doImport(){
 
     let pid='';
     if(r.projectName){
-      let p=projects.find(x=>x.name.toLowerCase()===r.projectName.toLowerCase()||x.id==='p'+r.projectName);
+      // Fix bug #12: usa helper _mkProjectId definido acima para lookup consistente
+      const normalizedName=String(r.projectName).trim();
+      const normalizedId=_mkProjectId(r.projectName);
+      let p=projects.find(x=>x.name.toLowerCase()===normalizedName.toLowerCase()||x.id===normalizedId);
       if(!p){
-        const projId=String(r.projectName).trim();
-        const tf=parsedProjectTotals[projId]||0;
-        const pc=parsedProjectCoords[projId]||null;
-        p={id:'p'+projId,name:projId,client:r.client,state:r.state,status:'Active',desc:'',_manual:false,totalFeet:tf,centerCoords:pc};
+        const tf=parsedProjectTotals[normalizedName]||0;
+        const pc=parsedProjectCoords[normalizedName]||null;
+        p={id:normalizedId,name:normalizedName,client:r.client,state:r.state,status:'Active',desc:'',_manual:false,totalFeet:tf,centerCoords:pc};
         projects.push(p);await saveProjectToDb(p);
       }else{
-        const projId=String(r.projectName).trim();
-        if(!p.totalFeet)p.totalFeet=parsedProjectTotals[projId]||0;
-        if(!p.centerCoords)p.centerCoords=parsedProjectCoords[projId]||null;
+        if(!p.totalFeet)p.totalFeet=parsedProjectTotals[normalizedName]||0;
+        if(!p.centerCoords)p.centerCoords=parsedProjectCoords[normalizedName]||null;
       }
       pid=p.id;
     }
@@ -3318,9 +3326,14 @@ async function manualRefresh(){
 }
 
 /* ═══════════ 28. INIT ═══════════ */
+// Fix bug #33: listeners de offline/online devem ser registrados no TOP LEVEL,
+// não dentro do load handler. Antes: funcionavam por acaso (load só dispara 1x), mas
+// se algum erro síncrono acontecesse antes do addEventListener, os listeners nunca
+// eram registrados. Registrando aqui, são garantidamente ativos desde o parse do script.
+window.addEventListener('offline',()=>{toast('⚠ Sem conexão — alterações não serão salvas','danger');setSyncStatus(false,'Offline');});
+window.addEventListener('online',()=>{toast('✅ Conexão restaurada','success');setSyncStatus(true,'Online');});
+
 window.addEventListener('load',async()=>{
-  window.addEventListener('offline',()=>{toast('⚠ Sem conexão — alterações não serão salvas','danger');setSyncStatus(false,'Offline');});
-  window.addEventListener('online',()=>{toast('✅ Conexão restaurada','success');setSyncStatus(true,'Online');});
   document.querySelector('#loading-screen div:last-child').textContent='Conectando ao Supabase...';
   const ok=await initSupabase();
   document.getElementById('loading-screen').style.display='none';

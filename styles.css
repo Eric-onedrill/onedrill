@@ -914,8 +914,7 @@ body {
 .util-badge,
 .status-pill,
 .cc-tag,
-.locked-badge,
-.notif-badge {
+.locked-badge {
   font-size: 10px;
   font-weight: 700;
   padding: 2px 8px;
@@ -958,7 +957,10 @@ body {
   border: 1px solid var(--purple-border);
 }
 
-/* Notification badge (counter) */
+/* Notification badge (counter) — Fix bug #27: removido da regra compartilhada acima
+   pra não herdar font-family:mono (número de notif fica melhor com font padrão).
+   As props abaixo (display, font-weight, line-height) faziam parte daquela regra e
+   são adicionadas aqui individualmente. */
 .notif-badge {
   position: absolute;
   top: -4px;
@@ -966,8 +968,11 @@ body {
   background: var(--red);
   color: white;
   font-size: 9px;
+  font-weight: 700;
   padding: 1px 5px;
   border-radius: 10px;
+  display: inline-block;
+  line-height: 1.4;
 }
 
 /* Contact tags */

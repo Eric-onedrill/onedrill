@@ -356,7 +356,9 @@ function projectToDb(p){
 async function initSupabase(){
   try{
     sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),8000));
+    // Fix bug #13: 8s é agressivo demais em 4G no campo (tablets de supervisor em obra).
+    // 15s dá margem mas ainda detecta servidor down em tempo razoável.
+    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),15000));
     const fetchData=async()=>{
       const{data:p,error:ep}=await sb.from('projects').select('*').order('name');
       const{data:t,error:et}=await sb.from('tickets').select('*').order('ticket');
@@ -579,7 +581,7 @@ function renderContacts(){
         return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--border)">'
           +(name?'<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:120px">'+name+'</span>':'')
           +'<div class="cc-phones" style="margin:0;gap:10px">'+phones.join(' ')+'</div>'
-          +(isAdmin?'<div style="display:flex;gap:4px;margin-left:8px"><button class="btn btn-sm" onclick="editContact('+c.id+')" style="font-size:10px;padding:2px 6px">✏</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')" style="font-size:10px;padding:2px 6px">×</button></div>':'')
+          +(isAdmin?'<div style="display:flex;gap:4px;margin-left:8px"><button class="btn btn-sm" onclick="openContactModal('+c.id+')" style="font-size:10px;padding:2px 6px">✏</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')" style="font-size:10px;padding:2px 6px">×</button></div>':'')
           +'</div>';
       }).join('')
       +(contacts.some(x=>x.notes)?'<div class="cc-meta" style="margin-top:6px">'+esc(contacts[0].notes)+'</div>':'')
@@ -608,7 +610,8 @@ function openContactModal(id){
   }
   openModal('ov-contact');
 }
-function editContact(id){openContactModal(id);}
+// Fix bug #31: função wrapper editContact removida — era só um alias de openContactModal.
+// Callers já foram atualizados para chamar openContactModal direto.
 
 async function saveContact(){
   const name=document.getElementById('ct-utility').value.trim();
@@ -1091,6 +1094,7 @@ async function saveFieldPath(){
   if(fieldPts.length<2){toast('Mínimo 2 pontos.','warn');return;}
   const t=tickets.find(x=>x.id===fieldTicketId);if(!t)return;
   t.fieldPath=[...fieldPts];
+  t.history=t.history||[];// Fix bug #20: garante array antes de push
   t.history.push({ts:Date.now(),action:`Trajeto desenhado (${fieldPts.length} pontos)`,color:'#6d28d9'});
   const ok=await saveTicketToDb(t);
   if(ok)toast(`Trajeto salvo — ${t.ticket}`,'success');
@@ -1301,7 +1305,9 @@ async function renewTicket(){
   if(dup){
     if(!confirm('Ticket '+newTicket+' já existe no sistema (importado pelo scraper).\n\nDeseja MESCLAR?\n• O trajeto e dados do ticket atual serão mantidos\n• O registro duplicado ('+newTicket+') será removido\n• O número será atualizado para '+newTicket))return;
     // Copia expire do duplicado se disponível (expire do ticket NOVO)
-    if(dup.expire&&dup.expire!=='—'&&(!t.expire||t.expire==='—'||new Date(dup.expire)>new Date(t.expire))){
+    // Fix bug #10: usa _eod() em vez de new Date() direto — parse MM/DD/YYYY confiável
+    // (new Date('05/13/2026') é unreliable em Safari antigo → pode retornar Invalid Date → comparação NaN)
+    if(dup.expire&&dup.expire!=='—'&&(!t.expire||t.expire==='—'||_eod(dup.expire)>_eod(t.expire))){
       t.expire=dup.expire;
     }
     // Deleta o duplicado via Supabase client (fix: usava SB_H que não existe no frontend)
@@ -1484,6 +1490,7 @@ async function unlockStatus(id){
 async function unlockProject(id){
   const t=tickets.find(x=>x.id===id||x.id===currentDetailId);if(!t)return;
   t.project_locked=false;
+  t.history=t.history||[];// Fix bug #20: garante array antes de push
   t.history.push({ts:Date.now(),action:'Projeto desbloqueado 🔓',color:'#1a6cf0'});
   const ok=await saveTicketToDb(t);
   if(ok){toast('🔓 Projeto desbloqueado','success');openTicketDetail(t.id);}
@@ -1789,7 +1796,7 @@ function renderDash(){
   +(soon.length?'<button class="btn btn-sm" onclick="exportExpiring()" style="background:var(--red);color:white;border-color:var(--red);font-size:11px">↓ Excel</button>':'')
   +'</div></div>'
   +(soon.length?'<div style="max-height:200px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px;font-weight:600">Ticket</th><th style="padding:4px 6px;font-weight:600">Dias</th><th style="padding:4px 6px;font-weight:600">Local</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600">Expira</th></tr></thead><tbody>'
-  +soon.sort((a,b)=>{const da=Math.round((new Date(a.expire)-now)/86400000);const db=Math.round((new Date(b.expire)-now)/86400000);return da-db;}).map(t=>{
+  +soon.sort((a,b)=>{const da=_eod(a.expire)-now;const db=_eod(b.expire)-now;return da-db;}).map(t=>{
     const d2=Math.ceil((_eod(t.expire)-now)/86400000);
     const urgColor=d2<=2?'var(--red)':d2<=5?'var(--amber)':'var(--text2)';
     const urgBg=d2<=2?'var(--red-bg)':d2<=5?'#fffbeb':'transparent';
@@ -2069,6 +2076,7 @@ async function saveMoveProj(){
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
   t.projectId=document.getElementById('move-proj-sel').value;
   t.project_locked=!!t.projectId;// trava se tem projeto, destrava se "Sem projeto"
+  t.history=t.history||[];// Fix bug #20: garante array antes de push
   t.history.push({ts:Date.now(),action:`Movido para projeto: ${projects.find(p=>p.id===t.projectId)?.name||'Sem projeto'}${t.project_locked?' 🔒':''}`,color:'#1a6cf0'});
   await saveTicketToDb(t);
   closeModal('ov-move-proj');openTicketDetail(currentDetailId);syncAll();toast('Projeto atualizado!'+(t.project_locked?' (travado)':''),'success');
@@ -2351,6 +2359,7 @@ async function saveTicket(){
         prime:document.getElementById('tm-prime').value,address:document.getElementById('tm-addr').value
       });
       if(projChanged&&newProjId)t.project_locked=true;// trava ao trocar projeto manualmente
+      t.history=t.history||[];// Fix bug #20: garante array antes dos pushes abaixo
       if(old!==newStatus)t.history.push({ts:Date.now(),action:`Status: ${old} → ${newStatus}`,color:scol(newStatus)});
       t.history.push({ts:Date.now(),action:'Editado',color:'#9a9888'});
       await saveTicketToDb(t);savedId=t.id;
@@ -3043,7 +3052,10 @@ function renderWeeklyEvolution(fTickets){
 
 function renderProgressoFootage(fTickets,projStats){
   try{
-    const pf=window._progProjFilter||'';
+    // Fix bug #25: usar a variável local _progProjFilter (declarada com `let` na linha 89).
+    // `let` no top-level NÃO cria propriedade em window (ES6), então window._progProjFilter
+    // sempre era undefined → filtro nunca funcionava. Agora lê e escreve na mesma variável.
+    const pf=_progProjFilter||'';
     const projOpts='<option value="">Todos (agrupado)</option>'+projStats.map(p=>'<option value="'+p.id+'"'+(pf===p.id?' selected':'')+'>'+(p.locs?esc(p.locs)+' ('+esc(p.name)+')':esc(p.name))+'</option>').join('');
     const projSel='<select class="fi" onchange="_progProjFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:160px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
     function mkGrid(d){return'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px"><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.totalFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Total ft</div></div><div style="padding:9px;background:var(--green-bg);border-radius:var(--r);border:1px solid var(--green-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green)">'+d.clearFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--green);text-transform:uppercase;margin-top:2px">Clear '+d.pctClear+'%</div></div><div style="padding:9px;background:var(--red-bg);border-radius:var(--r);border:1px solid var(--red-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--red)">'+d.openFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--red);text-transform:uppercase;margin-top:2px">Aberto '+d.pctOpen+'%</div></div><div style="padding:9px;background:var(--amber-bg);border-radius:var(--r);border:1px solid var(--amber-border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+d.damageFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--amber);text-transform:uppercase;margin-top:2px">Damage '+d.pctDamage+'%</div></div><div style="padding:9px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);text-align:center"><div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text)">'+d.concluidoFt.toLocaleString()+'</div><div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-top:2px">Concluído '+d.pctConcluido+'%</div></div></div><div class="prog-bar"><div style="width:'+d.pctClear+'%;background:var(--green)"></div><div style="width:'+Math.min(d.pctOpen,100-d.pctClear)+'%;background:var(--red)"></div><div style="width:'+Math.min(d.pctDamage,100-d.pctClear-d.pctOpen)+'%;background:#f59e0b"></div><div style="width:'+Math.min(d.pctConcluido,100-d.pctClear-d.pctOpen-d.pctDamage)+'%;background:var(--text)"></div></div>';}

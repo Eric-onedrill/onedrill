@@ -3514,9 +3514,11 @@ function renderClearedStats(fTickets){
       +'<div style="font-size:9px;color:var(--muted);white-space:nowrap">'+dLbl.label+'</div></div>';
   }
   barHtml+='</div>';
-  // Se tem dia selecionado, adiciona a seção expandida logo abaixo do chart
+  // Dia selecionado NÃO é mais concatenado aqui — vira variável separada
+  // pra renderizar em largura total, fora do grid de 2 colunas do chart+utilities.
+  var dayExpandHtml='';
   if(_clearedExpandDay){
-    barHtml+=_renderClearedDayExpand(_clearedExpandDay,c7);
+    dayExpandHtml=_renderClearedDayExpand(_clearedExpandDay,c7);
   }
 
   // ── Utility list (vertical) ──
@@ -3552,6 +3554,8 @@ function renderClearedStats(fTickets){
     +'<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Clareados por dia (últimos 7 dias)</div>'+barHtml+todayHtml+'</div>'
     +'<div>'+utilListHtml+'</div>'
     +'</div>'
+    // Dia expandido vai em largura total, FORA do grid 1fr 1fr acima
+    +dayExpandHtml
     +'</div></div>';
 }
 

@@ -1311,6 +1311,13 @@ function openTicketDetail(id){
     if(!inGrace)return'';
     const oldSt=t.statusOld||t.status_old||'Open';
     const oldNum=esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]);
+
+    // NOVA PRIORIDADE: novo totalmente clareado sobrepõe graça.
+    // Mesmo que o antigo fosse Open, se o novo já foi resolvido, mostra liberado.
+    if(newTicketFullyCleared(t)){
+      return'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Novo ticket clareou</div><div style="font-size:11px;color:#15803d;margin-top:3px">Todas as utilities do ticket <strong>'+esc(t.ticket)+'</strong> responderam <strong>Clear</strong>. As respostas do novo sobrepõem a carência do antigo ('+oldNum+').</div></div>';
+    }
+
     if(oldSt==='Clear')return'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Carência do ticket anterior</div><div style="font-size:11px;color:#15803d;margin-top:3px">Status efetivo: <strong>Clear</strong> até 23:59 de '+graceCutoverDate(t)+'. Utilities do ticket antigo ('+oldNum+') ainda válidas.</div></div>';
     return'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#b45309">⚠ Carência — Ticket anterior era '+esc(oldSt)+'</div><div style="font-size:11px;color:#92400e;margin-top:3px">O ticket antigo ('+oldNum+') <strong>não estava liberado</strong>. Status mantido como <strong>'+esc(oldSt)+'</strong> até '+graceCutoverDate(t)+'. Após essa data, segue as respostas do ticket novo.</div></div>';
   })();
@@ -1604,24 +1611,66 @@ function expireIsStale(t){
 }
 
 /**
- * Status efetivo — durante período de carência de renovação,
- * retorna o status REAL do ticket antigo (não assume Clear).
- * Após a carência, segue o status do ticket novo (respostas 811).
+ * Ticket NOVO (renovado) já foi totalmente resolvido pelas utilities?
+ *
+ * Retorna true quando, durante a graça, todas as utilities do ticket novo
+ * responderam E todas estão em status liberador (Clear/Private/Marked/Unmarked).
+ * Nenhuma Pending, nenhuma "No Response" sobrando.
+ *
+ * Usado pra SOBREPOR a graça do antigo: se o novo já foi completamente
+ * clareado, não faz sentido segurar status Open só porque o antigo estava
+ * Open — temos clear real pra trabalhar.
+ *
+ * Requisitos (todos os 3):
+ *   - Cache de utilities carregado (senão não dá pra avaliar)
+ *   - Novo tem pelo menos 1 resposta registrada
+ *   - Todas as respostas em status liberador
+ */
+function newTicketFullyCleared(t){
+  if(!utilCacheLoaded)return false;
+  if(!isRenewed(t))return false;
+  const newKey=String(t.ticket||'').trim();
+  const newUtils=utilCache[newKey]||[];
+  if(newUtils.length===0)return false;
+  const releasedStatuses=new Set(['Clear','Private','Marked','Unmarked']);
+  return newUtils.every(u=>releasedStatuses.has(u.status));
+}
+
+/**
+ * Status efetivo — durante período de carência de renovação.
+ *
+ * Ordem de avaliação (mais recente/completo sempre ganha, segurança em 1º lugar):
+ *   1. Status travado manualmente → respeita sempre
+ *   2. Em graça + novo tem Pending → força Open (segurança: novo mostra pendência real)
+ *   3. Em graça + novo TOTALMENTE Clear (todas utilities respondidas, todas Clear)
+ *      → força Clear (novo foi resolvido, sobrepõe antigo)
+ *   4. Em graça + antigo totalmente Clear → mantém Clear (proteção: respostas legais do antigo)
+ *   5. Em graça + fallback → statusOld (mantém comportamento antigo)
+ *   6. Fora de graça → status real do novo
+ *
+ * Regra do usuário: "se o antigo está clear, mantém até o vencimento. Depois segue novo.
+ * Se o novo ficar clear antes disso, sobrepõe o antigo já que temos clear para trabalhar."
  */
 function effectiveStatus(t){
   // Status travado manualmente = sempre respeitar
   if(t.status_locked)return t.status;
 
   if(isRenewed(t)&&isInRenewalGrace(t)){
-    // REGRA RIGOROSA: se o ticket NOVO tem utilities Pending, força Open.
-    // Não adianta mostrar Clear baseado no antigo se o novo já mostra pendências —
-    // isso seria perigoso (falso "pode trabalhar").
     if(utilCacheLoaded){
       const newKey=String(t.ticket||'').trim();
       const newUtils=utilCache[newKey]||[];
+
+      // REGRA RIGOROSA (segurança): se o ticket NOVO tem utilities Pending, força Open.
+      // Não adianta mostrar Clear baseado no antigo se o novo já mostra pendências.
       if(newUtils.some(u=>u.status==='Pending'))return 'Open';
+
+      // REGRA DE SOBREPOSIÇÃO: se o novo foi totalmente resolvido (todas utilities
+      // responderam e todas em status liberador), sobrepõe a graça e mostra Clear.
+      // Reflete a regra: "se o novo ficou clear, temos clear pra trabalhar —
+      // não precisa esperar expirar o antigo." (ver helper newTicketFullyCleared)
+      if(newTicketFullyCleared(t))return 'Clear';
     }
-    // Sem Pending no novo — aplicar lógica de graça: checa antigo.
+    // Novo ainda incompleto — aplicar lógica de graça: checa antigo.
     if(utilCacheLoaded){
       const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
       if(oldNum){
@@ -1919,10 +1968,14 @@ async function renderUtils(t){
   if(!el)return;
   el.innerHTML='<div style="color:var(--muted);font-size:12px">Carregando...</div>';
   try{
-    // Durante período de graça, mostra utilities do ticket ANTIGO
+    // Durante graça, MOSTRA utilities do ticket ANTIGO — exceto quando o NOVO já
+    // foi totalmente clareado (nesse caso, as respostas reais e autoritativas são
+    // as do ticket novo; o antigo virou histórico).
     const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+    const novoClareado=inGrace&&newTicketFullyCleared(t);
     const oldTicketNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]:'';
-    const queryTicket=inGrace&&oldTicketNum?oldTicketNum:t.ticket;
+    // novoClareado → lê do ticket novo. Caso contrário, lógica atual: em graça lê do antigo.
+    const queryTicket=novoClareado?t.ticket:(inGrace&&oldTicketNum?oldTicketNum:t.ticket);
 
     const{data,error}=await sb
       .from('ticket_811_responses')
@@ -1936,7 +1989,13 @@ async function renderUtils(t){
     let graceBanner='';
     if(inGrace){
       const oldSt=t.statusOld||t.status_old||'Open';
-      if(oldSt==='Clear'){
+      if(novoClareado){
+        // Novo já clareou — banner verde claro explicando a sobreposição.
+        graceBanner='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:8px 12px;margin-bottom:8px">'
+          +'<div style="font-size:11px;font-weight:700;color:#16a34a">✅ LIBERADO — Utilities do novo ticket ('+esc(t.ticket)+')</div>'
+          +'<div style="font-size:10px;color:#15803d;margin-top:2px">Novo ticket totalmente resolvido — respostas abaixo sobrepõem a carência do antigo ('+esc(oldTicketNum)+').</div>'
+          +'</div>';
+      }else if(oldSt==='Clear'){
         graceBanner='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:8px 12px;margin-bottom:8px">'
           +'<div style="font-size:11px;font-weight:700;color:#16a34a">✅ LIBERADO — Utilities do ticket antigo ('+esc(oldTicketNum)+')</div>'
           +'<div style="font-size:10px;color:#15803d;margin-top:2px">Válido até '+graceCutoverDate(t)+'. Após essa data, novas liberações serão necessárias do ticket '+esc(t.ticket)+'.</div>'
@@ -1959,7 +2018,7 @@ async function renderUtils(t){
     const marked=data.filter(u=>u.status==='Marked');
     if(sm){
       const parts=[];
-      if(inGrace)parts.push('<span style="color:#7c3aed">🔄 graça</span>');
+      if(inGrace)parts.push('<span style="color:#7c3aed">🔄 graça'+(novoClareado?' (novo clareou)':'')+'</span>');
       if(pending.length)parts.push(`<span style="color:var(--red)">${pending.length} pendente${pending.length>1?'s':''}</span>`);
       if(marked.length)parts.push(`<span style="color:var(--amber)">${marked.length} marcada${marked.length>1?'s':''}</span>`);
       if(cleared.length)parts.push(`<span style="color:var(--green)">${cleared.length} clear</span>`);

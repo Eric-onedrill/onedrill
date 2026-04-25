@@ -385,6 +385,44 @@ body::after{
 .cell-ft.green{color:var(--green-soft)}
 .cell-ft.green.zero{color:var(--muted)}
 
+/* Delta pills (vs ontem) */
+.delta{
+  display:inline-block;
+  font-family:var(--mono);
+  font-size:13px;
+  font-weight:700;
+  margin-left:4px;
+  letter-spacing:.02em;
+  vertical-align:1px;
+  white-space:nowrap;
+}
+.delta.up.bad{color:var(--red);text-shadow:0 0 8px rgba(239,68,68,.3)}
+.delta.up.good{color:var(--green);text-shadow:0 0 8px rgba(34,197,94,.3)}
+.delta.down.bad{color:var(--red);text-shadow:0 0 8px rgba(239,68,68,.3)}
+.delta.down.good{color:var(--green);text-shadow:0 0 8px rgba(34,197,94,.3)}
+.delta.stable{color:var(--muted);font-weight:400;font-size:12px}
+
+.state-total-num .delta{font-size:16px;margin-left:6px;vertical-align:6px}
+.proj-total-row .cell-n .delta{font-size:15px}
+
+.hero-num-row{
+  display:flex;
+  align-items:flex-end;
+  gap:14px;
+}
+.hero-delta{
+  font-family:var(--mono);
+  font-size:28px;
+  font-weight:700;
+  letter-spacing:.02em;
+  padding-bottom:6px;
+}
+.hero-delta .delta{
+  font-size:28px;
+  margin-left:0;
+  vertical-align:baseline;
+}
+
 /* Linha total no rodapé */
 .proj-total-row{
   background:var(--card2)!important;
@@ -597,8 +635,11 @@ body::after{
       </div>
       <div class="hero-stats">
         <div class="hero-stat">
-          <div class="hero-num" id="hero-open-n">0</div>
-          <div class="hero-stat-label">tickets</div>
+          <div class="hero-num-row">
+            <div class="hero-num" id="hero-open-n">0</div>
+            <span class="hero-delta" id="hero-open-delta"></span>
+          </div>
+          <div class="hero-stat-label">tickets · vs ontem</div>
         </div>
         <div class="hero-stat">
           <div class="hero-num ft" id="hero-open-ft">0</div>
@@ -614,8 +655,11 @@ body::after{
       </div>
       <div class="hero-stats">
         <div class="hero-stat">
-          <div class="hero-num" id="hero-clear-n">0</div>
-          <div class="hero-stat-label">tickets</div>
+          <div class="hero-num-row">
+            <div class="hero-num" id="hero-clear-n">0</div>
+            <span class="hero-delta" id="hero-clear-delta"></span>
+          </div>
+          <div class="hero-stat-label">tickets · vs ontem</div>
         </div>
         <div class="hero-stat">
           <div class="hero-num ft" id="hero-clear-ft">0</div>
@@ -672,11 +716,64 @@ function buildSupersededSet(tk){
   return s;
 }
 
+/** Reconstroi o status do ticket no momento `atTs` percorrendo o history.
+ *  Retorna null se ticket ainda não existia naquele momento. */
+function statusAt(t, atTs){
+  // Não existia ainda
+  if(t.created_at){
+    const cms = new Date(t.created_at).getTime();
+    if(!isNaN(cms) && cms > atTs) return null;
+  }
+
+  const hist = (t.history||[])
+    .filter(h => h && h.ts && h.ts <= atTs)
+    .sort((a,b) => b.ts - a.ts);  // mais recente primeiro
+
+  for(const ev of hist){
+    const a = (ev.action||'').toLowerCase();
+
+    // "X → Y" — pega Y
+    let m = a.match(/[→\->]\s*(open|clear|damage|closed|cancel)\b/);
+    if(m) return m[1].charAt(0).toUpperCase()+m[1].slice(1);
+
+    // [AUTO 811] Clear (sem revertido)
+    if((a.includes('auto 811')||a.includes('auto-clear')) && a.includes('clear') && !a.includes('revertido')){
+      return 'Clear';
+    }
+
+    // Revertido Clear→Open
+    if(a.includes('revertido') && a.includes('open')) return 'Open';
+
+    // Damage manual
+    if(a.includes('damage')) return 'Damage';
+
+    // Importado/criado/renovação → Open inicial
+    if(a.includes('importado')||a.includes('criado')||a.includes('renovação')||a.includes('renovou')){
+      return 'Open';
+    }
+  }
+
+  // Sem evento informativo antes — assume estava no status atual
+  return t.status;
+}
+
+/** Renderiza pílula de delta. value=current, prev=ontem. lessIsBetter=true pra Open. */
+function deltaPill(value, prev, lessIsBetter){
+  if(prev===null||prev===undefined) return '';
+  const d = value - prev;
+  if(d === 0) return '<span class="delta stable">—</span>';
+  const arrow = d > 0 ? '▲' : '▼';
+  const isUp = d > 0;
+  const isGood = lessIsBetter ? !isUp : isUp;
+  const cls = isGood ? (isUp?'up good':'down good') : (isUp?'up bad':'down bad');
+  return `<span class="delta ${cls}">${arrow}${Math.abs(d)}</span>`;
+}
+
 async function fetchAll(){
   setRefresh('loading','atualizando…');
   try{
     const [tr,pr] = await Promise.all([
-      sb.from('tickets').select('id,ticket,project_id,state,location,status,footage,old_ticket2').order('ticket'),
+      sb.from('tickets').select('id,ticket,project_id,state,location,status,footage,old_ticket2,history,created_at').order('ticket'),
       sb.from('projects').select('id,name,state,status'),
     ]);
     if(tr.error) throw tr.error;
@@ -709,31 +806,52 @@ function computeBreakdown(){
 
   const STATES_ORDER = ['FL','IN','IL'];
   const data = {};
-  const totals = {open:0, openFt:0, clear:0, clearFt:0};
+  // totals tem versão hoje E ontem pra comparar
+  const totals = {open:0, openFt:0, clear:0, clearFt:0, openY:0, openFtY:0, clearY:0, clearFtY:0};
   const stateSeen = new Set();
+
+  const yesterdayTs = Date.now() - 24*3600*1000;
 
   for(const t of tickets){
     if(supSet.has(String(t.ticket||'').trim())) continue;
     if(t.project_id && completedProjIds.has(t.project_id)) continue;
-    const status = t.status;
-    if(status!=='Open' && status!=='Clear') continue;
 
     const st = (t.state||'?').toUpperCase();
     const projName = t.project_id ? (projMap[t.project_id] || '(Projeto removido)') : '(Sem projeto)';
 
-    if(!data[st]) data[st]={};
-    if(!data[st][projName]) data[st][projName]={open:0, openFt:0, clear:0, clearFt:0};
+    // Status hoje (só conta se Open ou Clear)
+    const today = t.status;
+    // Status ontem (reconstruído do history). null = não existia.
+    const past = statusAt(t, yesterdayTs);
 
-    if(status==='Open'){
-      data[st][projName].open++;
-      data[st][projName].openFt += t.footage||0;
-      totals.open++; totals.openFt += t.footage||0;
-    }else if(status==='Clear'){
-      data[st][projName].clear++;
-      data[st][projName].clearFt += t.footage||0;
-      totals.clear++; totals.clearFt += t.footage||0;
+    if(today!=='Open' && today!=='Clear' && past!=='Open' && past!=='Clear') continue;
+
+    if(!data[st]) data[st]={};
+    if(!data[st][projName]) data[st][projName]={
+      open:0, openFt:0, clear:0, clearFt:0,
+      openY:0, openFtY:0, clearY:0, clearFtY:0
+    };
+
+    const ft = t.footage||0;
+    const cell = data[st][projName];
+
+    if(today==='Open'){
+      cell.open++; cell.openFt += ft;
+      totals.open++; totals.openFt += ft;
+    }else if(today==='Clear'){
+      cell.clear++; cell.clearFt += ft;
+      totals.clear++; totals.clearFt += ft;
     }
-    stateSeen.add(st);
+
+    if(past==='Open'){
+      cell.openY++; cell.openFtY += ft;
+      totals.openY++; totals.openFtY += ft;
+    }else if(past==='Clear'){
+      cell.clearY++; cell.clearFtY += ft;
+      totals.clearY++; totals.clearFtY += ft;
+    }
+
+    if(today==='Open'||today==='Clear') stateSeen.add(st);
   }
 
   const orderedStates = [
@@ -763,6 +881,10 @@ function renderHero(b){
   animateNum(document.getElementById('hero-open-ft'), b.totals.openFt);
   animateNum(document.getElementById('hero-clear-n'), b.totals.clear);
   animateNum(document.getElementById('hero-clear-ft'), b.totals.clearFt);
+
+  // Delta vs ontem
+  document.getElementById('hero-open-delta').innerHTML  = deltaPill(b.totals.open,  b.totals.openY,  true);
+  document.getElementById('hero-clear-delta').innerHTML = deltaPill(b.totals.clear, b.totals.clearY, false);
 }
 
 function renderStates(b){
@@ -793,23 +915,22 @@ function renderStates(b){
       });
 
     const sTot = projEntries.reduce((acc,[,p])=>{
-      acc.open += p.open;
-      acc.openFt += p.openFt;
-      acc.clear += p.clear;
-      acc.clearFt += p.clearFt;
+      acc.open += p.open;     acc.openFt += p.openFt;
+      acc.clear += p.clear;   acc.clearFt += p.clearFt;
+      acc.openY += p.openY;   acc.clearY += p.clearY;
       return acc;
-    },{open:0,openFt:0,clear:0,clearFt:0});
+    },{open:0,openFt:0,clear:0,clearFt:0,openY:0,clearY:0});
 
     html += `<div class="state">
       <div class="state-head">
         <div class="state-name">${esc(st)}</div>
         <div class="state-totals">
           <div class="state-total">
-            <div class="state-total-num open">${fmtN(sTot.open)}</div>
+            <div class="state-total-num open">${fmtN(sTot.open)} ${deltaPill(sTot.open, sTot.openY, true)}</div>
             <div class="state-total-lbl">open · ${fmtN(sTot.openFt)} ft</div>
           </div>
           <div class="state-total">
-            <div class="state-total-num clear">${fmtN(sTot.clear)}</div>
+            <div class="state-total-num clear">${fmtN(sTot.clear)} ${deltaPill(sTot.clear, sTot.clearY, false)}</div>
             <div class="state-total-lbl">clear · ${fmtN(sTot.clearFt)} ft</div>
           </div>
         </div>
@@ -829,17 +950,17 @@ function renderStates(b){
             ${projEntries.map(([name,p])=>`
               <tr>
                 <td class="proj-name${name.startsWith('(')?' no-proj':''}" title="${esc(name)}">${esc(name)}</td>
-                <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)}</td>
+                <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)} ${deltaPill(p.open, p.openY, true)}</td>
                 <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)}</td>
-                <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)}</td>
+                <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)} ${deltaPill(p.clear, p.clearY, false)}</td>
                 <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)}</td>
               </tr>
             `).join('')}
             <tr class="proj-total-row">
               <td class="proj-name">TOTAL ${esc(st)}</td>
-              <td class="cell-n red">${fmtN(sTot.open)}</td>
+              <td class="cell-n red">${fmtN(sTot.open)} ${deltaPill(sTot.open, sTot.openY, true)}</td>
               <td class="cell-ft red">${fmtN(sTot.openFt)}</td>
-              <td class="cell-n green">${fmtN(sTot.clear)}</td>
+              <td class="cell-n green">${fmtN(sTot.clear)} ${deltaPill(sTot.clear, sTot.clearY, false)}</td>
               <td class="cell-ft green">${fmtN(sTot.clearFt)}</td>
             </tr>
           </tbody>

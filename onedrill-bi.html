@@ -313,7 +313,7 @@ body::after{
   width:100%;
   border-collapse:collapse;
   font-family:var(--sans);
-  font-size:13px;
+  font-size:17px;
 }
 .proj-table thead{
   position:sticky;
@@ -322,9 +322,9 @@ body::after{
   z-index:2;
 }
 .proj-table th{
-  padding:8px 10px;
+  padding:10px 12px;
   font-family:var(--mono);
-  font-size:9px;
+  font-size:11px;
   font-weight:600;
   letter-spacing:.18em;
   text-transform:uppercase;
@@ -333,7 +333,7 @@ body::after{
   border-bottom:1px solid var(--border-strong);
   white-space:nowrap;
 }
-.proj-table th:first-child{text-align:left;padding-left:18px}
+.proj-table th:first-child{text-align:left;padding-left:20px}
 .proj-table th.col-open{color:var(--red-soft)}
 .proj-table th.col-clear{color:var(--green-soft)}
 
@@ -345,16 +345,16 @@ body::after{
 .proj-table tbody tr:last-child{border-bottom:none}
 
 .proj-table td{
-  padding:7px 10px;
+  padding:11px 12px;
   vertical-align:middle;
 }
-.proj-table td:first-child{padding-left:18px}
+.proj-table td:first-child{padding-left:20px}
 
 .proj-name{
   color:var(--text);
   font-weight:500;
-  font-size:13px;
-  max-width:220px;
+  font-size:17px;
+  max-width:260px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -365,8 +365,8 @@ body::after{
   text-align:right;
   font-family:var(--mono);
   font-feature-settings:"tnum";
-  font-weight:500;
-  font-size:14px;
+  font-weight:600;
+  font-size:20px;
   letter-spacing:.02em;
 }
 .cell-n.red{color:var(--red)}
@@ -376,8 +376,8 @@ body::after{
 .cell-ft{
   text-align:right;
   font-family:var(--mono);
-  font-size:12px;
-  font-weight:400;
+  font-size:16px;
+  font-weight:500;
   letter-spacing:.02em;
 }
 .cell-ft.red{color:var(--red-soft)}
@@ -393,15 +393,17 @@ body::after{
   bottom:0;
 }
 .proj-total-row td{
-  padding:9px 10px!important;
-  font-weight:600;
+  padding:14px 12px!important;
+  font-weight:700;
 }
 .proj-total-row .proj-name{
   font-family:var(--display);
-  font-size:16px;
-  letter-spacing:.06em;
-  color:var(--text2);
+  font-size:22px;
+  letter-spacing:.08em;
+  color:var(--text);
 }
+.proj-total-row .cell-n{font-size:24px}
+.proj-total-row .cell-ft{font-size:18px}
 
 .empty-state{
   flex:1;

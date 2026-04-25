@@ -341,7 +341,7 @@ body::after{
   border-bottom:1px solid var(--border);
   transition:background .2s;
 }
-.proj-table tbody tr:nth-child(even){background:var(--row-alt)}
+.proj-table tbody tr.proj-row:nth-of-type(even){background:var(--row-alt)}
 .proj-table tbody tr:last-child{border-bottom:none}
 
 .proj-table td{
@@ -442,6 +442,49 @@ body::after{
 }
 .proj-total-row .cell-n{font-size:24px}
 .proj-total-row .cell-ft{font-size:18px}
+
+/* Linha de prime (cabeçalho de grupo) */
+.prime-row{
+  background:linear-gradient(90deg,var(--accent-dim) 0%,transparent 100%)!important;
+  border-top:1px solid rgba(251,191,36,.2)!important;
+  border-bottom:1px solid var(--border-strong)!important;
+}
+.prime-row td{
+  padding:11px 12px!important;
+}
+.prime-name{
+  font-family:var(--display);
+  font-size:22px;
+  letter-spacing:.14em;
+  color:var(--accent);
+  text-transform:uppercase;
+  padding-left:18px!important;
+}
+.prime-row .cell-n{
+  font-weight:700;
+  font-size:19px;
+}
+.prime-row .cell-ft{
+  font-weight:600;
+  font-size:14px;
+}
+
+/* Indent dos projetos dentro de uma prime */
+.proj-row .proj-indent{
+  padding-left:36px!important;
+  font-size:15px;
+  position:relative;
+}
+.proj-row .proj-indent::before{
+  content:'';
+  position:absolute;
+  left:24px;
+  top:50%;
+  width:6px;
+  height:1px;
+  background:var(--muted);
+  opacity:.4;
+}
 
 .empty-state{
   flex:1;
@@ -716,6 +759,26 @@ function buildSupersededSet(tk){
   return s;
 }
 
+/** Limpa "Inside: ...", "Near: ..." e pega só a primeira parte antes da vírgula. */
+function cleanLocation(loc){
+  if(!loc) return '';
+  return String(loc).replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').split(',')[0].trim();
+}
+
+/** Display do projeto: se nome é só código (sem letras), prefixa com localidade dos tickets. */
+function projDisplay(name, ticketsOfProj){
+  if(!name) return '(Sem projeto)';
+  // Se já tem 2+ letras consecutivas, considera nome legível — usa direto
+  if(/[a-zA-Z]{2,}/.test(name)) return name;
+  // Caso contrário, é código puro tipo "20007433" — prefixa com localidade
+  const locs = (ticketsOfProj||[]).map(t => cleanLocation(t.location)).filter(Boolean);
+  if(!locs.length) return name;
+  const counts = {};
+  for(const l of locs) counts[l] = (counts[l]||0)+1;
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+  return top ? `${top[0]} — ${name}` : name;
+}
+
 /** Reconstroi o status do ticket no momento `atTs` percorrendo o history.
  *  Retorna null se ticket ainda não existia naquele momento. */
 function statusAt(t, atTs){
@@ -773,7 +836,7 @@ async function fetchAll(){
   setRefresh('loading','atualizando…');
   try{
     const [tr,pr] = await Promise.all([
-      sb.from('tickets').select('id,ticket,project_id,state,location,status,footage,old_ticket2,history,created_at').order('ticket'),
+      sb.from('tickets').select('id,ticket,project_id,state,location,status,footage,client,prime,old_ticket2,history,created_at').order('ticket'),
       sb.from('projects').select('id,name,state,status'),
     ]);
     if(tr.error) throw tr.error;
@@ -802,11 +865,25 @@ function computeBreakdown(){
   const supSet = buildSupersededSet(tickets);
   const completedProjIds = new Set(projects.filter(p=>p.status==='Completed').map(p=>p.id));
   const projMap = {};
-  for(const p of projects) projMap[p.id]=p.name;
+  for(const p of projects) projMap[p.id]=p;
+
+  // Pré-agrupar tickets por projeto pra calcular display name (com localidade quando nome é só código)
+  const ticketsByProj = {};
+  for(const t of tickets){
+    const k = t.project_id || '__none__';
+    if(!ticketsByProj[k]) ticketsByProj[k] = [];
+    ticketsByProj[k].push(t);
+  }
+  const projDisplayMap = {};
+  for(const [pid, ts] of Object.entries(ticketsByProj)){
+    const proj = projMap[pid];
+    const name = proj ? proj.name : (pid==='__none__' ? '(Sem projeto)' : '(Projeto removido)');
+    projDisplayMap[pid] = projDisplay(name, ts);
+  }
 
   const STATES_ORDER = ['FL','IN','IL'];
-  const data = {};
-  // totals tem versão hoje E ontem pra comparar
+  const SEM_PRIME = '(SEM PRIME)';
+  const data = {};   // state -> prime -> { total, projects: { displayName -> {...} } }
   const totals = {open:0, openFt:0, clear:0, clearFt:0, openY:0, openFtY:0, clearY:0, clearFtY:0};
   const stateSeen = new Set();
 
@@ -816,39 +893,44 @@ function computeBreakdown(){
     if(supSet.has(String(t.ticket||'').trim())) continue;
     if(t.project_id && completedProjIds.has(t.project_id)) continue;
 
-    const st = (t.state||'?').toUpperCase();
-    const projName = t.project_id ? (projMap[t.project_id] || '(Projeto removido)') : '(Sem projeto)';
-
-    // Status hoje (só conta se Open ou Clear)
     const today = t.status;
-    // Status ontem (reconstruído do history). null = não existia.
-    const past = statusAt(t, yesterdayTs);
-
+    const past  = statusAt(t, yesterdayTs);
     if(today!=='Open' && today!=='Clear' && past!=='Open' && past!=='Clear') continue;
 
+    const st = (t.state||'?').toUpperCase();
+    const prime = ((t.prime||'').trim() || SEM_PRIME).toUpperCase();
+    const projKey = projDisplayMap[t.project_id || '__none__'];
+    const ft = t.footage||0;
+
     if(!data[st]) data[st]={};
-    if(!data[st][projName]) data[st][projName]={
-      open:0, openFt:0, clear:0, clearFt:0,
-      openY:0, openFtY:0, clearY:0, clearFtY:0
+    if(!data[st][prime]) data[st][prime] = {
+      total: {open:0,openFt:0,clear:0,clearFt:0,openY:0,openFtY:0,clearY:0,clearFtY:0},
+      projects: {}
+    };
+    if(!data[st][prime].projects[projKey]) data[st][prime].projects[projKey] = {
+      open:0,openFt:0,clear:0,clearFt:0,openY:0,openFtY:0,clearY:0,clearFtY:0
     };
 
-    const ft = t.footage||0;
-    const cell = data[st][projName];
+    const cell = data[st][prime].projects[projKey];
+    const ptot = data[st][prime].total;
 
     if(today==='Open'){
-      cell.open++; cell.openFt += ft;
-      totals.open++; totals.openFt += ft;
-    }else if(today==='Clear'){
-      cell.clear++; cell.clearFt += ft;
-      totals.clear++; totals.clearFt += ft;
+      cell.open++; cell.openFt+=ft;
+      ptot.open++; ptot.openFt+=ft;
+      totals.open++; totals.openFt+=ft;
+    } else if(today==='Clear'){
+      cell.clear++; cell.clearFt+=ft;
+      ptot.clear++; ptot.clearFt+=ft;
+      totals.clear++; totals.clearFt+=ft;
     }
-
     if(past==='Open'){
-      cell.openY++; cell.openFtY += ft;
-      totals.openY++; totals.openFtY += ft;
-    }else if(past==='Clear'){
-      cell.clearY++; cell.clearFtY += ft;
-      totals.clearY++; totals.clearFtY += ft;
+      cell.openY++; cell.openFtY+=ft;
+      ptot.openY++; ptot.openFtY+=ft;
+      totals.openY++; totals.openFtY+=ft;
+    } else if(past==='Clear'){
+      cell.clearY++; cell.clearFtY+=ft;
+      ptot.clearY++; ptot.clearFtY+=ft;
+      totals.clearY++; totals.clearFtY+=ft;
     }
 
     if(today==='Open'||today==='Clear') stateSeen.add(st);
@@ -904,22 +986,56 @@ function renderStates(b){
       html += '<div class="state"><div class="state-head"><div class="state-name" style="color:var(--muted)">—</div></div><div class="empty-state">Sem dados</div></div>';
       continue;
     }
-    const stateProjs = b.data[st];
-    const projEntries = Object.entries(stateProjs)
-      .sort((a,b2)=>{
-        if(a[0]==='(Sem projeto)') return 1;
-        if(b2[0]==='(Sem projeto)') return -1;
+
+    const statePrimes = b.data[st];
+    // Ordena primes alfabeticamente, com "(SEM PRIME)" sempre no final
+    const primeKeys = Object.keys(statePrimes).sort((a,b2)=>{
+      if(a==='(SEM PRIME)') return 1;
+      if(b2==='(SEM PRIME)') return -1;
+      return a.localeCompare(b2);
+    });
+
+    // Total do estado = soma de todas as primes
+    const sTot = primeKeys.reduce((acc,pk)=>{
+      const pt = statePrimes[pk].total;
+      acc.open+=pt.open;     acc.openFt+=pt.openFt;
+      acc.clear+=pt.clear;   acc.clearFt+=pt.clearFt;
+      acc.openY+=pt.openY;   acc.clearY+=pt.clearY;
+      return acc;
+    },{open:0,openFt:0,clear:0,clearFt:0,openY:0,clearY:0});
+
+    // Build rows — pra cada prime: header de prime + linhas de projeto
+    const rows = primeKeys.map(pk=>{
+      const primeData = statePrimes[pk];
+      const projEntries = Object.entries(primeData.projects).sort((a,b2)=>{
+        if(a[0].startsWith('(Sem projeto)')) return 1;
+        if(b2[0].startsWith('(Sem projeto)')) return -1;
         const sa = a[1].openFt + a[1].clearFt;
         const sb2 = b2[1].openFt + b2[1].clearFt;
         return sb2 - sa;
       });
 
-    const sTot = projEntries.reduce((acc,[,p])=>{
-      acc.open += p.open;     acc.openFt += p.openFt;
-      acc.clear += p.clear;   acc.clearFt += p.clearFt;
-      acc.openY += p.openY;   acc.clearY += p.clearY;
-      return acc;
-    },{open:0,openFt:0,clear:0,clearFt:0,openY:0,clearY:0});
+      const pt = primeData.total;
+      const primeRow = `<tr class="prime-row">
+        <td class="prime-name">${esc(pk)}</td>
+        <td class="cell-n red">${fmtN(pt.open)} ${deltaPill(pt.open, pt.openY, true)}</td>
+        <td class="cell-ft red">${fmtN(pt.openFt)}</td>
+        <td class="cell-n green">${fmtN(pt.clear)} ${deltaPill(pt.clear, pt.clearY, false)}</td>
+        <td class="cell-ft green">${fmtN(pt.clearFt)}</td>
+      </tr>`;
+
+      const projRows = projEntries.map(([name,p])=>`
+        <tr class="proj-row">
+          <td class="proj-name proj-indent${name.startsWith('(')?' no-proj':''}" title="${esc(name)}">${esc(name)}</td>
+          <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)} ${deltaPill(p.open, p.openY, true)}</td>
+          <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)}</td>
+          <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)} ${deltaPill(p.clear, p.clearY, false)}</td>
+          <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)}</td>
+        </tr>
+      `).join('');
+
+      return primeRow + projRows;
+    }).join('');
 
     html += `<div class="state">
       <div class="state-head">
@@ -939,7 +1055,7 @@ function renderStates(b){
         <table class="proj-table">
           <thead>
             <tr>
-              <th>Projeto</th>
+              <th>Prime / Projeto</th>
               <th class="col-open">Open #</th>
               <th class="col-open">Open ft</th>
               <th class="col-clear">Clear #</th>
@@ -947,15 +1063,7 @@ function renderStates(b){
             </tr>
           </thead>
           <tbody>
-            ${projEntries.map(([name,p])=>`
-              <tr>
-                <td class="proj-name${name.startsWith('(')?' no-proj':''}" title="${esc(name)}">${esc(name)}</td>
-                <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)} ${deltaPill(p.open, p.openY, true)}</td>
-                <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)}</td>
-                <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)} ${deltaPill(p.clear, p.clearY, false)}</td>
-                <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)}</td>
-              </tr>
-            `).join('')}
+            ${rows}
             <tr class="proj-total-row">
               <td class="proj-name">TOTAL ${esc(st)}</td>
               <td class="cell-n red">${fmtN(sTot.open)} ${deltaPill(sTot.open, sTot.openY, true)}</td>

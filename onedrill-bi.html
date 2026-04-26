@@ -989,11 +989,14 @@ function renderStates(b){
 
     const statePrimes = b.data[st];
     // Ordena primes alfabeticamente, com "(SEM PRIME)" sempre no final
-    const primeKeys = Object.keys(statePrimes).sort((a,b2)=>{
-      if(a==='(SEM PRIME)') return 1;
-      if(b2==='(SEM PRIME)') return -1;
-      return a.localeCompare(b2);
-    });
+    // E filtra primes que ficaram zeradas hoje (0 open AND 0 clear)
+    const primeKeys = Object.keys(statePrimes)
+      .filter(pk => statePrimes[pk].total.open > 0 || statePrimes[pk].total.clear > 0)
+      .sort((a,b2)=>{
+        if(a==='(SEM PRIME)') return 1;
+        if(b2==='(SEM PRIME)') return -1;
+        return a.localeCompare(b2);
+      });
 
     // Total do estado = soma de todas as primes
     const sTot = primeKeys.reduce((acc,pk)=>{
@@ -1007,13 +1010,16 @@ function renderStates(b){
     // Build rows — pra cada prime: header de prime + linhas de projeto
     const rows = primeKeys.map(pk=>{
       const primeData = statePrimes[pk];
-      const projEntries = Object.entries(primeData.projects).sort((a,b2)=>{
-        if(a[0].startsWith('(Sem projeto)')) return 1;
-        if(b2[0].startsWith('(Sem projeto)')) return -1;
-        const sa = a[1].openFt + a[1].clearFt;
-        const sb2 = b2[1].openFt + b2[1].clearFt;
-        return sb2 - sa;
-      });
+      // Filtra projetos zerados hoje (mesmo que tivessem dados ontem) e ordena
+      const projEntries = Object.entries(primeData.projects)
+        .filter(([, p]) => p.open > 0 || p.clear > 0)
+        .sort((a,b2)=>{
+          if(a[0].startsWith('(Sem projeto)')) return 1;
+          if(b2[0].startsWith('(Sem projeto)')) return -1;
+          const sa = a[1].openFt + a[1].clearFt;
+          const sb2 = b2[1].openFt + b2[1].clearFt;
+          return sb2 - sa;
+        });
 
       const pt = primeData.total;
       const primeRow = `<tr class="prime-row">

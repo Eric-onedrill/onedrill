@@ -1,9 +1,29 @@
 <!DOCTYPE html>
+<!--
+  ONEDRILL · BI v2
+  ─────────────────────────────────────────────
+  Melhorias vs v1:
+    1. ⚠ SECURITY CHECKLIST — verificar RLS no Supabase Studio:
+         • Tabela `tickets`: RLS enabled, policy SELECT pra anon (sem INSERT/UPDATE/DELETE)
+         • Tabela `projects`: idem
+         • Considerar URL secreta ou Cloudflare Access pra TV pública
+    2. Aging dos Open (buckets 0-3 / 4-7 / 8-14 / 15+ dias) — tanto global quanto por projeto
+    3. Sparklines 14d nos hero cards e nos headers de estado
+    4. Delta vs ontem + delta vs média 7 dias
+    5. Velocidade (clears/dia média 7d) no hero Clear
+    6. Cor condicional do hero Open baseada em thresholds
+    7. AO VIVO em verde (vermelho pulsante = alerta, não live)
+    8. STATES_ORDER ordenado por volume (não mais hardcoded)
+    9. localStorage cache — sobrevive a recarga sem internet
+   10. Botão de force refresh visível
+   11. "Última atualização real" + fuso horário explícito
+   12. Modo DEMO automático quando rodando em file:// ou sem conexão
+-->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920, initial-scale=1">
-<title>OneDrill BI · Open / Clear por Projeto</title>
+<title>OneDrill BI v2 · Open / Clear · Aging · Tendência</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -30,6 +50,12 @@
   --green-soft:#86efac;
   --green-dim:rgba(34,197,94,.12);
   --green-bg:rgba(34,197,94,.06);
+  --orange:#fb923c;
+  --orange-soft:#fdba74;
+  --orange-dim:rgba(251,146,60,.15);
+  --yellow:#eab308;
+  --yellow-soft:#fde047;
+  --yellow-dim:rgba(234,179,8,.15);
   --display:'Bebas Neue',Impact,sans-serif;
   --sans:'DM Sans',-apple-system,system-ui,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,monospace;
@@ -76,7 +102,7 @@ body::after{
   height:100vh;
   padding:18px 24px;
   display:grid;
-  grid-template-rows:auto auto 1fr auto;
+  grid-template-rows:auto 1fr auto;
   gap:14px;
 }
 
@@ -115,47 +141,103 @@ body::after{
   letter-spacing:.18em;
   margin-top:3px;
 }
+.brand-version{
+  display:inline-block;
+  font-family:var(--mono);
+  font-size:9px;
+  font-weight:700;
+  color:var(--accent);
+  background:var(--accent-dim);
+  border:1px solid rgba(251,191,36,.3);
+  padding:2px 6px;
+  border-radius:3px;
+  letter-spacing:.1em;
+  margin-left:6px;
+  vertical-align:3px;
+}
 
-.head-meta{display:flex;align-items:center;gap:32px}
+.head-meta{display:flex;align-items:center;gap:24px}
 .live-pill{
   display:flex;align-items:center;gap:8px;
   padding:6px 14px;
-  background:var(--red-dim);
-  border:1px solid rgba(239,68,68,.4);
+  background:var(--green-dim);
+  border:1px solid rgba(34,197,94,.4);
   border-radius:20px;
   font-family:var(--mono);
   font-size:11px;
   letter-spacing:.18em;
   text-transform:uppercase;
-  color:var(--red);
+  color:var(--green);
+}
+.live-pill.demo{
+  background:var(--accent-dim);
+  border-color:rgba(251,191,36,.4);
+  color:var(--accent);
 }
 .live-dot{
   width:7px;height:7px;border-radius:50%;
-  background:var(--red);
-  animation:pulse 1.6s ease-in-out infinite;
+  background:var(--green);
+  animation:pulseGreen 2s ease-in-out infinite;
 }
-@keyframes pulse{
-  0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(239,68,68,.6)}
-  50%{opacity:.5;box-shadow:0 0 0 8px rgba(239,68,68,0)}
+.live-pill.demo .live-dot{
+  background:var(--accent);
+  animation:pulseAccent 2s ease-in-out infinite;
 }
+@keyframes pulseGreen{
+  0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,197,94,.5)}
+  50%{opacity:.6;box-shadow:0 0 0 7px rgba(34,197,94,0)}
+}
+@keyframes pulseAccent{
+  0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(251,191,36,.5)}
+  50%{opacity:.6;box-shadow:0 0 0 7px rgba(251,191,36,0)}
+}
+
+.refresh-btn{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 14px;
+  background:var(--card);
+  border:1px solid var(--border-strong);
+  border-radius:6px;
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text2);
+  cursor:pointer;
+  transition:all .2s;
+}
+.refresh-btn:hover{
+  background:var(--card2);
+  color:var(--text);
+  border-color:var(--accent);
+}
+.refresh-btn:active{transform:scale(.97)}
+.refresh-btn svg{width:13px;height:13px;stroke:currentColor}
+.refresh-btn.spinning svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 .clock{
   font-family:var(--display);
-  font-size:48px;
+  font-size:42px;
   letter-spacing:.06em;
   line-height:1;
   text-align:right;
 }
 .clock-sub{
   font-family:var(--mono);
-  font-size:11px;
+  font-size:10px;
   color:var(--muted);
   text-transform:uppercase;
-  letter-spacing:.16em;
+  letter-spacing:.12em;
   text-align:right;
-  margin-top:2px;
+  margin-top:3px;
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
 }
+.clock-sub .tz{color:var(--text2)}
 
-/* HERO: OPEN + CLEAR */
+/* HERO: OPEN + CLEAR — agora com sparkline e aging/velocidade */
 .hero{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -163,19 +245,27 @@ body::after{
 }
 .hero-card{
   position:relative;
-  padding:22px 28px;
+  padding:18px 24px;
   background:var(--card);
   border:1px solid var(--border);
   border-radius:10px;
   overflow:hidden;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
+  display:grid;
+  grid-template-columns:1.05fr .95fr;
   gap:24px;
+  align-items:stretch;
 }
 .hero-card.open{
   background:linear-gradient(135deg,var(--card) 0%,rgba(239,68,68,.08) 100%);
   border-color:rgba(239,68,68,.25);
+}
+.hero-card.open.healthy{
+  background:linear-gradient(135deg,var(--card) 0%,rgba(34,197,94,.06) 100%);
+  border-color:rgba(34,197,94,.2);
+}
+.hero-card.open.warning{
+  background:linear-gradient(135deg,var(--card) 0%,rgba(234,179,8,.08) 100%);
+  border-color:rgba(234,179,8,.25);
 }
 .hero-card.clear{
   background:linear-gradient(135deg,var(--card) 0%,rgba(34,197,94,.08) 100%);
@@ -188,57 +278,260 @@ body::after{
   height:3px;
 }
 .hero-card.open::before{background:var(--red);box-shadow:0 0 18px var(--red)}
+.hero-card.open.healthy::before{background:var(--green);box-shadow:0 0 18px var(--green)}
+.hero-card.open.warning::before{background:var(--yellow);box-shadow:0 0 18px var(--yellow)}
 .hero-card.clear::before{background:var(--green);box-shadow:0 0 18px var(--green)}
 
+.hero-left{
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  gap:14px;
+}
+.hero-tag-row{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
 .hero-tag{
   font-family:var(--display);
-  font-size:48px;
+  font-size:42px;
   letter-spacing:.16em;
   line-height:1;
 }
 .hero-tag.open{color:var(--red);text-shadow:0 0 20px rgba(239,68,68,.4)}
+.hero-card.open.healthy .hero-tag.open{color:var(--green);text-shadow:0 0 20px rgba(34,197,94,.4)}
+.hero-card.open.warning .hero-tag.open{color:var(--yellow);text-shadow:0 0 20px rgba(234,179,8,.4)}
 .hero-tag.clear{color:var(--green);text-shadow:0 0 20px rgba(34,197,94,.4)}
 .hero-tag-sub{
   font-family:var(--mono);
-  font-size:11px;
+  font-size:10px;
   color:var(--muted);
-  letter-spacing:.2em;
+  letter-spacing:.18em;
   text-transform:uppercase;
-  margin-top:6px;
+  margin-top:4px;
 }
 
-.hero-stats{
+.hero-main{display:flex;flex-direction:column;gap:6px}
+.hero-num-row{
   display:flex;
-  align-items:flex-end;
-  gap:36px;
-}
-.hero-stat{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-end;
+  align-items:baseline;
+  gap:10px;
+  flex-wrap:wrap;
 }
 .hero-num{
   font-family:var(--display);
-  font-size:96px;
+  font-size:78px;
   line-height:.85;
   letter-spacing:.02em;
   font-feature-settings:"tnum";
 }
 .hero-card.open .hero-num{color:var(--red)}
+.hero-card.open.healthy .hero-num{color:var(--green)}
+.hero-card.open.warning .hero-num{color:var(--yellow)}
 .hero-card.clear .hero-num{color:var(--green)}
-.hero-num.ft{
-  font-size:60px;
-  color:var(--text);
+.hero-num-suffix{
+  font-family:var(--display);
+  font-size:32px;
+  line-height:1;
+  color:var(--text2);
+  letter-spacing:.06em;
 }
+.hero-deltas{
+  display:flex;
+  gap:14px;
+  margin-left:auto;
+  padding-bottom:6px;
+}
+.hero-delta-item{display:flex;flex-direction:column;gap:1px;align-items:flex-end}
+.hero-delta-val{
+  font-family:var(--mono);
+  font-size:16px;
+  font-weight:700;
+  letter-spacing:.02em;
+}
+.hero-delta-lbl{
+  font-family:var(--mono);
+  font-size:8.5px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.15em;
+  font-weight:500;
+}
+
+.hero-secondary{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  font-family:var(--sans);
+  padding-top:4px;
+  border-top:1px solid var(--border);
+  margin-top:2px;
+}
+.hero-tk-num{
+  font-family:var(--display);
+  font-size:26px;
+  letter-spacing:.04em;
+  color:var(--text);
+  line-height:1;
+}
+.hero-tk-lbl{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+.hero-tk-delta{
+  font-family:var(--mono);
+  font-size:12px;
+  font-weight:700;
+  margin-left:auto;
+}
+.hero-tk-delta .delta{vertical-align:0}
+
 .hero-stat-label{
   font-family:var(--mono);
-  font-size:11px;
+  font-size:10px;
   color:var(--muted);
   letter-spacing:.18em;
   text-transform:uppercase;
-  margin-top:6px;
 }
 .hero-stat-label .unit{color:var(--text2);margin-left:4px}
+
+/* HERO RIGHT: spark + aging/velocidade */
+.hero-right{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  justify-content:space-between;
+  border-left:1px solid var(--border);
+  padding-left:24px;
+  min-width:0;
+}
+.hero-spark{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.hero-spark-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.hero-spark-lbl{
+  font-family:var(--mono);
+  font-size:9.5px;
+  color:var(--muted);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.hero-spark-range{
+  font-family:var(--mono);
+  font-size:9.5px;
+  color:var(--text2);
+  letter-spacing:.06em;
+}
+.hero-spark-svg{
+  width:100%;
+  height:46px;
+}
+
+/* AGING BUCKETS (no Open card) */
+.aging{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.aging-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.aging-lbl{
+  font-family:var(--mono);
+  font-size:9.5px;
+  color:var(--muted);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.aging-warn{
+  font-family:var(--mono);
+  font-size:9.5px;
+  color:var(--red);
+  letter-spacing:.06em;
+  font-weight:700;
+}
+.aging-bars{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+}
+.aging-bucket{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  padding:6px 8px;
+  background:var(--bg2);
+  border:1px solid var(--border);
+  border-radius:5px;
+  position:relative;
+  overflow:hidden;
+}
+.aging-bucket::before{
+  content:'';
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:3px;
+}
+.aging-bucket.fresh::before{background:var(--green)}
+.aging-bucket.warm::before{background:var(--yellow)}
+.aging-bucket.hot::before{background:var(--orange)}
+.aging-bucket.critical::before{background:var(--red);box-shadow:0 0 8px var(--red)}
+.aging-bucket-num{
+  font-family:var(--display);
+  font-size:22px;
+  line-height:1;
+  letter-spacing:.02em;
+  font-feature-settings:"tnum";
+}
+.aging-bucket.fresh .aging-bucket-num{color:var(--green)}
+.aging-bucket.warm .aging-bucket-num{color:var(--yellow)}
+.aging-bucket.hot .aging-bucket-num{color:var(--orange)}
+.aging-bucket.critical .aging-bucket-num{color:var(--red)}
+.aging-bucket-lbl{
+  font-family:var(--mono);
+  font-size:8.5px;
+  color:var(--muted);
+  letter-spacing:.1em;
+  text-transform:uppercase;
+}
+
+/* VELOCIDADE (no Clear card) */
+.velocity{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+.vel-card{
+  padding:8px 10px;
+  background:var(--bg2);
+  border:1px solid var(--border);
+  border-radius:5px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.vel-num{
+  font-family:var(--display);
+  font-size:24px;
+  line-height:1;
+  color:var(--green);
+  letter-spacing:.02em;
+}
+.vel-lbl{
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--muted);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
 
 /* STATES GRID */
 .states{
@@ -260,20 +553,49 @@ body::after{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:16px 20px 14px;
+  padding:14px 18px 12px;
   border-bottom:1px solid var(--border-strong);
   background:var(--card2);
+  gap:14px;
+}
+.state-head-left{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  flex:1;
+  min-width:0;
+}
+.state-head-top{
+  display:flex;
+  align-items:baseline;
+  gap:14px;
 }
 .state-name{
   font-family:var(--display);
-  font-size:42px;
+  font-size:38px;
   letter-spacing:.14em;
   line-height:1;
   color:var(--accent);
 }
+.state-spark{
+  flex-shrink:0;
+  height:22px;
+  width:80px;
+  opacity:.85;
+}
+.state-oldest{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.06em;
+}
+.state-oldest .age-val{color:var(--red);font-weight:700}
+.state-oldest .age-val.warn{color:var(--orange)}
+.state-oldest .age-val.ok{color:var(--text2)}
+
 .state-totals{
   display:flex;
-  gap:18px;
+  gap:14px;
   align-items:center;
 }
 .state-total{
@@ -283,20 +605,30 @@ body::after{
 }
 .state-total-num{
   font-family:var(--display);
-  font-size:32px;
+  font-size:26px;
   line-height:.9;
-  letter-spacing:.04em;
+  letter-spacing:.03em;
+  font-feature-settings:"tnum";
 }
 .state-total-num.open{color:var(--red)}
 .state-total-num.clear{color:var(--green)}
+.state-total-suffix{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.1em;
+  margin-left:3px;
+  font-weight:500;
+}
 .state-total-lbl{
   font-family:var(--mono);
   font-size:9px;
   color:var(--muted);
-  letter-spacing:.16em;
+  letter-spacing:.14em;
   text-transform:uppercase;
   margin-top:2px;
 }
+.state-total-lbl strong{color:var(--text2);font-weight:600}
 
 /* Tabela densa */
 .proj-table-wrap{
@@ -313,7 +645,7 @@ body::after{
   width:100%;
   border-collapse:collapse;
   font-family:var(--sans);
-  font-size:17px;
+  font-size:16px;
 }
 .proj-table thead{
   position:sticky;
@@ -322,20 +654,21 @@ body::after{
   z-index:2;
 }
 .proj-table th{
-  padding:10px 12px;
+  padding:9px 10px;
   font-family:var(--mono);
-  font-size:11px;
+  font-size:10px;
   font-weight:600;
-  letter-spacing:.18em;
+  letter-spacing:.16em;
   text-transform:uppercase;
   color:var(--muted);
   text-align:right;
   border-bottom:1px solid var(--border-strong);
   white-space:nowrap;
 }
-.proj-table th:first-child{text-align:left;padding-left:20px}
+.proj-table th:first-child{text-align:left;padding-left:18px}
 .proj-table th.col-open{color:var(--red-soft)}
 .proj-table th.col-clear{color:var(--green-soft)}
+.proj-table th.col-age{color:var(--orange-soft);text-align:center}
 
 .proj-table tbody tr{
   border-bottom:1px solid var(--border);
@@ -345,16 +678,16 @@ body::after{
 .proj-table tbody tr:last-child{border-bottom:none}
 
 .proj-table td{
-  padding:11px 12px;
+  padding:10px 10px;
   vertical-align:middle;
 }
-.proj-table td:first-child{padding-left:20px}
+.proj-table td:first-child{padding-left:18px}
 
 .proj-name{
   color:var(--text);
   font-weight:500;
-  font-size:17px;
-  max-width:260px;
+  font-size:16px;
+  max-width:240px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -365,31 +698,52 @@ body::after{
   text-align:right;
   font-family:var(--mono);
   font-feature-settings:"tnum";
-  font-weight:600;
-  font-size:20px;
+  font-weight:500;
+  font-size:13px;
   letter-spacing:.02em;
+  color:var(--text2);
 }
-.cell-n.red{color:var(--red)}
+.cell-n.red{color:var(--red-soft)}
 .cell-n.red.zero{color:var(--muted);font-weight:400}
-.cell-n.green{color:var(--green)}
+.cell-n.green{color:var(--green-soft)}
 .cell-n.green.zero{color:var(--muted);font-weight:400}
 .cell-ft{
   text-align:right;
   font-family:var(--mono);
-  font-size:16px;
-  font-weight:500;
+  font-feature-settings:"tnum";
+  font-weight:700;
+  font-size:18px;
   letter-spacing:.02em;
 }
-.cell-ft.red{color:var(--red-soft)}
-.cell-ft.red.zero{color:var(--muted)}
-.cell-ft.green{color:var(--green-soft)}
-.cell-ft.green.zero{color:var(--muted)}
+.cell-ft.red{color:var(--red)}
+.cell-ft.red.zero{color:var(--muted);font-weight:400}
+.cell-ft.green{color:var(--green)}
+.cell-ft.green.zero{color:var(--muted);font-weight:400}
+
+/* Coluna AGE — chip com cor por bucket */
+.cell-age{text-align:center;font-family:var(--mono);font-size:13px;font-weight:600}
+.age-chip{
+  display:inline-block;
+  padding:2px 7px;
+  border-radius:3px;
+  letter-spacing:.04em;
+  font-family:var(--mono);
+  font-size:12px;
+  font-weight:700;
+  min-width:42px;
+  text-align:center;
+}
+.age-chip.fresh{color:var(--green);background:var(--green-dim)}
+.age-chip.warm{color:var(--yellow);background:var(--yellow-dim)}
+.age-chip.hot{color:var(--orange);background:var(--orange-dim)}
+.age-chip.critical{color:var(--red);background:var(--red-dim);box-shadow:inset 0 0 0 1px rgba(239,68,68,.3)}
+.age-chip.none{color:var(--muted);font-weight:400;background:transparent}
 
 /* Delta pills (vs ontem) */
 .delta{
   display:inline-block;
   font-family:var(--mono);
-  font-size:13px;
+  font-size:12px;
   font-weight:700;
   margin-left:4px;
   letter-spacing:.02em;
@@ -400,28 +754,10 @@ body::after{
 .delta.up.good{color:var(--green);text-shadow:0 0 8px rgba(34,197,94,.3)}
 .delta.down.bad{color:var(--red);text-shadow:0 0 8px rgba(239,68,68,.3)}
 .delta.down.good{color:var(--green);text-shadow:0 0 8px rgba(34,197,94,.3)}
-.delta.stable{color:var(--muted);font-weight:400;font-size:12px}
+.delta.stable{color:var(--muted);font-weight:400;font-size:11px}
 
-.state-total-num .delta{font-size:16px;margin-left:6px;vertical-align:6px}
-.proj-total-row .cell-n .delta{font-size:15px}
-
-.hero-num-row{
-  display:flex;
-  align-items:flex-end;
-  gap:14px;
-}
-.hero-delta{
-  font-family:var(--mono);
-  font-size:28px;
-  font-weight:700;
-  letter-spacing:.02em;
-  padding-bottom:6px;
-}
-.hero-delta .delta{
-  font-size:28px;
-  margin-left:0;
-  vertical-align:baseline;
-}
+.state-total-num .delta{font-size:14px;margin-left:5px;vertical-align:5px}
+.proj-total-row .cell-n .delta{font-size:13px}
 
 /* Linha total no rodapé */
 .proj-total-row{
@@ -431,17 +767,17 @@ body::after{
   bottom:0;
 }
 .proj-total-row td{
-  padding:14px 12px!important;
+  padding:13px 10px!important;
   font-weight:700;
 }
 .proj-total-row .proj-name{
   font-family:var(--display);
-  font-size:22px;
+  font-size:20px;
   letter-spacing:.08em;
   color:var(--text);
 }
-.proj-total-row .cell-n{font-size:24px}
-.proj-total-row .cell-ft{font-size:18px}
+.proj-total-row .cell-n{font-size:14px;font-weight:600}
+.proj-total-row .cell-ft{font-size:20px;font-weight:700}
 
 /* Linha de prime (cabeçalho de grupo) */
 .prime-row{
@@ -450,35 +786,35 @@ body::after{
   border-bottom:1px solid var(--border-strong)!important;
 }
 .prime-row td{
-  padding:11px 12px!important;
+  padding:10px 10px!important;
 }
 .prime-name{
   font-family:var(--display);
-  font-size:22px;
+  font-size:20px;
   letter-spacing:.14em;
   color:var(--accent);
   text-transform:uppercase;
-  padding-left:18px!important;
+  padding-left:16px!important;
 }
 .prime-row .cell-n{
-  font-weight:700;
-  font-size:19px;
+  font-weight:600;
+  font-size:13px;
 }
 .prime-row .cell-ft{
-  font-weight:600;
-  font-size:14px;
+  font-weight:700;
+  font-size:17px;
 }
 
 /* Indent dos projetos dentro de uma prime */
 .proj-row .proj-indent{
-  padding-left:36px!important;
-  font-size:15px;
+  padding-left:32px!important;
+  font-size:14px;
   position:relative;
 }
 .proj-row .proj-indent::before{
   content:'';
   position:absolute;
-  left:24px;
+  left:22px;
   top:50%;
   width:6px;
   height:1px;
@@ -503,7 +839,7 @@ body::after{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:10px 16px;
+  padding:9px 16px;
   background:var(--card);
   border:1px solid var(--border);
   border-radius:6px;
@@ -511,11 +847,13 @@ body::after{
   font-size:11px;
   color:var(--text2);
   height:42px;
+  gap:18px;
 }
 .foot-section{
   display:flex;
   align-items:center;
   gap:18px;
+  flex-wrap:wrap;
 }
 .foot-stat{
   display:flex;
@@ -530,6 +868,20 @@ body::after{
 .foot-dot.r{background:var(--red);box-shadow:0 0 6px var(--red)}
 .foot-dot.g{background:var(--green);box-shadow:0 0 6px var(--green)}
 .foot-dot.a{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.foot-dot.o{background:var(--orange);box-shadow:0 0 6px var(--orange)}
+
+.foot-right{
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+.last-update{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.06em;
+}
+.last-update strong{color:var(--text2);font-weight:500}
 
 .refresh-pill{
   display:flex;
@@ -548,7 +900,7 @@ body::after{
 .refresh-dot.loading{
   background:var(--accent);
   box-shadow:0 0 8px var(--accent);
-  animation:pulse 1s ease-in-out infinite;
+  animation:pulseAccent 1s ease-in-out infinite;
 }
 .refresh-dot.error{background:var(--red);box-shadow:0 0 8px var(--red)}
 
@@ -612,9 +964,8 @@ body::after{
 }
 .frame > *{animation:reveal .6s ease both}
 .frame > :nth-child(1){animation-delay:0s}
-.frame > :nth-child(2){animation-delay:.08s}
-.frame > :nth-child(3){animation-delay:.16s}
-.frame > :nth-child(4){animation-delay:.24s}
+.frame > :nth-child(2){animation-delay:.12s}
+.frame > :nth-child(3){animation-delay:.24s}
 .state{animation:reveal .5s ease both}
 .state:nth-child(1){animation-delay:.18s}
 .state:nth-child(2){animation-delay:.24s}
@@ -636,17 +987,376 @@ body::after{
   letter-spacing:.06em;
 }
 .err-banner.visible{display:block;animation:reveal .4s ease}
+
+/* ─────────────────────────────────────────────
+   SCREENS (rotação automática)
+   ───────────────────────────────────────────── */
+.screens-wrap{
+  position:relative;
+  display:grid;
+  grid-template-columns:1fr;
+  grid-template-rows:1fr;
+  min-height:0;
+  overflow:hidden;
+}
+.screen{
+  grid-column:1;
+  grid-row:1;
+  display:grid;
+  grid-template-rows:auto 1fr;
+  gap:14px;
+  min-height:0;
+  opacity:0;
+  pointer-events:none;
+  transform:translateY(8px);
+  transition:opacity .55s ease, transform .55s ease;
+}
+.screen.active{
+  opacity:1;
+  pointer-events:auto;
+  transform:translateY(0);
+}
+
+/* SCREEN INDICATOR (header) */
+.screen-switcher{
+  display:flex;
+  align-items:center;
+  gap:0;
+  background:var(--card);
+  border:1px solid var(--border-strong);
+  border-radius:6px;
+  padding:3px;
+  position:relative;
+  overflow:hidden;
+}
+.screen-tab{
+  position:relative;
+  z-index:2;
+  background:transparent;
+  border:none;
+  color:var(--text2);
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  font-weight:600;
+  padding:6px 13px;
+  cursor:pointer;
+  transition:color .25s;
+  border-radius:4px;
+}
+.screen-tab.active{color:var(--bg)}
+.screen-tab:hover:not(.active){color:var(--text)}
+.screen-tab-bg{
+  position:absolute;
+  z-index:1;
+  top:3px;
+  bottom:3px;
+  background:var(--accent);
+  border-radius:4px;
+  transition:left .35s cubic-bezier(.4,0,.2,1), width .35s cubic-bezier(.4,0,.2,1);
+}
+.screen-tab-bg::after{
+  content:'';
+  position:absolute;
+  bottom:0;
+  left:0;
+  height:2px;
+  background:rgba(10,14,20,.4);
+  border-radius:0 0 4px 4px;
+  width:var(--progress, 0%);
+  transition:width .3s linear;
+}
+
+/* ─────────────────────────────────────────────
+   TELA 2 — OPERAÇÕES (Forecast + Lead Time)
+   ───────────────────────────────────────────── */
+.ops-section{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.ops-section-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  padding:0 4px;
+}
+.ops-section-title{
+  font-family:var(--display);
+  font-size:22px;
+  letter-spacing:.18em;
+  color:var(--accent);
+  line-height:1;
+}
+.ops-section-sub{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.16em;
+}
+
+/* FORECAST CARDS — 3 estados */
+.forecast-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:14px;
+}
+.forecast-card{
+  position:relative;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:18px 22px;
+  display:grid;
+  grid-template-columns:1fr auto;
+  grid-template-rows:auto auto;
+  gap:14px 22px;
+  overflow:hidden;
+  align-items:center;
+}
+.forecast-card::before{
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;
+  height:3px;
+  background:var(--accent);
+  opacity:.6;
+}
+.forecast-card.healthy::before{background:var(--green);box-shadow:0 0 14px rgba(34,197,94,.3)}
+.forecast-card.warning::before{background:var(--yellow);box-shadow:0 0 14px rgba(234,179,8,.3)}
+.forecast-card.critical::before{background:var(--red);box-shadow:0 0 14px rgba(239,68,68,.3)}
+.forecast-card.stuck::before{background:var(--muted);opacity:.5}
+
+.fc-state{
+  font-family:var(--display);
+  font-size:38px;
+  letter-spacing:.14em;
+  line-height:1;
+  color:var(--accent);
+  grid-column:1;
+  grid-row:1;
+}
+.fc-stats{
+  grid-column:1;
+  grid-row:2;
+  display:flex;
+  gap:18px;
+}
+.fc-stat{
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+}
+.fc-stat-num{
+  font-family:var(--display);
+  font-size:24px;
+  line-height:1;
+  letter-spacing:.04em;
+  color:var(--text);
+  font-feature-settings:"tnum";
+}
+.fc-stat-num.open{color:var(--red-soft)}
+.fc-stat-num.vel{color:var(--green-soft)}
+.fc-stat-suffix{
+  font-family:var(--mono);
+  font-size:9.5px;
+  color:var(--muted);
+  letter-spacing:.06em;
+  margin-left:2px;
+}
+.fc-stat-lbl{
+  font-family:var(--mono);
+  font-size:8.5px;
+  color:var(--muted);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  margin-top:1px;
+}
+
+.fc-eta{
+  grid-column:2;
+  grid-row:1 / span 2;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  justify-content:center;
+  padding:6px 0 6px 18px;
+  border-left:1px solid var(--border);
+  min-width:118px;
+}
+.fc-eta-num{
+  font-family:var(--display);
+  font-size:62px;
+  line-height:.85;
+  letter-spacing:.02em;
+  font-feature-settings:"tnum";
+}
+.forecast-card.healthy .fc-eta-num{color:var(--green)}
+.forecast-card.warning .fc-eta-num{color:var(--yellow)}
+.forecast-card.critical .fc-eta-num{color:var(--red)}
+.forecast-card.stuck .fc-eta-num{color:var(--muted)}
+.fc-eta-suffix{
+  font-family:var(--display);
+  font-size:18px;
+  letter-spacing:.1em;
+  color:var(--text2);
+  margin-top:2px;
+}
+.fc-eta-lbl{
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--muted);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  margin-top:5px;
+  text-align:right;
+}
+
+/* LEAD TIME CARDS — global + por estado (4 cards) */
+.leadtime-section{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  flex:1;
+  min-height:0;
+}
+.leadtime-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:14px;
+  flex:1;
+  min-height:0;
+}
+.lt-card{
+  position:relative;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:18px 22px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  overflow:hidden;
+}
+.lt-card.global{
+  background:linear-gradient(135deg,var(--card) 0%,var(--accent-dim) 200%);
+  border-color:rgba(251,191,36,.25);
+}
+.lt-card.global::before{
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;
+  height:3px;
+  background:var(--accent);
+  box-shadow:0 0 14px rgba(251,191,36,.3);
+}
+
+.lt-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+}
+.lt-state{
+  font-family:var(--display);
+  font-size:30px;
+  letter-spacing:.14em;
+  line-height:1;
+  color:var(--accent);
+}
+.lt-card.global .lt-state{color:var(--text)}
+.lt-count{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.08em;
+}
+
+.lt-main{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  margin-top:8px;
+}
+.lt-num{
+  font-family:var(--display);
+  font-size:60px;
+  line-height:.85;
+  letter-spacing:.02em;
+  color:var(--text);
+  font-feature-settings:"tnum";
+}
+.lt-card.global .lt-num{color:var(--accent)}
+.lt-num-suffix{
+  font-family:var(--display);
+  font-size:22px;
+  letter-spacing:.08em;
+  color:var(--text2);
+}
+.lt-num.empty{color:var(--muted);font-size:34px}
+
+.lt-meta{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  margin-top:4px;
+}
+.lt-meta-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--text2);
+  letter-spacing:.04em;
+}
+.lt-meta-lbl{color:var(--muted);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase}
+.lt-meta-val{font-weight:600}
+.lt-meta-val.ok{color:var(--green)}
+.lt-meta-val.warn{color:var(--yellow)}
+.lt-meta-val.bad{color:var(--red)}
+
+/* Distribuição mini-bar dentro do lead time card */
+.lt-dist{
+  display:flex;
+  height:6px;
+  border-radius:3px;
+  overflow:hidden;
+  background:var(--bg2);
+  margin-top:6px;
+}
+.lt-dist-seg{height:100%}
+.lt-dist-seg.fresh{background:var(--green)}
+.lt-dist-seg.warm{background:var(--yellow)}
+.lt-dist-seg.hot{background:var(--orange)}
+.lt-dist-seg.critical{background:var(--red)}
+.lt-dist-legend{
+  display:flex;
+  justify-content:space-between;
+  font-family:var(--mono);
+  font-size:8.5px;
+  color:var(--muted);
+  letter-spacing:.06em;
+  margin-top:3px;
+}
+.lt-dist-legend span{display:flex;align-items:center;gap:3px}
+.lt-dist-legend span::before{content:'';width:6px;height:6px;border-radius:50%}
+.lt-dist-legend .fresh::before{background:var(--green)}
+.lt-dist-legend .warm::before{background:var(--yellow)}
+.lt-dist-legend .hot::before{background:var(--orange)}
+.lt-dist-legend .critical::before{background:var(--red)}
 </style>
 </head>
 <body>
 
 <div class="loading" id="loading">
   <div class="loading-mark">O</div>
-  <div class="loading-text">ONEDRILL · BI</div>
+  <div class="loading-text">ONEDRILL · BI v2</div>
   <div class="loading-bar"><div class="loading-bar-fill"></div></div>
 </div>
 
-<div class="err-banner" id="err-banner">⚠ Erro de conexão — usando últimos dados</div>
+<div class="err-banner" id="err-banner">⚠ Erro de conexão — usando últimos dados em cache</div>
 
 <div class="frame" id="frame" style="visibility:hidden">
 
@@ -654,59 +1364,146 @@ body::after{
     <div class="brand">
       <div class="brand-mark">O</div>
       <div>
-        <div class="brand-name">ONEDRILL</div>
-        <div class="brand-sub">Open / Clear · por estado e projeto</div>
+        <div class="brand-name">ONEDRILL<span class="brand-version">v2</span></div>
+        <div class="brand-sub">Open / Clear · Aging · Tendência 14d</div>
       </div>
     </div>
     <div class="head-meta">
-      <div class="live-pill">
+      <div class="screen-switcher" id="screen-switcher">
+        <span class="screen-tab-bg" id="screen-tab-bg"></span>
+        <button class="screen-tab active" data-screen="1">Status</button>
+        <button class="screen-tab" data-screen="2">Operações</button>
+      </div>
+      <button class="refresh-btn" id="refresh-btn" title="Atualizar agora">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        <span>Atualizar</span>
+      </button>
+      <div class="live-pill" id="live-pill">
         <div class="live-dot"></div>
-        AO VIVO
+        <span id="live-label">AO VIVO</span>
       </div>
       <div>
         <div class="clock" id="clock">--:--:--</div>
-        <div class="clock-sub" id="clock-date">—</div>
+        <div class="clock-sub">
+          <span id="clock-date">—</span>
+          <span class="tz" id="clock-tz">—</span>
+        </div>
       </div>
     </div>
   </header>
 
+  <div class="screens-wrap" id="screens-wrap">
+
+  <!-- ═══════════ SCREEN 1: STATUS ═══════════ -->
+  <div class="screen active" data-screen="1">
+
   <section class="hero">
-    <div class="hero-card open">
-      <div>
-        <div class="hero-tag open">OPEN</div>
-        <div class="hero-tag-sub">Aguardando liberação</div>
-      </div>
-      <div class="hero-stats">
-        <div class="hero-stat">
-          <div class="hero-num-row">
-            <div class="hero-num" id="hero-open-n">0</div>
-            <span class="hero-delta" id="hero-open-delta"></span>
+    <!-- OPEN CARD -->
+    <div class="hero-card open" id="hero-open-card">
+      <div class="hero-left">
+        <div>
+          <div class="hero-tag-row">
+            <div class="hero-tag open">OPEN</div>
           </div>
-          <div class="hero-stat-label">tickets · vs ontem</div>
+          <div class="hero-tag-sub">Footage parado · aguardando liberação</div>
         </div>
-        <div class="hero-stat">
-          <div class="hero-num ft" id="hero-open-ft">0</div>
-          <div class="hero-stat-label">footage <span class="unit">ft</span></div>
+        <div class="hero-main">
+          <div class="hero-num-row">
+            <div class="hero-num" id="hero-open-ft">0</div>
+            <div class="hero-num-suffix">ft</div>
+            <div class="hero-deltas">
+              <div class="hero-delta-item">
+                <div class="hero-delta-val" id="hero-open-ft-delta-y"></div>
+                <div class="hero-delta-lbl">vs ontem</div>
+              </div>
+              <div class="hero-delta-item">
+                <div class="hero-delta-val" id="hero-open-ft-delta-7"></div>
+                <div class="hero-delta-lbl">vs média 7d</div>
+              </div>
+            </div>
+          </div>
+          <div class="hero-secondary">
+            <span class="hero-tk-num" id="hero-open-n">0</span>
+            <span class="hero-tk-lbl">tickets</span>
+            <span class="hero-tk-delta" id="hero-open-tk-delta-y"></span>
+          </div>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="hero-spark">
+          <div class="hero-spark-head">
+            <div class="hero-spark-lbl">Footage Open · 14 dias</div>
+            <div class="hero-spark-range" id="hero-open-range"></div>
+          </div>
+          <svg class="hero-spark-svg" id="hero-open-spark" viewBox="0 0 200 46" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="aging">
+          <div class="aging-head">
+            <div class="aging-lbl">Aging dos Open (tickets)</div>
+            <div class="aging-warn" id="aging-warn"></div>
+          </div>
+          <div class="aging-bars" id="aging-bars">
+            <div class="aging-bucket fresh"><div class="aging-bucket-num" id="age-fresh">0</div><div class="aging-bucket-lbl">0–3d</div></div>
+            <div class="aging-bucket warm"><div class="aging-bucket-num" id="age-warm">0</div><div class="aging-bucket-lbl">4–7d</div></div>
+            <div class="aging-bucket hot"><div class="aging-bucket-num" id="age-hot">0</div><div class="aging-bucket-lbl">8–14d</div></div>
+            <div class="aging-bucket critical"><div class="aging-bucket-num" id="age-crit">0</div><div class="aging-bucket-lbl">15+ d</div></div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="hero-card clear">
-      <div>
-        <div class="hero-tag clear">CLEAR</div>
-        <div class="hero-tag-sub">Liberados pra trabalhar</div>
-      </div>
-      <div class="hero-stats">
-        <div class="hero-stat">
-          <div class="hero-num-row">
-            <div class="hero-num" id="hero-clear-n">0</div>
-            <span class="hero-delta" id="hero-clear-delta"></span>
+    <!-- CLEAR CARD -->
+    <div class="hero-card clear" id="hero-clear-card">
+      <div class="hero-left">
+        <div>
+          <div class="hero-tag-row">
+            <div class="hero-tag clear">CLEAR</div>
           </div>
-          <div class="hero-stat-label">tickets · vs ontem</div>
+          <div class="hero-tag-sub">Footage liberado · pronto pra trabalhar</div>
         </div>
-        <div class="hero-stat">
-          <div class="hero-num ft" id="hero-clear-ft">0</div>
-          <div class="hero-stat-label">footage <span class="unit">ft</span></div>
+        <div class="hero-main">
+          <div class="hero-num-row">
+            <div class="hero-num" id="hero-clear-ft">0</div>
+            <div class="hero-num-suffix">ft</div>
+            <div class="hero-deltas">
+              <div class="hero-delta-item">
+                <div class="hero-delta-val" id="hero-clear-ft-delta-y"></div>
+                <div class="hero-delta-lbl">vs ontem</div>
+              </div>
+              <div class="hero-delta-item">
+                <div class="hero-delta-val" id="hero-clear-ft-delta-7"></div>
+                <div class="hero-delta-lbl">vs média 7d</div>
+              </div>
+            </div>
+          </div>
+          <div class="hero-secondary">
+            <span class="hero-tk-num" id="hero-clear-n">0</span>
+            <span class="hero-tk-lbl">tickets</span>
+            <span class="hero-tk-delta" id="hero-clear-tk-delta-y"></span>
+          </div>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="hero-spark">
+          <div class="hero-spark-head">
+            <div class="hero-spark-lbl">Footage liberado / dia</div>
+            <div class="hero-spark-range" id="hero-clear-range"></div>
+          </div>
+          <svg class="hero-spark-svg" id="hero-clear-spark" viewBox="0 0 200 46" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="velocity">
+          <div class="vel-card">
+            <div class="vel-num" id="vel-avg">0</div>
+            <div class="vel-lbl">ft/dia · média 7d</div>
+          </div>
+          <div class="vel-card">
+            <div class="vel-num" id="vel-peak">0</div>
+            <div class="vel-lbl">ft/dia · pico 14d</div>
+          </div>
         </div>
       </div>
     </div>
@@ -714,15 +1511,46 @@ body::after{
 
   <section class="states" id="states"></section>
 
+  </div><!-- /screen 1 -->
+
+  <!-- ═══════════ SCREEN 2: OPERAÇÕES ═══════════ -->
+  <div class="screen" data-screen="2">
+
+    <!-- FORECAST DO BACKLOG POR ESTADO -->
+    <div class="ops-section">
+      <div class="ops-section-head">
+        <div class="ops-section-title">FORECAST DO BACKLOG · POR ESTADO</div>
+        <div class="ops-section-sub">footage open ÷ velocidade média 7d</div>
+      </div>
+      <div class="forecast-grid" id="forecast-grid"></div>
+    </div>
+
+    <!-- LEAD TIME -->
+    <div class="ops-section leadtime-section">
+      <div class="ops-section-head">
+        <div class="ops-section-title">LEAD TIME · TEMPO ATÉ LIBERAÇÃO</div>
+        <div class="ops-section-sub">média Open → Clear · últimos 7 dias</div>
+      </div>
+      <div class="leadtime-grid" id="leadtime-grid"></div>
+    </div>
+
+  </div><!-- /screen 2 -->
+
+  </div><!-- /screens-wrap -->
+
   <div class="foot">
     <div class="foot-section">
-      <div class="foot-stat"><span class="foot-dot r"></span><span><strong id="foot-open">0</strong> open · <strong id="foot-open-ft">0</strong> ft</span></div>
-      <div class="foot-stat"><span class="foot-dot g"></span><span><strong id="foot-clear">0</strong> clear · <strong id="foot-clear-ft">0</strong> ft</span></div>
-      <div class="foot-stat"><span class="foot-dot a"></span><span><strong id="foot-projs">0</strong> projetos ativos em <strong id="foot-states">0</strong> estados</span></div>
+      <div class="foot-stat"><span class="foot-dot r"></span><span><strong id="foot-open-ft">0</strong> ft open · <strong id="foot-open">0</strong> tk</span></div>
+      <div class="foot-stat"><span class="foot-dot g"></span><span><strong id="foot-clear-ft">0</strong> ft clear · <strong id="foot-clear">0</strong> tk</span></div>
+      <div class="foot-stat"><span class="foot-dot o"></span><span><strong id="foot-aging-crit">0</strong> tickets 15+d</span></div>
+      <div class="foot-stat"><span class="foot-dot a"></span><span><strong id="foot-projs">0</strong> projetos · <strong id="foot-states">0</strong> estados</span></div>
     </div>
-    <div class="refresh-pill">
-      <div class="refresh-dot" id="refresh-dot"></div>
-      <span id="refresh-label">Conectando…</span>
+    <div class="foot-right">
+      <div class="last-update">Última atualização: <strong id="last-update">—</strong></div>
+      <div class="refresh-pill">
+        <div class="refresh-dot" id="refresh-dot"></div>
+        <span id="refresh-label">Conectando…</span>
+      </div>
     </div>
   </div>
 
@@ -731,24 +1559,56 @@ body::after{
 <script>
 'use strict';
 
+/* ─────────────────────────────────────────────
+   CONFIG
+   ─────────────────────────────────────────────
+   ⚠ SECURITY: Antes de subir essa versão pra produção,
+   verifique no Supabase Studio que as tabelas `tickets`
+   e `projects` têm RLS habilitado e policies só de SELECT
+   pra role anon. A anon key fica visível no frontend.
+*/
 const SUPABASE_URL = 'https://ofbqtaulvzeltfpqcjhh.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE';
 
-const REFRESH_MS = 60_000;
-const TICK_MS    = 1_000;
+const REFRESH_MS  = 60_000;
+const TICK_MS     = 1_000;
+const CACHE_KEY   = 'onedrill-bi-v2-cache';
+const TZ_LABEL    = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+
+// Threshold pra cor condicional do hero Open card
+const OPEN_HEALTHY_MAX = 80;   // ≤ 80 → verde
+const OPEN_WARNING_MAX = 160;  // ≤ 160 → amarelo / acima → vermelho
+
+// Aging buckets (dias)
+const AGE_FRESH_MAX = 3;
+const AGE_WARM_MAX  = 7;
+const AGE_HOT_MAX   = 14;
+
+// Modo demo automático (file:// ou ?demo=1)
+const FORCE_DEMO = location.protocol === 'file:' || /[\?&]demo=1/.test(location.search);
 
 let sb;
 let tickets = [];
 let projects = [];
 let nextRefreshAt = 0;
 let lastValues = {};
+let lastFetchAt = null;
+let isDemo = FORCE_DEMO;
 
+/* ─────────────────────────────────────────────
+   UTIL
+   ───────────────────────────────────────────── */
 function esc(s){
   if(s==null) return '';
   const d=document.createElement('div'); d.textContent=String(s);
   return d.innerHTML;
 }
 function fmtN(n){return Number(n||0).toLocaleString('pt-BR')}
+function fmtPct(n){
+  if(!isFinite(n)) return '—';
+  const sign = n > 0 ? '+' : '';
+  return sign + n.toFixed(0) + '%';
+}
 
 function buildSupersededSet(tk){
   const s=new Set();
@@ -759,18 +1619,14 @@ function buildSupersededSet(tk){
   return s;
 }
 
-/** Limpa "Inside: ...", "Near: ..." e pega só a primeira parte antes da vírgula. */
 function cleanLocation(loc){
   if(!loc) return '';
   return String(loc).replace(/\s*(Inside|Near|inside|near)\s*:.*/i,'').split(',')[0].trim();
 }
 
-/** Display do projeto: se nome é só código (sem letras), prefixa com localidade dos tickets. */
 function projDisplay(name, ticketsOfProj){
   if(!name) return '(Sem projeto)';
-  // Se já tem 2+ letras consecutivas, considera nome legível — usa direto
   if(/[a-zA-Z]{2,}/.test(name)) return name;
-  // Caso contrário, é código puro tipo "20007433" — prefixa com localidade
   const locs = (ticketsOfProj||[]).map(t => cleanLocation(t.location)).filter(Boolean);
   if(!locs.length) return name;
   const counts = {};
@@ -779,48 +1635,61 @@ function projDisplay(name, ticketsOfProj){
   return top ? `${top[0]} — ${name}` : name;
 }
 
-/** Reconstroi o status do ticket no momento `atTs` percorrendo o history.
- *  Retorna null se ticket ainda não existia naquele momento. */
+/** Reconstroi status num timestamp passado. */
 function statusAt(t, atTs){
-  // Não existia ainda
   if(t.created_at){
     const cms = new Date(t.created_at).getTime();
     if(!isNaN(cms) && cms > atTs) return null;
   }
-
   const hist = (t.history||[])
     .filter(h => h && h.ts && h.ts <= atTs)
-    .sort((a,b) => b.ts - a.ts);  // mais recente primeiro
+    .sort((a,b) => b.ts - a.ts);
 
   for(const ev of hist){
     const a = (ev.action||'').toLowerCase();
-
-    // "X → Y" — pega Y
     let m = a.match(/[→\->]\s*(open|clear|damage|closed|cancel)\b/);
     if(m) return m[1].charAt(0).toUpperCase()+m[1].slice(1);
-
-    // [AUTO 811] Clear (sem revertido)
-    if((a.includes('auto 811')||a.includes('auto-clear')) && a.includes('clear') && !a.includes('revertido')){
-      return 'Clear';
-    }
-
-    // Revertido Clear→Open
+    if((a.includes('auto 811')||a.includes('auto-clear')) && a.includes('clear') && !a.includes('revertido')) return 'Clear';
     if(a.includes('revertido') && a.includes('open')) return 'Open';
-
-    // Damage manual
     if(a.includes('damage')) return 'Damage';
-
-    // Importado/criado/renovação → Open inicial
-    if(a.includes('importado')||a.includes('criado')||a.includes('renovação')||a.includes('renovou')){
-      return 'Open';
-    }
+    if(a.includes('importado')||a.includes('criado')||a.includes('renovação')||a.includes('renovou')) return 'Open';
   }
-
-  // Sem evento informativo antes — assume estava no status atual
   return t.status;
 }
 
-/** Renderiza pílula de delta. value=current, prev=ontem. lessIsBetter=true pra Open. */
+/** Quando esse ticket entrou no estado Open atual (último Open não revertido). */
+function openSinceTs(t){
+  if(t.status !== 'Open') return null;
+  const hist = (t.history||[]).filter(h=>h&&h.ts).sort((a,b)=>a.ts-b.ts);
+  let lastOpenTs = null;
+  for(const ev of hist){
+    const a = (ev.action||'').toLowerCase();
+    if(/[→\->]\s*open\b/.test(a) || a.includes('importado') || a.includes('criado') || a.includes('renovação') || a.includes('renovou') || (a.includes('revertido') && a.includes('open'))){
+      lastOpenTs = ev.ts;
+    } else if(/[→\->]\s*(clear|closed|cancel)\b/.test(a) || ((a.includes('auto 811')||a.includes('auto-clear')) && a.includes('clear'))){
+      lastOpenTs = null;
+    }
+  }
+  if(!lastOpenTs && t.created_at){
+    const cms = new Date(t.created_at).getTime();
+    if(!isNaN(cms)) lastOpenTs = cms;
+  }
+  return lastOpenTs;
+}
+
+function ageDays(ts){
+  if(!ts) return null;
+  return Math.floor((Date.now() - ts) / (24*3600*1000));
+}
+
+function ageBucket(days){
+  if(days === null) return null;
+  if(days <= AGE_FRESH_MAX) return 'fresh';
+  if(days <= AGE_WARM_MAX)  return 'warm';
+  if(days <= AGE_HOT_MAX)   return 'hot';
+  return 'critical';
+}
+
 function deltaPill(value, prev, lessIsBetter){
   if(prev===null||prev===undefined) return '';
   const d = value - prev;
@@ -832,7 +1701,80 @@ function deltaPill(value, prev, lessIsBetter){
   return `<span class="delta ${cls}">${arrow}${Math.abs(d)}</span>`;
 }
 
+function deltaPctText(value, baseline, lessIsBetter){
+  if(!baseline) return {html:'<span class="delta stable">—</span>', val:0};
+  const d = value - baseline;
+  const pct = (d / baseline) * 100;
+  if(Math.abs(pct) < 0.5) return {html:'<span class="delta stable">≈</span>', val:0};
+  const arrow = d > 0 ? '▲' : '▼';
+  const isUp = d > 0;
+  const isGood = lessIsBetter ? !isUp : isUp;
+  const cls = isGood ? (isUp?'up good':'down good') : (isUp?'up bad':'down bad');
+  return {html:`<span class="delta ${cls}">${arrow}${fmtPct(Math.abs(pct))}</span>`, val:pct};
+}
+
+/** Sparkline SVG. values: array de números. dims: viewBox 200x46. */
+function sparkline(values, color, fillColor){
+  if(!values || values.length < 2) return '';
+  const W = 200, H = 46, PAD = 4;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = (W - PAD*2) / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = PAD + i*step;
+    const y = H - PAD - ((v-min)/range)*(H-PAD*2);
+    return [x, y];
+  });
+  const path = points.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const fillPath = path + ` L${points[points.length-1][0].toFixed(1)},${H} L${points[0][0].toFixed(1)},${H} Z`;
+  const last = points[points.length-1];
+  return `
+    <defs>
+      <linearGradient id="sg-${color.replace(/[^a-z0-9]/gi,'')}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity=".3"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${fillPath}" fill="url(#sg-${color.replace(/[^a-z0-9]/gi,'')})" stroke="none"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="${color}"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="5" fill="${color}" opacity=".25"/>
+  `;
+}
+
+/** Mini sparkline pra state header — versão menor sem fill. */
+function miniSparkline(values, color){
+  if(!values || values.length < 2) return '';
+  const W = 80, H = 22, PAD = 2;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = (W - PAD*2) / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = PAD + i*step;
+    const y = H - PAD - ((v-min)/range)*(H-PAD*2);
+    return [x, y];
+  });
+  const path = points.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const last = points[points.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%">
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="1.8" fill="${color}"/>
+  </svg>`;
+}
+
+/* ─────────────────────────────────────────────
+   SUPABASE FETCH
+   ───────────────────────────────────────────── */
 async function fetchAll(){
+  if(isDemo){
+    const mock = generateMockData();
+    tickets = mock.tickets;
+    projects = mock.projects;
+    setRefresh('ok','modo demo');
+    return true;
+  }
   setRefresh('loading','atualizando…');
   try{
     const [tr,pr] = await Promise.all([
@@ -844,15 +1786,43 @@ async function fetchAll(){
     tickets = tr.data || [];
     projects = pr.data || [];
 
+    saveCache();
     setRefresh('ok',`Próximo em ${REFRESH_MS/1000}s`);
     document.getElementById('err-banner').classList.remove('visible');
+    lastFetchAt = new Date();
     return true;
   }catch(e){
     console.error('[BI] Fetch error:',e);
     setRefresh('error','reconectando…');
     document.getElementById('err-banner').classList.add('visible');
+    // Tenta carregar cache se ainda não temos dados
+    if(tickets.length === 0) loadCache();
     return false;
   }
+}
+
+function saveCache(){
+  try{
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      ts: Date.now(),
+      tickets, projects
+    }));
+  }catch(e){ /* quota cheia ou bloqueado, segue */ }
+}
+
+function loadCache(){
+  try{
+    const raw = localStorage.getItem(CACHE_KEY);
+    if(!raw) return false;
+    const obj = JSON.parse(raw);
+    if(obj && Array.isArray(obj.tickets)){
+      tickets = obj.tickets;
+      projects = obj.projects || [];
+      lastFetchAt = new Date(obj.ts);
+      return true;
+    }
+  }catch(e){}
+  return false;
 }
 
 function setRefresh(state,label){
@@ -861,13 +1831,15 @@ function setRefresh(state,label){
   document.getElementById('refresh-label').textContent=label;
 }
 
+/* ─────────────────────────────────────────────
+   COMPUTE BREAKDOWN
+   ───────────────────────────────────────────── */
 function computeBreakdown(){
   const supSet = buildSupersededSet(tickets);
   const completedProjIds = new Set(projects.filter(p=>p.status==='Completed').map(p=>p.id));
   const projMap = {};
   for(const p of projects) projMap[p.id]=p;
 
-  // Pré-agrupar tickets por projeto pra calcular display name (com localidade quando nome é só código)
   const ticketsByProj = {};
   for(const t of tickets){
     const k = t.project_id || '__none__';
@@ -881,24 +1853,35 @@ function computeBreakdown(){
     projDisplayMap[pid] = projDisplay(name, ts);
   }
 
-  const STATES_ORDER = ['FL','IN','IL'];
   const SEM_PRIME = '(SEM PRIME)';
   const data = {};   // state -> prime -> { total, projects: { displayName -> {...} } }
   const totals = {open:0, openFt:0, clear:0, clearFt:0, openY:0, openFtY:0, clearY:0, clearFtY:0};
   const stateSeen = new Set();
+  const aging = {fresh:0, warm:0, hot:0, critical:0};
+  // Por estado: aging + tendência 14d + oldest open age
+  const stateMeta = {};   // state -> {aging, trendOpen14, trendClear14, oldestOpen}
+  // Por projeto-em-estado: oldest open age pra coluna AGE
+  const projOldest = {};  // `${state}|${prime}|${displayName}` -> oldest open ts
 
-  const yesterdayTs = Date.now() - 24*3600*1000;
+  // Tendências 14d globais
+  const trendOpen14 = new Array(14).fill(0);
+  const trendClear14 = new Array(14).fill(0);
+  const now = Date.now();
+  const day = 24*3600*1000;
+  // Pra "vs média 7d" precisamos de Open atual vs média Open dos últimos 7 dias (snapshot)
+  // E Clear total vs média Clear dos últimos 7 dias
 
   for(const t of tickets){
     if(supSet.has(String(t.ticket||'').trim())) continue;
     if(t.project_id && completedProjIds.has(t.project_id)) continue;
 
     const today = t.status;
-    const past  = statusAt(t, yesterdayTs);
+    const yesterdayTs = now - day;
+    const past = statusAt(t, yesterdayTs);
     if(today!=='Open' && today!=='Clear' && past!=='Open' && past!=='Clear') continue;
 
     const st = (t.state||'?').toUpperCase();
-    const prime = ((t.prime||'').trim() || SEM_PRIME).toUpperCase();
+    const prime = (t.prime||'').trim() || SEM_PRIME;
     const projKey = projDisplayMap[t.project_id || '__none__'];
     const ft = t.footage||0;
 
@@ -908,7 +1891,8 @@ function computeBreakdown(){
       projects: {}
     };
     if(!data[st][prime].projects[projKey]) data[st][prime].projects[projKey] = {
-      open:0,openFt:0,clear:0,clearFt:0,openY:0,openFtY:0,clearY:0,clearFtY:0
+      open:0,openFt:0,clear:0,clearFt:0,openY:0,openFtY:0,clearY:0,clearFtY:0,
+      oldestOpenTs:null
     };
 
     const cell = data[st][prime].projects[projKey];
@@ -918,6 +1902,15 @@ function computeBreakdown(){
       cell.open++; cell.openFt+=ft;
       ptot.open++; ptot.openFt+=ft;
       totals.open++; totals.openFt+=ft;
+
+      // Aging (só pros Open de hoje)
+      const sinceTs = openSinceTs(t);
+      if(sinceTs){
+        const ad = ageDays(sinceTs);
+        const b = ageBucket(ad);
+        if(b){ aging[b]++; }
+        if(!cell.oldestOpenTs || sinceTs < cell.oldestOpenTs) cell.oldestOpenTs = sinceTs;
+      }
     } else if(today==='Clear'){
       cell.clear++; cell.clearFt+=ft;
       ptot.clear++; ptot.clearFt+=ft;
@@ -936,14 +1929,238 @@ function computeBreakdown(){
     if(today==='Open'||today==='Clear') stateSeen.add(st);
   }
 
-  const orderedStates = [
-    ...STATES_ORDER.filter(s=>data[s]),
-    ...[...stateSeen].filter(s=>!STATES_ORDER.includes(s)).sort()
-  ];
+  // Tendência 14d global (snapshot diário) — agora também em footage
+  const trendOpenFt14 = new Array(14).fill(0);
+  const trendClearFt14 = new Array(14).fill(0);
+  for(let i=0; i<14; i++){
+    const ts = now - (13-i)*day;
+    let openCount = 0, clearCount = 0, openFt = 0, clearFt = 0;
+    for(const t of tickets){
+      if(supSet.has(String(t.ticket||'').trim())) continue;
+      if(t.project_id && completedProjIds.has(t.project_id)) continue;
+      const s = statusAt(t, ts);
+      const ft = t.footage||0;
+      if(s === 'Open')  { openCount++;  openFt += ft; }
+      else if(s === 'Clear') { clearCount++; clearFt += ft; }
+    }
+    trendOpen14[i] = openCount;
+    trendClear14[i] = clearCount;
+    trendOpenFt14[i] = openFt;
+    trendClearFt14[i] = clearFt;
+  }
 
-  return {data, totals, orderedStates};
+  // Por estado: tendência + oldest open
+  for(const st of stateSeen){
+    stateMeta[st] = {
+      aging:{fresh:0,warm:0,hot:0,critical:0},
+      trendOpen14:new Array(14).fill(0),
+      trendClear14:new Array(14).fill(0),
+      trendOpenFt14:new Array(14).fill(0),
+      trendClearFt14:new Array(14).fill(0),
+      oldestOpenTs:null,
+      oldestOpenProj:null
+    };
+  }
+  for(const t of tickets){
+    if(supSet.has(String(t.ticket||'').trim())) continue;
+    if(t.project_id && completedProjIds.has(t.project_id)) continue;
+    const st = (t.state||'?').toUpperCase();
+    if(!stateMeta[st]) continue;
+
+    if(t.status === 'Open'){
+      const sinceTs = openSinceTs(t);
+      if(sinceTs){
+        const ad = ageDays(sinceTs);
+        const b = ageBucket(ad);
+        if(b) stateMeta[st].aging[b]++;
+        if(!stateMeta[st].oldestOpenTs || sinceTs < stateMeta[st].oldestOpenTs){
+          stateMeta[st].oldestOpenTs = sinceTs;
+          const pname = projDisplayMap[t.project_id || '__none__'];
+          stateMeta[st].oldestOpenProj = pname;
+        }
+      }
+    }
+  }
+  // Tendência por estado (loop separado pra não estourar) — count + footage
+  for(let i=0; i<14; i++){
+    const ts = now - (13-i)*day;
+    for(const st of stateSeen){
+      let openCount = 0, clearCount = 0, openFt = 0, clearFt = 0;
+      for(const t of tickets){
+        if(supSet.has(String(t.ticket||'').trim())) continue;
+        if(t.project_id && completedProjIds.has(t.project_id)) continue;
+        if((t.state||'?').toUpperCase() !== st) continue;
+        const s = statusAt(t, ts);
+        const ft = t.footage||0;
+        if(s === 'Open')  { openCount++; openFt += ft; }
+        else if(s === 'Clear') { clearCount++; clearFt += ft; }
+      }
+      stateMeta[st].trendOpen14[i] = openCount;
+      stateMeta[st].trendClear14[i] = clearCount;
+      stateMeta[st].trendOpenFt14[i] = openFt;
+      stateMeta[st].trendClearFt14[i] = clearFt;
+    }
+  }
+
+  // Velocidade Clear: ft liberado/dia (a partir de history "→ Clear")
+  // Pra cada evento de clear no histórico, soma o footage do ticket no dia em que aconteceu
+  const dailyClears = new Array(14).fill(0);    // count de eventos
+  const dailyClearsFt = new Array(14).fill(0);  // footage liberado
+  // Por estado também — pra forecast individual
+  const dailyClearsFtByState = {};
+  for(const st of stateSeen) dailyClearsFtByState[st] = new Array(14).fill(0);
+
+  for(const t of tickets){
+    if(supSet.has(String(t.ticket||'').trim())) continue;
+    const ft = t.footage||0;
+    const st = (t.state||'?').toUpperCase();
+    for(const ev of (t.history||[])){
+      const a = (ev.action||'').toLowerCase();
+      const isClearEvent = /[→\->]\s*clear\b/.test(a) || ((a.includes('auto 811')||a.includes('auto-clear')) && a.includes('clear') && !a.includes('revertido'));
+      if(!isClearEvent) continue;
+      const dayDelta = Math.floor((now - ev.ts)/day);
+      if(dayDelta >= 0 && dayDelta < 14){
+        const idx = 13-dayDelta;
+        dailyClears[idx]++;
+        dailyClearsFt[idx] += ft;
+        if(dailyClearsFtByState[st]) dailyClearsFtByState[st][idx] += ft;
+      }
+    }
+  }
+  const last7Ft = dailyClearsFt.slice(-7);
+  const velAvg7Ft = last7Ft.reduce((a,b)=>a+b,0)/7;
+  const velPeak14Ft = Math.max(...dailyClearsFt, 0);
+  const last7 = dailyClears.slice(-7);
+  const velAvg7 = last7.reduce((a,b)=>a+b,0)/7;
+  const velPeak14 = Math.max(...dailyClears, 0);
+
+  // Velocidade ft/dia média 7d POR ESTADO
+  const velByState = {};
+  for(const st of stateSeen){
+    const arr = dailyClearsFtByState[st] || [];
+    const last7 = arr.slice(-7);
+    velByState[st] = last7.length ? last7.reduce((a,b)=>a+b,0)/7 : 0;
+  }
+
+  // Médias 7d em footage
+  const openFt7Avg  = trendOpenFt14.slice(0,7).reduce((a,b)=>a+b,0)/7;
+  const clearFt7Avg = trendClearFt14.slice(0,7).reduce((a,b)=>a+b,0)/7;
+
+  // ─────────────────────────────────────────
+  // LEAD TIME (Open → Clear) últimos 7 dias
+  // ─────────────────────────────────────────
+  const LEAD_WINDOW_DAYS = 7;
+  const leadCutoff = now - LEAD_WINDOW_DAYS*day;
+  const leadTimesGlobal = [];
+  const leadTimesByState = {};
+  for(const st of stateSeen) leadTimesByState[st] = [];
+
+  for(const t of tickets){
+    if(supSet.has(String(t.ticket||'').trim())) continue;
+    if(t.project_id && completedProjIds.has(t.project_id)) continue;
+    const st = (t.state||'?').toUpperCase();
+    const hist = (t.history||[]).filter(h=>h&&h.ts).sort((a,b)=>a.ts-b.ts);
+
+    // Procura todos pares Open → Clear no histórico do ticket
+    let lastOpenTs = null;
+    for(const ev of hist){
+      const a = (ev.action||'').toLowerCase();
+      const isOpenEv = /[→\->]\s*open\b/.test(a) ||
+                      a.includes('importado') || a.includes('criado') ||
+                      a.includes('renovação') || a.includes('renovou') ||
+                      (a.includes('revertido') && a.includes('open'));
+      const isClearEv = /[→\->]\s*clear\b/.test(a) ||
+                       ((a.includes('auto 811')||a.includes('auto-clear')) && a.includes('clear') && !a.includes('revertido'));
+
+      if(isOpenEv){
+        lastOpenTs = ev.ts;
+      } else if(isClearEv && lastOpenTs && ev.ts >= leadCutoff){
+        const lead = (ev.ts - lastOpenTs) / day;
+        if(lead >= 0 && lead < 365){ // sanity
+          leadTimesGlobal.push(lead);
+          if(leadTimesByState[st]) leadTimesByState[st].push(lead);
+        }
+        lastOpenTs = null;
+      } else if(isClearEv){
+        lastOpenTs = null;
+      }
+    }
+  }
+
+  function avg(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
+  function median(arr){
+    if(!arr.length) return null;
+    const s = [...arr].sort((a,b)=>a-b);
+    const m = Math.floor(s.length/2);
+    return s.length%2===0 ? (s[m-1]+s[m])/2 : s[m];
+  }
+  function distribution(arr){
+    if(!arr.length) return {fresh:0,warm:0,hot:0,critical:0};
+    const d = {fresh:0,warm:0,hot:0,critical:0};
+    for(const v of arr){
+      if(v <= AGE_FRESH_MAX) d.fresh++;
+      else if(v <= AGE_WARM_MAX) d.warm++;
+      else if(v <= AGE_HOT_MAX) d.hot++;
+      else d.critical++;
+    }
+    return d;
+  }
+
+  const leadTime = {
+    global: {
+      avg: avg(leadTimesGlobal),
+      median: median(leadTimesGlobal),
+      count: leadTimesGlobal.length,
+      dist: distribution(leadTimesGlobal)
+    },
+    byState: {}
+  };
+  for(const [st, arr] of Object.entries(leadTimesByState)){
+    leadTime.byState[st] = {
+      avg: avg(arr),
+      median: median(arr),
+      count: arr.length,
+      dist: distribution(arr)
+    };
+  }
+
+  // ─────────────────────────────────────────
+  // FORECAST por estado: openFt / velByState
+  // ─────────────────────────────────────────
+  const forecast = {};
+  for(const st of stateSeen){
+    const stateData = data[st] || {};
+    let openFt = 0;
+    for(const pk in stateData) openFt += stateData[pk].total.openFt;
+    const velocityFt = velByState[st] || 0;
+    const daysToZero = velocityFt > 0 ? openFt / velocityFt : null;
+    forecast[st] = { openFt, velocityFt, daysToZero };
+  }
+
+  // Média 7d (snapshot diário) — pra delta vs média (count)
+  const open7Avg  = trendOpen14.slice(0,7).reduce((a,b)=>a+b,0)/7;
+  const clear7Avg = trendClear14.slice(0,7).reduce((a,b)=>a+b,0)/7;
+
+  // STATES_ORDER agora ordenado por volume Open footage (decrescente)
+  const orderedStates = [...stateSeen].sort((a,b)=>{
+    const ao = Object.values(data[a]||{}).reduce((s,p)=>s+p.total.openFt,0);
+    const bo = Object.values(data[b]||{}).reduce((s,p)=>s+p.total.openFt,0);
+    if(bo !== ao) return bo - ao;
+    return a.localeCompare(b);
+  });
+
+  return {
+    data, totals, orderedStates, aging, stateMeta,
+    trendOpen14, trendClear14, trendOpenFt14, trendClearFt14, dailyClears, dailyClearsFt,
+    velAvg7, velPeak14, velAvg7Ft, velPeak14Ft, velByState,
+    open7Avg, clear7Avg, openFt7Avg, clearFt7Avg,
+    leadTime, forecast
+  };
 }
 
+/* ─────────────────────────────────────────────
+   RENDER
+   ───────────────────────────────────────────── */
 function animateNum(el, target, duration=900){
   const start = lastValues[el.id]||0;
   const t0 = performance.now();
@@ -959,14 +2176,57 @@ function animateNum(el, target, duration=900){
 }
 
 function renderHero(b){
-  animateNum(document.getElementById('hero-open-n'), b.totals.open);
-  animateNum(document.getElementById('hero-open-ft'), b.totals.openFt);
-  animateNum(document.getElementById('hero-clear-n'), b.totals.clear);
-  animateNum(document.getElementById('hero-clear-ft'), b.totals.clearFt);
+  // Cor condicional do Open card baseada em ticket count (mais estável que ft pra threshold)
+  const openCard = document.getElementById('hero-open-card');
+  openCard.classList.remove('healthy','warning');
+  if(b.totals.open <= OPEN_HEALTHY_MAX) openCard.classList.add('healthy');
+  else if(b.totals.open <= OPEN_WARNING_MAX) openCard.classList.add('warning');
 
-  // Delta vs ontem
-  document.getElementById('hero-open-delta').innerHTML  = deltaPill(b.totals.open,  b.totals.openY,  true);
-  document.getElementById('hero-clear-delta').innerHTML = deltaPill(b.totals.clear, b.totals.clearY, false);
+  // Números principais: FOOTAGE
+  animateNum(document.getElementById('hero-open-ft'),  b.totals.openFt);
+  animateNum(document.getElementById('hero-clear-ft'), b.totals.clearFt);
+  // Secundário: ticket count
+  animateNum(document.getElementById('hero-open-n'),  b.totals.open);
+  animateNum(document.getElementById('hero-clear-n'), b.totals.clear);
+
+  // Deltas de FOOTAGE (vs ontem absoluto + vs média 7d %)
+  document.getElementById('hero-open-ft-delta-y').innerHTML  = deltaPill(b.totals.openFt,  b.totals.openFtY,  true);
+  document.getElementById('hero-clear-ft-delta-y').innerHTML = deltaPill(b.totals.clearFt, b.totals.clearFtY, false);
+  document.getElementById('hero-open-ft-delta-7').innerHTML  = deltaPctText(b.totals.openFt,  b.openFt7Avg,  true).html;
+  document.getElementById('hero-clear-ft-delta-7').innerHTML = deltaPctText(b.totals.clearFt, b.clearFt7Avg, false).html;
+
+  // Delta de ticket count (compacto, na linha secundária)
+  document.getElementById('hero-open-tk-delta-y').innerHTML  = deltaPill(b.totals.open,  b.totals.openY,  true);
+  document.getElementById('hero-clear-tk-delta-y').innerHTML = deltaPill(b.totals.clear, b.totals.clearY, false);
+
+  // Sparklines em FOOTAGE
+  const openColor  = openCard.classList.contains('healthy') ? '#22c55e'
+                   : openCard.classList.contains('warning') ? '#eab308'
+                   : '#ef4444';
+  document.getElementById('hero-open-spark').innerHTML = sparkline(b.trendOpenFt14, openColor);
+  document.getElementById('hero-open-range').textContent =
+    `min ${fmtN(Math.min(...b.trendOpenFt14))} · max ${fmtN(Math.max(...b.trendOpenFt14))} ft`;
+
+  document.getElementById('hero-clear-spark').innerHTML = sparkline(b.dailyClearsFt, '#22c55e');
+  document.getElementById('hero-clear-range').textContent =
+    `min ${fmtN(Math.min(...b.dailyClearsFt))} · max ${fmtN(Math.max(...b.dailyClearsFt))} ft`;
+
+  // Aging (continua em count — faz sentido contar tickets envelhecidos)
+  document.getElementById('age-fresh').textContent = fmtN(b.aging.fresh);
+  document.getElementById('age-warm').textContent  = fmtN(b.aging.warm);
+  document.getElementById('age-hot').textContent   = fmtN(b.aging.hot);
+  document.getElementById('age-crit').textContent  = fmtN(b.aging.critical);
+
+  const warnEl = document.getElementById('aging-warn');
+  if(b.aging.critical > 0){
+    warnEl.textContent = `⚠ ${b.aging.critical} ticket${b.aging.critical>1?'s':''} 15+d`;
+  } else {
+    warnEl.textContent = '';
+  }
+
+  // Velocidade em FOOTAGE
+  document.getElementById('vel-avg').textContent  = fmtN(Math.round(b.velAvg7Ft));
+  document.getElementById('vel-peak').textContent = fmtN(b.velPeak14Ft);
 }
 
 function renderStates(b){
@@ -983,77 +2243,118 @@ function renderStates(b){
   for(let i=0; i<slotsToRender; i++){
     const st = b.orderedStates[i];
     if(!st){
-      html += '<div class="state"><div class="state-head"><div class="state-name" style="color:var(--muted)">—</div></div><div class="empty-state">Sem dados</div></div>';
+      html += '<div class="state"><div class="state-head"><div class="state-head-left"><div class="state-name" style="color:var(--muted)">—</div></div></div><div class="empty-state">Sem dados</div></div>';
       continue;
     }
 
     const statePrimes = b.data[st];
-    // Ordena primes alfabeticamente, com "(SEM PRIME)" sempre no final
-    // E filtra primes que ficaram zeradas hoje (0 open AND 0 clear)
+    const meta = b.stateMeta[st] || {};
     const primeKeys = Object.keys(statePrimes)
       .filter(pk => statePrimes[pk].total.open > 0 || statePrimes[pk].total.clear > 0)
       .sort((a,b2)=>{
         if(a==='(SEM PRIME)') return 1;
         if(b2==='(SEM PRIME)') return -1;
+        // Sort por openFt decrescente, depois alfabético
+        const af = statePrimes[a].total.openFt;
+        const bf = statePrimes[b2].total.openFt;
+        if(bf !== af) return bf - af;
         return a.localeCompare(b2);
       });
 
-    // Total do estado = soma de todas as primes
     const sTot = primeKeys.reduce((acc,pk)=>{
       const pt = statePrimes[pk].total;
       acc.open+=pt.open;     acc.openFt+=pt.openFt;
       acc.clear+=pt.clear;   acc.clearFt+=pt.clearFt;
-      acc.openY+=pt.openY;   acc.clearY+=pt.clearY;
+      acc.openY+=pt.openY;   acc.openFtY+=pt.openFtY;
+      acc.clearY+=pt.clearY; acc.clearFtY+=pt.clearFtY;
       return acc;
-    },{open:0,openFt:0,clear:0,clearFt:0,openY:0,clearY:0});
+    },{open:0,openFt:0,clear:0,clearFt:0,openY:0,openFtY:0,clearY:0,clearFtY:0});
 
-    // Build rows — pra cada prime: header de prime + linhas de projeto
     const rows = primeKeys.map(pk=>{
       const primeData = statePrimes[pk];
-      // Filtra projetos zerados hoje (mesmo que tivessem dados ontem) e ordena
       const projEntries = Object.entries(primeData.projects)
         .filter(([, p]) => p.open > 0 || p.clear > 0)
         .sort((a,b2)=>{
           if(a[0].startsWith('(Sem projeto)')) return 1;
           if(b2[0].startsWith('(Sem projeto)')) return -1;
-          const sa = a[1].openFt + a[1].clearFt;
-          const sb2 = b2[1].openFt + b2[1].clearFt;
-          return sb2 - sa;
+          // Critério: footage Open decrescente, depois idade do mais antigo Open
+          if(b2[1].openFt !== a[1].openFt) return b2[1].openFt - a[1].openFt;
+          const aa = a[1].oldestOpenTs ? Date.now()-a[1].oldestOpenTs : 0;
+          const bb = b2[1].oldestOpenTs ? Date.now()-b2[1].oldestOpenTs : 0;
+          return bb - aa;
         });
 
       const pt = primeData.total;
+      // Aging do prime: pega o mais velho dos projetos
+      let primeOldest = null;
+      for(const [, p] of Object.entries(primeData.projects)){
+        if(p.oldestOpenTs && (!primeOldest || p.oldestOpenTs < primeOldest)) primeOldest = p.oldestOpenTs;
+      }
+      const primeAge = primeOldest ? ageDays(primeOldest) : null;
+      const primeAgeChip = primeAge !== null
+        ? `<span class="age-chip ${ageBucket(primeAge)}">${primeAge}d</span>`
+        : `<span class="age-chip none">—</span>`;
+
+      // Coluna order: Prime/Projeto | Open ft | tk | Idade | Clear ft | tk
       const primeRow = `<tr class="prime-row">
         <td class="prime-name">${esc(pk)}</td>
-        <td class="cell-n red">${fmtN(pt.open)} ${deltaPill(pt.open, pt.openY, true)}</td>
-        <td class="cell-ft red">${fmtN(pt.openFt)}</td>
-        <td class="cell-n green">${fmtN(pt.clear)} ${deltaPill(pt.clear, pt.clearY, false)}</td>
-        <td class="cell-ft green">${fmtN(pt.clearFt)}</td>
+        <td class="cell-ft red">${fmtN(pt.openFt)} ${deltaPill(pt.openFt, pt.openFtY, true)}</td>
+        <td class="cell-n red">${fmtN(pt.open)}</td>
+        <td class="cell-age">${primeAgeChip}</td>
+        <td class="cell-ft green">${fmtN(pt.clearFt)} ${deltaPill(pt.clearFt, pt.clearFtY, false)}</td>
+        <td class="cell-n green">${fmtN(pt.clear)}</td>
       </tr>`;
 
-      const projRows = projEntries.map(([name,p])=>`
+      const projRows = projEntries.map(([name,p])=>{
+        const projAge = p.oldestOpenTs ? ageDays(p.oldestOpenTs) : null;
+        const projAgeChip = projAge !== null
+          ? `<span class="age-chip ${ageBucket(projAge)}">${projAge}d</span>`
+          : `<span class="age-chip none">—</span>`;
+        return `
         <tr class="proj-row">
           <td class="proj-name proj-indent${name.startsWith('(')?' no-proj':''}" title="${esc(name)}">${esc(name)}</td>
-          <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)} ${deltaPill(p.open, p.openY, true)}</td>
-          <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)}</td>
-          <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)} ${deltaPill(p.clear, p.clearY, false)}</td>
-          <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)}</td>
-        </tr>
-      `).join('');
+          <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)} ${deltaPill(p.openFt, p.openFtY, true)}</td>
+          <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)}</td>
+          <td class="cell-age">${projAgeChip}</td>
+          <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)} ${deltaPill(p.clearFt, p.clearFtY, false)}</td>
+          <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)}</td>
+        </tr>`;
+      }).join('');
 
       return primeRow + projRows;
     }).join('');
 
+    // Oldest open do estado
+    const oldestAge = meta.oldestOpenTs ? ageDays(meta.oldestOpenTs) : null;
+    let oldestHtml;
+    if(oldestAge === null){
+      oldestHtml = '<span style="color:var(--muted)">sem Open ativo</span>';
+    } else {
+      const cls = oldestAge > AGE_HOT_MAX ? '' : oldestAge > AGE_WARM_MAX ? 'warn' : 'ok';
+      oldestHtml = `<span class="age-val ${cls}">${oldestAge}d</span> · ${esc((meta.oldestOpenProj||'').slice(0,28))}`;
+    }
+
+    // Sparkline mini do estado em footage Open
+    const stateTrendFt = (meta.trendOpenFt14 && meta.trendOpenFt14.length) ? meta.trendOpenFt14 : (meta.trendOpen14 || []);
+    const stateSpark = miniSparkline(stateTrendFt, '#fbbf24');
+
     html += `<div class="state">
       <div class="state-head">
-        <div class="state-name">${esc(st)}</div>
+        <div class="state-head-left">
+          <div class="state-head-top">
+            <div class="state-name">${esc(st)}</div>
+            <div class="state-spark">${stateSpark}</div>
+          </div>
+          <div class="state-oldest">Mais antigo: ${oldestHtml}</div>
+        </div>
         <div class="state-totals">
           <div class="state-total">
-            <div class="state-total-num open">${fmtN(sTot.open)} ${deltaPill(sTot.open, sTot.openY, true)}</div>
-            <div class="state-total-lbl">open · ${fmtN(sTot.openFt)} ft</div>
+            <div class="state-total-num open">${fmtN(sTot.openFt)}<span class="state-total-suffix">ft</span> ${deltaPill(sTot.openFt, sTot.openFtY, true)}</div>
+            <div class="state-total-lbl">open · <strong>${fmtN(sTot.open)}</strong> tk</div>
           </div>
           <div class="state-total">
-            <div class="state-total-num clear">${fmtN(sTot.clear)} ${deltaPill(sTot.clear, sTot.clearY, false)}</div>
-            <div class="state-total-lbl">clear · ${fmtN(sTot.clearFt)} ft</div>
+            <div class="state-total-num clear">${fmtN(sTot.clearFt)}<span class="state-total-suffix">ft</span> ${deltaPill(sTot.clearFt, sTot.clearFtY, false)}</div>
+            <div class="state-total-lbl">clear · <strong>${fmtN(sTot.clear)}</strong> tk</div>
           </div>
         </div>
       </div>
@@ -1062,20 +2363,22 @@ function renderStates(b){
           <thead>
             <tr>
               <th>Prime / Projeto</th>
-              <th class="col-open">Open #</th>
               <th class="col-open">Open ft</th>
-              <th class="col-clear">Clear #</th>
+              <th class="col-open">tk</th>
+              <th class="col-age">Idade</th>
               <th class="col-clear">Clear ft</th>
+              <th class="col-clear">tk</th>
             </tr>
           </thead>
           <tbody>
             ${rows}
             <tr class="proj-total-row">
               <td class="proj-name">TOTAL ${esc(st)}</td>
-              <td class="cell-n red">${fmtN(sTot.open)} ${deltaPill(sTot.open, sTot.openY, true)}</td>
-              <td class="cell-ft red">${fmtN(sTot.openFt)}</td>
-              <td class="cell-n green">${fmtN(sTot.clear)} ${deltaPill(sTot.clear, sTot.clearY, false)}</td>
-              <td class="cell-ft green">${fmtN(sTot.clearFt)}</td>
+              <td class="cell-ft red">${fmtN(sTot.openFt)} ${deltaPill(sTot.openFt, sTot.openFtY, true)}</td>
+              <td class="cell-n red">${fmtN(sTot.open)}</td>
+              <td class="cell-age"></td>
+              <td class="cell-ft green">${fmtN(sTot.clearFt)} ${deltaPill(sTot.clearFt, sTot.clearFtY, false)}</td>
+              <td class="cell-n green">${fmtN(sTot.clear)}</td>
             </tr>
           </tbody>
         </table>
@@ -1086,11 +2389,156 @@ function renderStates(b){
   root.innerHTML = html;
 }
 
+function renderScreen2(b){
+  // ─── FORECAST GRID ───
+  const fcRoot = document.getElementById('forecast-grid');
+  const states = b.orderedStates.length ? b.orderedStates : [];
+  // Garante 3 slots visuais
+  const fcSlots = Math.max(states.length, 3);
+  let fcHtml = '';
+  for(let i=0; i<fcSlots; i++){
+    const st = states[i];
+    if(!st){
+      fcHtml += `<div class="forecast-card stuck">
+        <div class="fc-state" style="color:var(--muted)">—</div>
+        <div class="fc-stats"></div>
+        <div class="fc-eta">
+          <div class="fc-eta-num">—</div>
+          <div class="fc-eta-lbl">sem dados</div>
+        </div>
+      </div>`;
+      continue;
+    }
+    const f = b.forecast[st] || {openFt:0, velocityFt:0, daysToZero:null};
+    let cls = 'stuck';
+    let etaText = '∞', etaSuffix = '', etaLbl = 'sem velocidade';
+    if(f.daysToZero !== null){
+      if(f.daysToZero <= 5) cls = 'healthy';
+      else if(f.daysToZero <= 14) cls = 'warning';
+      else cls = 'critical';
+      etaText = f.daysToZero < 10
+        ? f.daysToZero.toFixed(1).replace('.',',')
+        : Math.round(f.daysToZero).toString();
+      etaSuffix = 'dias';
+      etaLbl = 'até zerar backlog';
+    }
+    if(f.openFt === 0){
+      cls = 'healthy';
+      etaText = '0';
+      etaSuffix = 'dias';
+      etaLbl = 'backlog vazio';
+    }
+
+    fcHtml += `<div class="forecast-card ${cls}">
+      <div class="fc-state">${esc(st)}</div>
+      <div class="fc-stats">
+        <div class="fc-stat">
+          <div class="fc-stat-num open">${fmtN(Math.round(f.openFt))}<span class="fc-stat-suffix">ft</span></div>
+          <div class="fc-stat-lbl">open agora</div>
+        </div>
+        <div class="fc-stat">
+          <div class="fc-stat-num vel">${fmtN(Math.round(f.velocityFt))}<span class="fc-stat-suffix">ft/d</span></div>
+          <div class="fc-stat-lbl">velocidade 7d</div>
+        </div>
+      </div>
+      <div class="fc-eta">
+        <div>
+          <span class="fc-eta-num">${etaText}</span>
+          ${etaSuffix?`<span class="fc-eta-suffix"> ${etaSuffix}</span>`:''}
+        </div>
+        <div class="fc-eta-lbl">${etaLbl}</div>
+      </div>
+    </div>`;
+  }
+  fcRoot.innerHTML = fcHtml;
+
+  // ─── LEAD TIME GRID ───
+  const ltRoot = document.getElementById('leadtime-grid');
+  function ltCard(label, lt, isGlobal){
+    const cls = isGlobal ? 'lt-card global' : 'lt-card';
+    if(!lt || lt.count === 0){
+      return `<div class="${cls}">
+        <div class="lt-head">
+          <div class="lt-state">${esc(label)}</div>
+          <div class="lt-count">0 clears</div>
+        </div>
+        <div class="lt-main">
+          <div class="lt-num empty">sem dados</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="lt-meta">
+          <div class="lt-meta-row"><span class="lt-meta-lbl">Mediana</span><span class="lt-meta-val">—</span></div>
+        </div>
+      </div>`;
+    }
+
+    const avgD = lt.avg.toFixed(1).replace('.',',');
+    const medD = lt.median.toFixed(1).replace('.',',');
+    let avgCls = 'ok';
+    if(lt.avg > AGE_HOT_MAX) avgCls = 'bad';
+    else if(lt.avg > AGE_WARM_MAX) avgCls = 'warn';
+
+    // Distribuição barra
+    const tot = lt.count || 1;
+    const dPct = {
+      fresh: (lt.dist.fresh/tot)*100,
+      warm: (lt.dist.warm/tot)*100,
+      hot: (lt.dist.hot/tot)*100,
+      critical: (lt.dist.critical/tot)*100
+    };
+
+    return `<div class="${cls}">
+      <div class="lt-head">
+        <div class="lt-state">${esc(label)}</div>
+        <div class="lt-count">${fmtN(lt.count)} clears 7d</div>
+      </div>
+      <div class="lt-main">
+        <span class="lt-num ${avgCls==='bad'?'':''}" style="${avgCls==='bad'?'color:var(--red)':avgCls==='warn'?'color:var(--yellow)':''}">${avgD}</span>
+        <span class="lt-num-suffix">dias</span>
+      </div>
+      <div class="lt-meta">
+        <div class="lt-meta-row">
+          <span class="lt-meta-lbl">Mediana</span>
+          <span class="lt-meta-val">${medD} dias</span>
+        </div>
+      </div>
+      <div class="lt-dist" title="Distribuição: ${lt.dist.fresh} ≤3d · ${lt.dist.warm} 4-7d · ${lt.dist.hot} 8-14d · ${lt.dist.critical} 15+d">
+        ${dPct.fresh > 0 ? `<div class="lt-dist-seg fresh" style="width:${dPct.fresh}%"></div>`:''}
+        ${dPct.warm > 0 ? `<div class="lt-dist-seg warm" style="width:${dPct.warm}%"></div>`:''}
+        ${dPct.hot > 0 ? `<div class="lt-dist-seg hot" style="width:${dPct.hot}%"></div>`:''}
+        ${dPct.critical > 0 ? `<div class="lt-dist-seg critical" style="width:${dPct.critical}%"></div>`:''}
+      </div>
+      <div class="lt-dist-legend">
+        <span class="fresh">${lt.dist.fresh}</span>
+        <span class="warm">${lt.dist.warm}</span>
+        <span class="hot">${lt.dist.hot}</span>
+        <span class="critical">${lt.dist.critical}</span>
+      </div>
+    </div>`;
+  }
+
+  let ltHtml = ltCard('GLOBAL', b.leadTime.global, true);
+  const ltStates = b.orderedStates.length ? b.orderedStates : [];
+  for(let i=0; i<3; i++){
+    const st = ltStates[i];
+    if(!st){
+      ltHtml += `<div class="lt-card">
+        <div class="lt-head"><div class="lt-state" style="color:var(--muted)">—</div></div>
+        <div class="lt-main"><div class="lt-num empty">sem dados</div></div>
+      </div>`;
+    } else {
+      ltHtml += ltCard(st, b.leadTime.byState[st], false);
+    }
+  }
+  ltRoot.innerHTML = ltHtml;
+}
+
 function renderFoot(b){
   document.getElementById('foot-open').textContent = fmtN(b.totals.open);
   document.getElementById('foot-open-ft').textContent = fmtN(b.totals.openFt);
   document.getElementById('foot-clear').textContent = fmtN(b.totals.clear);
   document.getElementById('foot-clear-ft').textContent = fmtN(b.totals.clearFt);
+  document.getElementById('foot-aging-crit').textContent = fmtN(b.aging.critical);
 
   let projCount = 0;
   for(const st of b.orderedStates){
@@ -1098,6 +2546,13 @@ function renderFoot(b){
   }
   document.getElementById('foot-projs').textContent = fmtN(projCount);
   document.getElementById('foot-states').textContent = b.orderedStates.length;
+
+  if(lastFetchAt){
+    const hh = String(lastFetchAt.getHours()).padStart(2,'0');
+    const mm = String(lastFetchAt.getMinutes()).padStart(2,'0');
+    const ss = String(lastFetchAt.getSeconds()).padStart(2,'0');
+    document.getElementById('last-update').textContent = `${hh}:${mm}:${ss}`;
+  }
 }
 
 function tick(){
@@ -1111,11 +2566,12 @@ function tick(){
   const months = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
   document.getElementById('clock-date').textContent =
     `${days[now.getDay()]} · ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+  document.getElementById('clock-tz').textContent = TZ_LABEL;
 
   if(nextRefreshAt > 0){
     const remain = Math.max(0, Math.round((nextRefreshAt - Date.now())/1000));
     if(remain > 0){
-      document.getElementById('refresh-label').textContent = `Próximo em ${remain}s`;
+      document.getElementById('refresh-label').textContent = isDemo ? 'modo demo' : `Próximo em ${remain}s`;
     }
   }
 }
@@ -1127,9 +2583,11 @@ async function refresh(){
   const b = computeBreakdown();
   renderHero(b);
   renderStates(b);
+  renderScreen2(b);
   renderFoot(b);
 
   nextRefreshAt = Date.now() + REFRESH_MS;
+  if(!lastFetchAt) lastFetchAt = new Date();
 
   if(document.getElementById('frame').style.visibility==='hidden'){
     document.getElementById('frame').style.visibility='visible';
@@ -1137,23 +2595,293 @@ async function refresh(){
   }
 }
 
-async function init(){
-  try{
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-  }catch(e){
-    console.error('[BI] Supabase init falhou:',e);
-    document.getElementById('err-banner').textContent = '⚠ Falha ao inicializar conexão';
-    document.getElementById('err-banner').classList.add('visible');
+async function manualRefresh(){
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+  await refresh();
+  setTimeout(()=>btn.classList.remove('spinning'), 500);
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN ROTATION — robusto pra TV/kiosk
+   ─────────────────────────────────────────────
+   - Usa setTimeout encadeado em vez de setInterval (alguns
+     navegadores de TV pausam setInterval em background ou
+     com tela ociosa).
+   - Não pausa por mouseenter (TV não tem mouse).
+   - Detecta visibilidade da página: pausa se a aba estiver
+     escondida e retoma ao voltar.
+*/
+const SCREEN_ROTATE_MS = 18_000;
+let currentScreen = 1;
+let rotateTimeout = null;
+let rotateProgressTimer = null;
+let rotateStartedAt = 0;
+let rotatePaused = false;
+
+function setScreen(n){
+  if(n === currentScreen) return;
+  currentScreen = n;
+  document.querySelectorAll('.screen').forEach(s=>{
+    s.classList.toggle('active', Number(s.dataset.screen) === n);
+  });
+  document.querySelectorAll('.screen-tab').forEach(t=>{
+    t.classList.toggle('active', Number(t.dataset.screen) === n);
+  });
+  positionTabBg();
+  rotateStartedAt = Date.now();
+  updateProgress();
+  console.log('[BI] Trocou pra tela', n, 'às', new Date().toLocaleTimeString());
+}
+
+function positionTabBg(){
+  const sw = document.getElementById('screen-switcher');
+  const bg = document.getElementById('screen-tab-bg');
+  if(!sw || !bg) return;
+  const active = sw.querySelector('.screen-tab.active');
+  if(!active) return;
+  const swRect = sw.getBoundingClientRect();
+  const aRect = active.getBoundingClientRect();
+  bg.style.left = (aRect.left - swRect.left) + 'px';
+  bg.style.width = aRect.width + 'px';
+}
+
+function updateProgress(){
+  const bg = document.getElementById('screen-tab-bg');
+  if(!bg) return;
+  if(rotatePaused){
+    bg.style.setProperty('--progress', '0%');
     return;
   }
+  const elapsed = Date.now() - rotateStartedAt;
+  const pct = Math.min(100, (elapsed / SCREEN_ROTATE_MS) * 100);
+  bg.style.setProperty('--progress', pct + '%');
+}
+
+function scheduleNextRotate(){
+  if(rotateTimeout) clearTimeout(rotateTimeout);
+  rotateTimeout = setTimeout(()=>{
+    if(!rotatePaused){
+      setScreen(currentScreen === 1 ? 2 : 1);
+    }
+    scheduleNextRotate(); // sempre re-agenda, mesmo se pausado
+  }, SCREEN_ROTATE_MS);
+}
+
+function startRotation(){
+  stopRotation();
+  rotateStartedAt = Date.now();
+  console.log('[BI] Rotação iniciada — troca a cada', SCREEN_ROTATE_MS/1000, 's');
+  scheduleNextRotate();
+  rotateProgressTimer = setInterval(updateProgress, 200);
+}
+
+function stopRotation(){
+  if(rotateTimeout) clearTimeout(rotateTimeout);
+  if(rotateProgressTimer) clearInterval(rotateProgressTimer);
+  rotateTimeout = null;
+  rotateProgressTimer = null;
+}
+
+function setupScreenSwitcher(){
+  document.querySelectorAll('.screen-tab').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      const n = Number(t.dataset.screen);
+      if(n !== currentScreen){
+        setScreen(n);
+        // Após click manual, reinicia o timer pra dar 18s na nova tela
+        scheduleNextRotate();
+      }
+    });
+  });
+  // Pausa quando a aba/tela fica inativa, retoma quando volta
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden){
+      rotatePaused = true;
+    } else {
+      rotatePaused = false;
+      rotateStartedAt = Date.now();
+      // Re-agenda pra evitar disparo imediato após hibernação
+      scheduleNextRotate();
+    }
+  });
+  // Reposiciona BG ao redimensionar
+  window.addEventListener('resize', positionTabBg);
+}
+
+async function init(){
+  // Live pill: demo vs prod
+  if(isDemo){
+    const pill = document.getElementById('live-pill');
+    pill.classList.add('demo');
+    document.getElementById('live-label').textContent = 'MODO DEMO';
+  }
+
+  if(!isDemo){
+    try{
+      sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    }catch(e){
+      console.error('[BI] Supabase init falhou:',e);
+      // Fallback pra demo
+      isDemo = true;
+      const pill = document.getElementById('live-pill');
+      pill.classList.add('demo');
+      document.getElementById('live-label').textContent = 'MODO DEMO';
+    }
+  }
+
+  // Botão manual refresh
+  document.getElementById('refresh-btn').addEventListener('click', manualRefresh);
+
+  // Screen switcher
+  setupScreenSwitcher();
+
   setInterval(tick, TICK_MS);
   tick();
   await refresh();
-  setInterval(refresh, REFRESH_MS);
+
+  // Posiciona BG do tab e inicia rotação após primeiro render
+  // 200ms é suficiente pra DOM estar 100% pintado mesmo em TVs lentas
+  setTimeout(()=>{
+    positionTabBg();
+    startRotation();
+    console.log('[BI] Init completo. Tela atual:', currentScreen, '| Demo:', isDemo);
+  }, 200);
+
+  if(!isDemo) setInterval(refresh, REFRESH_MS);
 }
 
 window.addEventListener('load', init);
-window.addEventListener('online', ()=>refresh());
+window.addEventListener('online', ()=>{ if(!isDemo) refresh(); });
+
+/* ─────────────────────────────────────────────
+   MOCK DATA (modo demo / file://)
+   ─────────────────────────────────────────────
+   Gerador determinístico: mesmos números entre reloads
+*/
+let _seed = 42;
+function rnd(){ _seed = (_seed * 9301 + 49297) % 233280; return _seed / 233280; }
+function rint(min,max){ return Math.floor(rnd()*(max-min+1))+min; }
+function rpick(arr){ return arr[Math.floor(rnd()*arr.length)]; }
+
+function generateMockData(){
+  _seed = 42; // reset pra ser determinístico
+  const STATES = ['FL','IN','IL'];
+  const PRIMES = {
+    FL: ['CHARTER','COMCAST','SPECTRUM','BREZE'],
+    IN: ['ATT','SPECTRUM','METRONET'],
+    IL: ['XFINITY','ATT','FRONTIER']
+  };
+  const CITIES = {
+    FL: ['Orlando','Tampa','Jacksonville','Miami','Kissimmee','Fort Lauderdale','Sarasota'],
+    IN: ['Indianapolis','Fort Wayne','Bloomington','Evansville','South Bend'],
+    IL: ['Chicago','Naperville','Aurora','Peoria','Springfield','Rockford']
+  };
+  const SUFFIXES = ['Build','North','Phase 2','Loop','Backbone','Drop','Expansion','Node','South','West'];
+
+  const projects = [];
+  const tickets = [];
+  let projId = 1;
+  let ticketSeq = 100000;
+  const now = Date.now();
+  const day = 24*3600*1000;
+
+  // Pra cada estado, gera 3-5 projetos
+  for(const state of STATES){
+    const numProjs = 3 + rint(0,2);
+    for(let p=0; p<numProjs; p++){
+      const pid = `proj-${projId++}`;
+      const city = rpick(CITIES[state]);
+      const suffix = rpick(SUFFIXES);
+      const name = `${city.toUpperCase()} ${suffix}`;
+      projects.push({id:pid, name, state, status:'Active'});
+
+      // 12-30 tickets por projeto
+      const numTks = 12 + rint(0,18);
+      for(let i=0; i<numTks; i++){
+        const prime = rpick(PRIMES[state]);
+        const createdDaysAgo = rint(1, 28);
+        const createdTs = now - createdDaysAgo*day;
+        const footage = 80 + rint(0, 520);
+
+        // Status atual: 50% Clear, 35% Open, 15% Closed
+        const r = rnd();
+        let status;
+        if(r < 0.50) status = 'Clear';
+        else if(r < 0.85) status = 'Open';
+        else status = 'Closed';
+
+        // History
+        const history = [];
+        history.push({ ts: createdTs, action: 'Importado' });
+
+        if(status === 'Clear'){
+          // Cleared em algum momento entre criação e hoje
+          const clearedDaysAgo = Math.max(0, rint(0, createdDaysAgo-1));
+          history.push({
+            ts: now - clearedDaysAgo*day,
+            action: 'Open → Clear'
+          });
+        } else if(status === 'Open' && rnd() < 0.18){
+          // Foi clear e voltou pra open
+          const clearedDaysAgo = rint(2, createdDaysAgo-1);
+          const reopenedDaysAgo = Math.max(0, clearedDaysAgo - rint(1, 3));
+          history.push({
+            ts: now - clearedDaysAgo*day,
+            action: 'Open → Clear'
+          });
+          history.push({
+            ts: now - reopenedDaysAgo*day,
+            action: 'Clear → Open (revertido)'
+          });
+        } else if(status === 'Closed'){
+          history.push({
+            ts: now - rint(0, createdDaysAgo-1)*day,
+            action: 'Open → Closed'
+          });
+        }
+
+        tickets.push({
+          id: `tk-${ticketSeq++}`,
+          ticket: `${state}${ticketSeq}`,
+          project_id: pid,
+          state,
+          location: `${city}, ${state}`,
+          status,
+          footage,
+          client: 'OneDrill',
+          prime,
+          old_ticket2: '',
+          history,
+          created_at: new Date(createdTs).toISOString()
+        });
+      }
+    }
+  }
+
+  // Adiciona alguns tickets "(SEM PRIME)" e alguns Open MUITO antigos pra mostrar critical
+  for(let i=0; i<6; i++){
+    const state = rpick(STATES);
+    const ageDays = 18 + rint(0, 14); // 18-32 dias
+    const createdTs = now - ageDays*day;
+    tickets.push({
+      id: `tk-old-${i}`,
+      ticket: `${state}${999000+i}`,
+      project_id: rpick(projects.filter(p=>p.state===state)).id,
+      state,
+      location: `${rpick(CITIES[state])}, ${state}`,
+      status: 'Open',
+      footage: 100 + rint(0, 300),
+      client: 'OneDrill',
+      prime: i%3===0 ? '' : rpick(PRIMES[state]),
+      old_ticket2: '',
+      history: [{ ts: createdTs, action: 'Importado' }],
+      created_at: new Date(createdTs).toISOString()
+    });
+  }
+
+  return {tickets, projects};
+}
 </script>
 </body>
 </html>

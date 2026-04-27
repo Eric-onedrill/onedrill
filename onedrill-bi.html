@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  ONEDRILL · BI v2
+  ONEDRILL · BI v4
   ─────────────────────────────────────────────
   Melhorias vs v1:
     1. ⚠ SECURITY CHECKLIST — verificar RLS no Supabase Studio:
@@ -23,7 +23,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920, initial-scale=1">
-<title>OneDrill BI v2 · Open / Clear · Aging · Tendência</title>
+<title>OneDrill BI v4 · Open / Clear · Aging · Tendência</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -394,6 +394,217 @@ body::after{
   text-transform:uppercase;
 }
 .hero-stat-label .unit{color:var(--text2);margin-left:4px}
+
+/* ── BLOCO DE PRODUÇÃO REALIZADA HOJE (dentro do hero-clear-card) ── */
+.hero-prod{
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px dashed var(--border);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.hero-prod-row{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  font-family:var(--mono);
+  font-size:13px;
+}
+.hero-prod-minus,.hero-prod-eq{
+  color:var(--muted);
+  font-weight:700;
+  width:12px;
+}
+.hero-prod-num{
+  color:var(--text);
+  font-weight:700;
+  font-size:16px;
+  font-variant-numeric:tabular-nums;
+}
+.hero-prod-num.remain{
+  color:var(--green);
+  font-size:18px;
+}
+.hero-prod-num.remain.negative{
+  color:var(--yellow);
+}
+.hero-prod-lbl{
+  color:var(--text2);
+  font-size:11px;
+  letter-spacing:.06em;
+}
+.hero-prod-btn{
+  margin-left:auto;
+  padding:4px 10px;
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  background:var(--green-dim);
+  color:var(--green);
+  border:1px solid var(--green);
+  border-radius:4px;
+  cursor:pointer;
+  transition:background .15s;
+}
+.hero-prod-btn:hover{background:var(--green);color:#000}
+
+/* ── MODAL DE LANÇAMENTO DE PRODUÇÃO ── */
+.prod-modal-bg{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.7);
+  backdrop-filter:blur(4px);
+  z-index:1000;
+  display:none;
+  align-items:center;
+  justify-content:center;
+}
+.prod-modal-bg.visible{display:flex}
+.prod-modal{
+  background:var(--card2);
+  border:1px solid var(--border-strong);
+  border-radius:8px;
+  padding:24px;
+  width:480px;
+  max-width:90vw;
+  max-height:80vh;
+  overflow-y:auto;
+  font-family:var(--sans);
+}
+.prod-modal-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:16px;
+  padding-bottom:12px;
+  border-bottom:1px solid var(--border);
+}
+.prod-modal-title{
+  font-family:var(--display);
+  font-size:22px;
+  letter-spacing:.04em;
+  color:var(--text);
+}
+.prod-modal-close{
+  background:none;
+  border:none;
+  color:var(--muted);
+  font-size:24px;
+  cursor:pointer;
+  line-height:1;
+  padding:4px 8px;
+}
+.prod-modal-close:hover{color:var(--text)}
+.prod-form{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.prod-form-row{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.prod-form-label{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.prod-form-input{
+  background:var(--bg2);
+  border:1px solid var(--border-strong);
+  color:var(--text);
+  padding:10px 12px;
+  border-radius:4px;
+  font-family:var(--mono);
+  font-size:14px;
+}
+.prod-form-input:focus{outline:none;border-color:var(--green)}
+.prod-form-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-top:8px;
+}
+.prod-btn{
+  padding:8px 16px;
+  font-family:var(--mono);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  border-radius:4px;
+  cursor:pointer;
+  border:1px solid var(--border-strong);
+  background:transparent;
+  color:var(--text2);
+}
+.prod-btn:hover{color:var(--text);border-color:var(--text2)}
+.prod-btn.primary{
+  background:var(--green-dim);
+  color:var(--green);
+  border-color:var(--green);
+}
+.prod-btn.primary:hover{background:var(--green);color:#000}
+.prod-btn:disabled{opacity:.5;cursor:not-allowed}
+
+.prod-history{
+  margin-top:20px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+}
+.prod-history-head{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  margin-bottom:8px;
+}
+.prod-history-empty{
+  color:var(--muted);
+  font-size:12px;
+  font-style:italic;
+}
+.prod-history-list{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.prod-history-item{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:8px 12px;
+  background:var(--bg2);
+  border-radius:4px;
+  font-family:var(--mono);
+  font-size:12px;
+}
+.prod-history-time{color:var(--muted);min-width:50px}
+.prod-history-ft{color:var(--green);font-weight:700;min-width:80px}
+.prod-history-notes{color:var(--text2);flex:1;font-size:11px}
+.prod-history-del{
+  background:none;
+  border:none;
+  color:var(--muted);
+  cursor:pointer;
+  padding:2px 6px;
+  font-size:14px;
+}
+.prod-history-del:hover{color:var(--red)}
+
+.prod-error{
+  color:var(--red);
+  font-size:12px;
+  font-family:var(--mono);
+  margin-top:4px;
+}
 
 /* HERO RIGHT: spark + aging/velocidade */
 .hero-right{
@@ -1352,7 +1563,7 @@ body::after{
 
 <div class="loading" id="loading">
   <div class="loading-mark">O</div>
-  <div class="loading-text">ONEDRILL · BI v2</div>
+  <div class="loading-text">ONEDRILL · BI v4</div>
   <div class="loading-bar"><div class="loading-bar-fill"></div></div>
 </div>
 
@@ -1364,7 +1575,7 @@ body::after{
     <div class="brand">
       <div class="brand-mark">O</div>
       <div>
-        <div class="brand-name">ONEDRILL<span class="brand-version">v2</span></div>
+        <div class="brand-name">ONEDRILL<span class="brand-version">v4</span></div>
         <div class="brand-sub">Open / Clear · Aging · Tendência 14d</div>
       </div>
     </div>
@@ -1485,6 +1696,19 @@ body::after{
             <span class="hero-tk-lbl">tickets</span>
             <span class="hero-tk-delta" id="hero-clear-tk-delta-y"></span>
           </div>
+          <div class="hero-prod" id="hero-prod-block">
+            <div class="hero-prod-row">
+              <span class="hero-prod-minus">–</span>
+              <span class="hero-prod-num" id="hero-prod-done">0</span>
+              <span class="hero-prod-lbl">ft realizados hoje</span>
+              <button class="hero-prod-btn" id="btn-add-prod" title="Lançar produção do dia">+ lançar</button>
+            </div>
+            <div class="hero-prod-row remain">
+              <span class="hero-prod-eq">=</span>
+              <span class="hero-prod-num remain" id="hero-prod-remain">0</span>
+              <span class="hero-prod-lbl">ft restantes pra trabalhar</span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="hero-right">
@@ -1572,7 +1796,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const REFRESH_MS  = 60_000;
 const TICK_MS     = 1_000;
-const CACHE_KEY   = 'onedrill-bi-v2-cache';
+const CACHE_KEY   = 'onedrill-bi-v4-cache';
 const TZ_LABEL    = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
 
 // Threshold pra cor condicional do hero Open card
@@ -1590,10 +1814,19 @@ const FORCE_DEMO = location.protocol === 'file:' || /[\?&]demo=1/.test(location.
 let sb;
 let tickets = [];
 let projects = [];
+let productionToday = [];   // [{id, footage, notes, created_at}, ...] — apenas hoje (fuso local)
 let nextRefreshAt = 0;
 let lastValues = {};
 let lastFetchAt = null;
 let isDemo = FORCE_DEMO;
+
+/** Data de hoje em fuso LOCAL no formato YYYY-MM-DD (que é o formato DATE do Postgres). */
+function todayLocalISO(){
+  const d = new Date();
+  return d.getFullYear() + '-' +
+         String(d.getMonth()+1).padStart(2,'0') + '-' +
+         String(d.getDate()).padStart(2,'0');
+}
 
 /* ─────────────────────────────────────────────
    UTIL
@@ -1772,17 +2005,27 @@ async function fetchAll(){
     const mock = generateMockData();
     tickets = mock.tickets;
     projects = mock.projects;
+    productionToday = [];
     setRefresh('ok','modo demo');
     return true;
   }
   setRefresh('loading','atualizando…');
   try{
-    const [tr,pr] = await Promise.all([
+    const today = todayLocalISO();
+    const [tr,pr,prod] = await Promise.all([
       sb.from('tickets').select('id,ticket,project_id,state,location,status,footage,client,prime,old_ticket2,history,created_at').order('ticket'),
       sb.from('projects').select('id,name,state,status'),
+      sb.from('daily_production').select('id,footage,notes,created_at').eq('date', today).order('created_at',{ascending:false}),
     ]);
     if(tr.error) throw tr.error;
     if(pr.error) throw pr.error;
+    // Não falha o fetch inteiro se daily_production não existir ainda — degrada graciosamente.
+    if(prod.error){
+      console.warn('[BI] daily_production indisponível:', prod.error.message);
+      productionToday = [];
+    } else {
+      productionToday = prod.data || [];
+    }
     tickets = tr.data || [];
     projects = pr.data || [];
 
@@ -2582,6 +2825,7 @@ async function refresh(){
 
   const b = computeBreakdown();
   renderHero(b);
+  renderProduction(b.totals.clearFt);
   renderStates(b);
   renderScreen2(b);
   renderFoot(b);
@@ -2736,6 +2980,9 @@ async function init(){
   // Screen switcher
   setupScreenSwitcher();
 
+  // Wire up modal de produção diária
+  wireProductionUI();
+
   setInterval(tick, TICK_MS);
   tick();
   await refresh();
@@ -2882,6 +3129,205 @@ function generateMockData(){
 
   return {tickets, projects};
 }
+
+/* ─────────────────────────────────────────────
+   PRODUÇÃO DIÁRIA — lançamento, render e exclusão
+   ───────────────────────────────────────────── */
+
+/** Soma footage de todos os lançamentos de hoje. */
+function getProductionTotal(){
+  return productionToday.reduce((sum,p)=>sum+(p.footage||0),0);
+}
+
+/** Atualiza a UI do bloco de produção dentro do hero clear card.
+ *  Chamada DEPOIS de renderHero pra usar o clearFt já calculado. */
+function renderProduction(clearFt){
+  const total = getProductionTotal();
+  const remaining = clearFt - total;
+  const doneEl = document.getElementById('hero-prod-done');
+  const remainEl = document.getElementById('hero-prod-remain');
+  if(doneEl) doneEl.textContent = fmtN(total);
+  if(remainEl){
+    remainEl.textContent = fmtN(remaining);
+    // Cor amarela se a produção ultrapassou o clear (cenário "trabalho adiantado")
+    if(remaining < 0) remainEl.classList.add('negative');
+    else remainEl.classList.remove('negative');
+  }
+}
+
+/** Abre o modal de lançamento. Carrega histórico do dia direto de productionToday. */
+function openProductionModal(){
+  const bg = document.getElementById('prod-modal-bg');
+  if(!bg) return;
+  document.getElementById('prod-input-ft').value = '';
+  document.getElementById('prod-input-notes').value = '';
+  document.getElementById('prod-error').textContent = '';
+  renderProductionHistory();
+  bg.classList.add('visible');
+  setTimeout(()=>document.getElementById('prod-input-ft').focus(),50);
+}
+
+function closeProductionModal(){
+  document.getElementById('prod-modal-bg').classList.remove('visible');
+}
+
+/** Renderiza a lista de lançamentos de hoje dentro do modal. */
+function renderProductionHistory(){
+  const list = document.getElementById('prod-history-list');
+  if(!list) return;
+  if(!productionToday.length){
+    list.innerHTML = '<div class="prod-history-empty">Nenhum lançamento hoje ainda.</div>';
+    return;
+  }
+  list.innerHTML = productionToday.map(p=>{
+    const t = new Date(p.created_at);
+    const hh = String(t.getHours()).padStart(2,'0');
+    const mm = String(t.getMinutes()).padStart(2,'0');
+    return `<div class="prod-history-item">
+      <span class="prod-history-time">${hh}:${mm}</span>
+      <span class="prod-history-ft">${fmtN(p.footage)} ft</span>
+      <span class="prod-history-notes">${esc(p.notes||'')}</span>
+      <button class="prod-history-del" data-id="${p.id}" title="Excluir">✕</button>
+    </div>`;
+  }).join('');
+  // Wire delete buttons
+  list.querySelectorAll('.prod-history-del').forEach(btn=>{
+    btn.addEventListener('click',()=>deleteProductionEntry(btn.dataset.id));
+  });
+}
+
+/** Salva um novo lançamento. */
+async function saveProduction(){
+  const ftInput = document.getElementById('prod-input-ft');
+  const notesInput = document.getElementById('prod-input-notes');
+  const errEl = document.getElementById('prod-error');
+  const saveBtn = document.getElementById('prod-save-btn');
+  errEl.textContent = '';
+
+  const ft = parseInt(ftInput.value, 10);
+  if(!ft || ft <= 0){
+    errEl.textContent = 'Footage deve ser um número maior que zero.';
+    return;
+  }
+  if(isDemo){
+    errEl.textContent = 'Modo demo — lançamentos não são salvos.';
+    return;
+  }
+
+  saveBtn.disabled = true;
+  try{
+    const today = todayLocalISO();
+    const {data,error} = await sb.from('daily_production').insert({
+      date: today,
+      footage: ft,
+      notes: notesInput.value.trim() || null,
+    }).select().single();
+    if(error) throw error;
+
+    // Adiciona localmente sem precisar de refetch completo
+    productionToday.unshift(data);
+    renderProductionHistory();
+
+    // Re-renderiza o BI imediatamente
+    const b = computeBreakdown();
+    renderProduction(b.totals.clearFt);
+
+    ftInput.value = '';
+    notesInput.value = '';
+    setTimeout(()=>ftInput.focus(),50);
+  } catch(e){
+    console.error('[BI] Erro ao salvar produção:', e);
+    errEl.textContent = 'Erro ao salvar: ' + (e.message || 'desconhecido');
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+/** Exclui um lançamento. */
+async function deleteProductionEntry(id){
+  if(!confirm('Excluir esse lançamento?')) return;
+  if(isDemo) return;
+  try{
+    const {error} = await sb.from('daily_production').delete().eq('id', id);
+    if(error) throw error;
+    productionToday = productionToday.filter(p=>String(p.id)!==String(id));
+    renderProductionHistory();
+    const b = computeBreakdown();
+    renderProduction(b.totals.clearFt);
+  } catch(e){
+    console.error('[BI] Erro ao excluir produção:', e);
+    alert('Erro ao excluir: ' + (e.message || 'desconhecido'));
+  }
+}
+
+/** Wire up dos botões e teclas. Chamado uma vez no boot. */
+function wireProductionUI(){
+  const addBtn = document.getElementById('btn-add-prod');
+  if(addBtn) addBtn.addEventListener('click', openProductionModal);
+
+  const closeBtn = document.getElementById('prod-close-btn');
+  if(closeBtn) closeBtn.addEventListener('click', closeProductionModal);
+
+  const cancelBtn = document.getElementById('prod-cancel-btn');
+  if(cancelBtn) cancelBtn.addEventListener('click', closeProductionModal);
+
+  const saveBtn = document.getElementById('prod-save-btn');
+  if(saveBtn) saveBtn.addEventListener('click', saveProduction);
+
+  // Enter no campo footage = salvar
+  const ftInput = document.getElementById('prod-input-ft');
+  if(ftInput){
+    ftInput.addEventListener('keydown',(e)=>{
+      if(e.key==='Enter'){e.preventDefault();saveProduction();}
+    });
+  }
+
+  // ESC fecha o modal
+  document.addEventListener('keydown',(e)=>{
+    if(e.key==='Escape'){
+      const bg = document.getElementById('prod-modal-bg');
+      if(bg && bg.classList.contains('visible')) closeProductionModal();
+    }
+  });
+
+  // Click no fundo (fora do card) fecha
+  const bg = document.getElementById('prod-modal-bg');
+  if(bg){
+    bg.addEventListener('click',(e)=>{
+      if(e.target === bg) closeProductionModal();
+    });
+  }
+}
 </script>
+
+<!-- Modal de lançamento de produção diária -->
+<div class="prod-modal-bg" id="prod-modal-bg">
+  <div class="prod-modal">
+    <div class="prod-modal-head">
+      <div class="prod-modal-title">LANÇAR PRODUÇÃO DO DIA</div>
+      <button class="prod-modal-close" id="prod-close-btn" title="Fechar">×</button>
+    </div>
+    <div class="prod-form">
+      <div class="prod-form-row">
+        <label class="prod-form-label" for="prod-input-ft">Footage realizado (ft)</label>
+        <input class="prod-form-input" id="prod-input-ft" type="number" min="1" step="1" placeholder="ex: 600">
+      </div>
+      <div class="prod-form-row">
+        <label class="prod-form-label" for="prod-input-notes">Notas (opcional)</label>
+        <input class="prod-form-input" id="prod-input-notes" type="text" placeholder="ex: equipe Carlos, máquina 3">
+      </div>
+      <div class="prod-error" id="prod-error"></div>
+      <div class="prod-form-actions">
+        <button class="prod-btn" id="prod-cancel-btn">Cancelar</button>
+        <button class="prod-btn primary" id="prod-save-btn">Salvar</button>
+      </div>
+    </div>
+    <div class="prod-history">
+      <div class="prod-history-head">Lançamentos de hoje</div>
+      <div class="prod-history-list" id="prod-history-list"></div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

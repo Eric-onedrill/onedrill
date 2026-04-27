@@ -2560,13 +2560,11 @@ function renderStates(b){
 
       const pt = primeData.total;
 
-      // Coluna order: Prime/Projeto | Open ft | tk | Clear ft | tk
+      // Coluna order: Prime/Projeto | Open ft | Clear ft
       const primeRow = `<tr class="prime-row">
         <td class="prime-name">${esc(pk)}</td>
         <td class="cell-ft red">${fmtN(pt.openFt)} ${deltaPill(pt.openFt, pt.openFtY, true)}</td>
-        <td class="cell-n red">${fmtN(pt.open)}</td>
         <td class="cell-ft green">${fmtN(pt.clearFt)} ${deltaPill(pt.clearFt, pt.clearFtY, false)}</td>
-        <td class="cell-n green">${fmtN(pt.clear)}</td>
       </tr>`;
 
       const projRows = projEntries.map(([name,p])=>{
@@ -2574,24 +2572,12 @@ function renderStates(b){
         <tr class="proj-row">
           <td class="proj-name proj-indent${name.startsWith('(')?' no-proj':''}" title="${esc(name)}">${esc(name)}</td>
           <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)} ${deltaPill(p.openFt, p.openFtY, true)}</td>
-          <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)}</td>
           <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)} ${deltaPill(p.clearFt, p.clearFtY, false)}</td>
-          <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)}</td>
         </tr>`;
       }).join('');
 
       return primeRow + projRows;
     }).join('');
-
-    // Oldest open do estado
-    const oldestAge = meta.oldestOpenTs ? ageDays(meta.oldestOpenTs) : null;
-    let oldestHtml;
-    if(oldestAge === null){
-      oldestHtml = '<span style="color:var(--muted)">sem Open ativo</span>';
-    } else {
-      const cls = oldestAge > AGE_HOT_MAX ? '' : oldestAge > AGE_WARM_MAX ? 'warn' : 'ok';
-      oldestHtml = `<span class="age-val ${cls}">${oldestAge}d</span> · ${esc((meta.oldestOpenProj||'').slice(0,28))}`;
-    }
 
     // Sparkline mini do estado em footage Open
     const stateTrendFt = (meta.trendOpenFt14 && meta.trendOpenFt14.length) ? meta.trendOpenFt14 : (meta.trendOpen14 || []);
@@ -2604,16 +2590,15 @@ function renderStates(b){
             <div class="state-name">${esc(st)}</div>
             <div class="state-spark">${stateSpark}</div>
           </div>
-          <div class="state-oldest">Mais antigo: ${oldestHtml}</div>
         </div>
         <div class="state-totals">
           <div class="state-total">
             <div class="state-total-num open">${fmtN(sTot.openFt)}<span class="state-total-suffix">ft</span> ${deltaPill(sTot.openFt, sTot.openFtY, true)}</div>
-            <div class="state-total-lbl">open · <strong>${fmtN(sTot.open)}</strong> tk</div>
+            <div class="state-total-lbl">open</div>
           </div>
           <div class="state-total">
             <div class="state-total-num clear">${fmtN(sTot.clearFt)}<span class="state-total-suffix">ft</span> ${deltaPill(sTot.clearFt, sTot.clearFtY, false)}</div>
-            <div class="state-total-lbl">clear · <strong>${fmtN(sTot.clear)}</strong> tk</div>
+            <div class="state-total-lbl">clear</div>
           </div>
         </div>
       </div>
@@ -2623,9 +2608,7 @@ function renderStates(b){
             <tr>
               <th>Prime / Projeto</th>
               <th class="col-open">Open ft</th>
-              <th class="col-open">tk</th>
               <th class="col-clear">Clear ft</th>
-              <th class="col-clear">tk</th>
             </tr>
           </thead>
           <tbody>
@@ -2633,9 +2616,7 @@ function renderStates(b){
             <tr class="proj-total-row">
               <td class="proj-name">TOTAL ${esc(st)}</td>
               <td class="cell-ft red">${fmtN(sTot.openFt)} ${deltaPill(sTot.openFt, sTot.openFtY, true)}</td>
-              <td class="cell-n red">${fmtN(sTot.open)}</td>
               <td class="cell-ft green">${fmtN(sTot.clearFt)} ${deltaPill(sTot.clearFt, sTot.clearFtY, false)}</td>
-              <td class="cell-n green">${fmtN(sTot.clear)}</td>
             </tr>
           </tbody>
         </table>
@@ -2667,10 +2648,6 @@ function renderScreen2(b){
       continue;
     }
     const f = b.forecast[st] || {openFt:0, velocityFt:0, daysToZero:null};
-    const stMeta = b.stateMeta[st] || {};
-    const oldestAge = stMeta.oldestOpenTs ? ageDays(stMeta.oldestOpenTs) : null;
-    const oldestBucket = oldestAge !== null ? ageBucket(oldestAge) : 'none';
-
     let cls = 'stuck';
     let etaText = '∞', etaSuffix = '', etaLbl = 'sem velocidade';
     if(f.daysToZero !== null){
@@ -2690,10 +2667,6 @@ function renderScreen2(b){
       etaLbl = 'backlog vazio';
     }
 
-    const oldestCell = oldestAge !== null
-      ? `<div class="fc-stat-num age-${oldestBucket}">${oldestAge}<span class="fc-stat-suffix">d</span></div>`
-      : `<div class="fc-stat-num" style="color:var(--muted)">—</div>`;
-
     fcHtml += `<div class="forecast-card ${cls}">
       <div class="fc-state">${esc(st)}</div>
       <div class="fc-stats">
@@ -2704,10 +2677,6 @@ function renderScreen2(b){
         <div class="fc-stat">
           <div class="fc-stat-num vel">${fmtN(Math.round(f.velocityFt))}<span class="fc-stat-suffix">ft/d</span></div>
           <div class="fc-stat-lbl">velocidade 7d</div>
-        </div>
-        <div class="fc-stat">
-          ${oldestCell}
-          <div class="fc-stat-lbl">mais antigo</div>
         </div>
       </div>
       <div class="fc-eta">

@@ -397,12 +397,12 @@ body::after{
 
 /* ── BLOCO DE PRODUÇÃO REALIZADA HOJE (dentro do hero-clear-card) ── */
 .hero-prod{
-  margin-top:12px;
-  padding-top:10px;
+  margin-top:14px;
+  padding-top:12px;
   border-top:1px dashed var(--border);
   display:flex;
   flex-direction:column;
-  gap:4px;
+  gap:6px;
 }
 .hero-prod-row{
   display:flex;
@@ -410,6 +410,7 @@ body::after{
   gap:10px;
   font-family:var(--mono);
   font-size:13px;
+  flex-wrap:wrap;
 }
 .hero-prod-minus,.hero-prod-eq{
   color:var(--muted);
@@ -422,12 +423,10 @@ body::after{
   font-size:16px;
   font-variant-numeric:tabular-nums;
 }
-.hero-prod-num.remain{
+/* Total clear (linha de baixo, valor menor mas legível) */
+.hero-prod-num.total{
   color:var(--green);
   font-size:18px;
-}
-.hero-prod-num.remain.negative{
-  color:var(--yellow);
 }
 .hero-prod-lbl{
   color:var(--text2);
@@ -450,6 +449,28 @@ body::after{
   transition:background .15s;
 }
 .hero-prod-btn:hover{background:var(--green);color:#000}
+
+/* Deltas mini ao lado do total clear */
+.hero-prod-deltas{
+  display:inline-flex;
+  align-items:baseline;
+  gap:4px;
+  margin-left:auto;
+  font-family:var(--mono);
+  font-size:11px;
+}
+.hero-delta-mini{font-weight:700}
+.hero-delta-mini-lbl{color:var(--muted);font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-right:6px}
+
+/* Quando o número grande (restantes) fica negativo */
+#hero-clear-remain.negative{color:var(--yellow)!important}
+
+/* Tickets count discreto (era hero-secondary destaque) */
+.hero-secondary.subtle{
+  margin-top:8px;
+  opacity:.7;
+}
+.hero-secondary.subtle .hero-tk-num{font-size:18px}
 
 /* ── MODAL DE LANÇAMENTO DE PRODUÇÃO ── */
 .prod-modal-bg{
@@ -949,6 +970,13 @@ body::after{
 .age-chip.hot{color:var(--orange);background:var(--orange-dim)}
 .age-chip.critical{color:var(--red);background:var(--red-dim);box-shadow:inset 0 0 0 1px rgba(239,68,68,.3)}
 .age-chip.none{color:var(--muted);font-weight:400;background:transparent}
+
+/* Cores do "mais antigo" nos cards de forecast (tela 2) */
+.fc-stat-num.age-fresh{color:var(--green)}
+.fc-stat-num.age-warm{color:var(--yellow)}
+.fc-stat-num.age-hot{color:var(--orange)}
+.fc-stat-num.age-critical{color:var(--red)}
+.fc-stat-num.age-none{color:var(--muted)}
 
 /* Delta pills (vs ontem) */
 .delta{
@@ -1677,25 +1705,14 @@ body::after{
           <div class="hero-tag-sub">Footage liberado · pronto pra trabalhar</div>
         </div>
         <div class="hero-main">
+          <!-- NÚMERO GRANDE: restantes pra trabalhar (era total) -->
           <div class="hero-num-row">
-            <div class="hero-num" id="hero-clear-ft">0</div>
+            <div class="hero-num" id="hero-clear-remain">0</div>
             <div class="hero-num-suffix">ft</div>
-            <div class="hero-deltas">
-              <div class="hero-delta-item">
-                <div class="hero-delta-val" id="hero-clear-ft-delta-y"></div>
-                <div class="hero-delta-lbl">vs ontem</div>
-              </div>
-              <div class="hero-delta-item">
-                <div class="hero-delta-val" id="hero-clear-ft-delta-7"></div>
-                <div class="hero-delta-lbl">vs média 7d</div>
-              </div>
-            </div>
           </div>
-          <div class="hero-secondary">
-            <span class="hero-tk-num" id="hero-clear-n">0</span>
-            <span class="hero-tk-lbl">tickets</span>
-            <span class="hero-tk-delta" id="hero-clear-tk-delta-y"></span>
-          </div>
+          <div class="hero-stat-label" style="margin-top:4px">Restantes pra trabalhar</div>
+
+          <!-- BLOCO DE PRODUÇÃO + TOTAL CLEAR -->
           <div class="hero-prod" id="hero-prod-block">
             <div class="hero-prod-row">
               <span class="hero-prod-minus">–</span>
@@ -1703,11 +1720,25 @@ body::after{
               <span class="hero-prod-lbl">ft realizados hoje</span>
               <button class="hero-prod-btn" id="btn-add-prod" title="Lançar produção do dia">+ lançar</button>
             </div>
-            <div class="hero-prod-row remain">
+            <div class="hero-prod-row total">
               <span class="hero-prod-eq">=</span>
-              <span class="hero-prod-num remain" id="hero-prod-remain">0</span>
-              <span class="hero-prod-lbl">ft restantes pra trabalhar</span>
+              <span class="hero-prod-num total" id="hero-clear-ft">0</span>
+              <span class="hero-prod-lbl">ft total clear</span>
+              <span class="hero-prod-deltas">
+                <span class="hero-delta-mini" id="hero-clear-ft-delta-y"></span>
+                <span class="hero-delta-mini-lbl">ontem</span>
+                <span class="hero-delta-mini" id="hero-clear-ft-delta-7"></span>
+                <span class="hero-delta-mini-lbl">média 7d</span>
+              </span>
             </div>
+          </div>
+
+          <!-- TICKETS COUNT (agora discreto, abaixo) -->
+          <div class="hero-secondary subtle">
+            <span class="hero-tk-num" id="hero-clear-n">0</span>
+            <span class="hero-tk-lbl">tickets</span>
+            <span class="hero-tk-delta" id="hero-clear-tk-delta-y"></span>
+          </div>
           </div>
         </div>
       </div>
@@ -2528,37 +2559,22 @@ function renderStates(b){
         });
 
       const pt = primeData.total;
-      // Aging do prime: pega o mais velho dos projetos
-      let primeOldest = null;
-      for(const [, p] of Object.entries(primeData.projects)){
-        if(p.oldestOpenTs && (!primeOldest || p.oldestOpenTs < primeOldest)) primeOldest = p.oldestOpenTs;
-      }
-      const primeAge = primeOldest ? ageDays(primeOldest) : null;
-      const primeAgeChip = primeAge !== null
-        ? `<span class="age-chip ${ageBucket(primeAge)}">${primeAge}d</span>`
-        : `<span class="age-chip none">—</span>`;
 
-      // Coluna order: Prime/Projeto | Open ft | tk | Idade | Clear ft | tk
+      // Coluna order: Prime/Projeto | Open ft | tk | Clear ft | tk
       const primeRow = `<tr class="prime-row">
         <td class="prime-name">${esc(pk)}</td>
         <td class="cell-ft red">${fmtN(pt.openFt)} ${deltaPill(pt.openFt, pt.openFtY, true)}</td>
         <td class="cell-n red">${fmtN(pt.open)}</td>
-        <td class="cell-age">${primeAgeChip}</td>
         <td class="cell-ft green">${fmtN(pt.clearFt)} ${deltaPill(pt.clearFt, pt.clearFtY, false)}</td>
         <td class="cell-n green">${fmtN(pt.clear)}</td>
       </tr>`;
 
       const projRows = projEntries.map(([name,p])=>{
-        const projAge = p.oldestOpenTs ? ageDays(p.oldestOpenTs) : null;
-        const projAgeChip = projAge !== null
-          ? `<span class="age-chip ${ageBucket(projAge)}">${projAge}d</span>`
-          : `<span class="age-chip none">—</span>`;
         return `
         <tr class="proj-row">
           <td class="proj-name proj-indent${name.startsWith('(')?' no-proj':''}" title="${esc(name)}">${esc(name)}</td>
           <td class="cell-ft red${p.openFt===0?' zero':''}">${fmtN(p.openFt)} ${deltaPill(p.openFt, p.openFtY, true)}</td>
           <td class="cell-n red${p.open===0?' zero':''}">${fmtN(p.open)}</td>
-          <td class="cell-age">${projAgeChip}</td>
           <td class="cell-ft green${p.clearFt===0?' zero':''}">${fmtN(p.clearFt)} ${deltaPill(p.clearFt, p.clearFtY, false)}</td>
           <td class="cell-n green${p.clear===0?' zero':''}">${fmtN(p.clear)}</td>
         </tr>`;
@@ -2608,7 +2624,6 @@ function renderStates(b){
               <th>Prime / Projeto</th>
               <th class="col-open">Open ft</th>
               <th class="col-open">tk</th>
-              <th class="col-age">Idade</th>
               <th class="col-clear">Clear ft</th>
               <th class="col-clear">tk</th>
             </tr>
@@ -2619,7 +2634,6 @@ function renderStates(b){
               <td class="proj-name">TOTAL ${esc(st)}</td>
               <td class="cell-ft red">${fmtN(sTot.openFt)} ${deltaPill(sTot.openFt, sTot.openFtY, true)}</td>
               <td class="cell-n red">${fmtN(sTot.open)}</td>
-              <td class="cell-age"></td>
               <td class="cell-ft green">${fmtN(sTot.clearFt)} ${deltaPill(sTot.clearFt, sTot.clearFtY, false)}</td>
               <td class="cell-n green">${fmtN(sTot.clear)}</td>
             </tr>
@@ -2653,6 +2667,10 @@ function renderScreen2(b){
       continue;
     }
     const f = b.forecast[st] || {openFt:0, velocityFt:0, daysToZero:null};
+    const stMeta = b.stateMeta[st] || {};
+    const oldestAge = stMeta.oldestOpenTs ? ageDays(stMeta.oldestOpenTs) : null;
+    const oldestBucket = oldestAge !== null ? ageBucket(oldestAge) : 'none';
+
     let cls = 'stuck';
     let etaText = '∞', etaSuffix = '', etaLbl = 'sem velocidade';
     if(f.daysToZero !== null){
@@ -2672,6 +2690,10 @@ function renderScreen2(b){
       etaLbl = 'backlog vazio';
     }
 
+    const oldestCell = oldestAge !== null
+      ? `<div class="fc-stat-num age-${oldestBucket}">${oldestAge}<span class="fc-stat-suffix">d</span></div>`
+      : `<div class="fc-stat-num" style="color:var(--muted)">—</div>`;
+
     fcHtml += `<div class="forecast-card ${cls}">
       <div class="fc-state">${esc(st)}</div>
       <div class="fc-stats">
@@ -2682,6 +2704,10 @@ function renderScreen2(b){
         <div class="fc-stat">
           <div class="fc-stat-num vel">${fmtN(Math.round(f.velocityFt))}<span class="fc-stat-suffix">ft/d</span></div>
           <div class="fc-stat-lbl">velocidade 7d</div>
+        </div>
+        <div class="fc-stat">
+          ${oldestCell}
+          <div class="fc-stat-lbl">mais antigo</div>
         </div>
       </div>
       <div class="fc-eta">
@@ -2855,8 +2881,16 @@ async function manualRefresh(){
    - Não pausa por mouseenter (TV não tem mouse).
    - Detecta visibilidade da página: pausa se a aba estiver
      escondida e retoma ao voltar.
+   - Tempos POR TELA: tela 1 (status) tem o dobro da tela 2 (operações).
 */
-const SCREEN_ROTATE_MS = 18_000;
+const SCREEN_DURATIONS = {
+  1: 24_000,  // tela 1: STATUS — informação principal, fica mais tempo
+  2: 12_000,  // tela 2: OPERAÇÕES — leitura mais rápida
+};
+function getCurrentScreenDuration(){
+  return SCREEN_DURATIONS[currentScreen] || 18_000;
+}
+
 let currentScreen = 1;
 let rotateTimeout = null;
 let rotateProgressTimer = null;
@@ -2875,7 +2909,7 @@ function setScreen(n){
   positionTabBg();
   rotateStartedAt = Date.now();
   updateProgress();
-  console.log('[BI] Trocou pra tela', n, 'às', new Date().toLocaleTimeString());
+  console.log('[BI] Trocou pra tela', n, '— durará', getCurrentScreenDuration()/1000, 's');
 }
 
 function positionTabBg(){
@@ -2898,24 +2932,26 @@ function updateProgress(){
     return;
   }
   const elapsed = Date.now() - rotateStartedAt;
-  const pct = Math.min(100, (elapsed / SCREEN_ROTATE_MS) * 100);
+  const dur = getCurrentScreenDuration();
+  const pct = Math.min(100, (elapsed / dur) * 100);
   bg.style.setProperty('--progress', pct + '%');
 }
 
 function scheduleNextRotate(){
   if(rotateTimeout) clearTimeout(rotateTimeout);
+  const dur = getCurrentScreenDuration();
   rotateTimeout = setTimeout(()=>{
     if(!rotatePaused){
       setScreen(currentScreen === 1 ? 2 : 1);
     }
     scheduleNextRotate(); // sempre re-agenda, mesmo se pausado
-  }, SCREEN_ROTATE_MS);
+  }, dur);
 }
 
 function startRotation(){
   stopRotation();
   rotateStartedAt = Date.now();
-  console.log('[BI] Rotação iniciada — troca a cada', SCREEN_ROTATE_MS/1000, 's');
+  console.log('[BI] Rotação iniciada — tela 1:', SCREEN_DURATIONS[1]/1000, 's | tela 2:', SCREEN_DURATIONS[2]/1000, 's');
   scheduleNextRotate();
   rotateProgressTimer = setInterval(updateProgress, 200);
 }
@@ -3145,10 +3181,10 @@ function renderProduction(clearFt){
   const total = getProductionTotal();
   const remaining = clearFt - total;
   const doneEl = document.getElementById('hero-prod-done');
-  const remainEl = document.getElementById('hero-prod-remain');
+  const remainEl = document.getElementById('hero-clear-remain');
   if(doneEl) doneEl.textContent = fmtN(total);
   if(remainEl){
-    remainEl.textContent = fmtN(remaining);
+    animateNum(remainEl, remaining);
     // Cor amarela se a produção ultrapassou o clear (cenário "trabalho adiantado")
     if(remaining < 0) remainEl.classList.add('negative');
     else remainEl.classList.remove('negative');

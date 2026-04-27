@@ -1246,14 +1246,17 @@ body::after{
   gap:14px;
   min-height:0;
   opacity:0;
+  visibility:hidden;          /* esconde do screenshot/leitor de tela quando inativa */
   pointer-events:none;
   transform:translateY(8px);
-  transition:opacity .55s ease, transform .55s ease;
+  transition:opacity .55s ease, transform .55s ease, visibility 0s linear .55s;
 }
 .screen.active{
   opacity:1;
+  visibility:visible;
   pointer-events:auto;
   transform:translateY(0);
+  transition:opacity .55s ease, transform .55s ease, visibility 0s linear 0s;
 }
 
 /* SCREEN INDICATOR (header) */
@@ -1739,9 +1742,8 @@ body::after{
             <span class="hero-tk-lbl">tickets</span>
             <span class="hero-tk-delta" id="hero-clear-tk-delta-y"></span>
           </div>
-          </div>
-        </div>
-      </div>
+        </div><!-- /hero-main -->
+      </div><!-- /hero-left -->
       <div class="hero-right">
         <div class="hero-spark">
           <div class="hero-spark-head">

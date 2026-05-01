@@ -1550,17 +1550,46 @@ async function renewTicket(){
   t.statusOld=oldStatus;
   // Atualiza para novo ticket
   t.ticket=newTicket;
-  // Zera t.expire pra forçar o scraper 811 a buscar a data REAL do ticket novo.
-  // Sem isso, o expire fica com a data do antigo e, assim que a graça termina,
-  // dispara falso banner de "VENCIDO". filter_tickets_for_sync detecta expire
-  // vazio e prioriza esse ticket no próximo scrape.
-  t.expire='';
+  // Nova data de expire — comportamento depende do estado:
+  // - IN/FL: zera pra forçar o scraper 811 a buscar do portal Indiana/Florida.
+  //   Sem isso, o expire fica com a data do antigo e, assim que a graça termina,
+  //   dispara falso banner de "VENCIDO". filter_tickets_for_sync detecta expire
+  //   vazio e prioriza esse ticket no próximo scrape.
+  // - IL: NÃO há scraper de data (JULIE só lê respostas, tickets IL são manuais).
+  //   Se zerasse aqui, o ticket ficaria órfão sem expire pra sempre.
+  //   Pede a data nova ao operador.
+  if((t.state||'').toUpperCase()==='IL'){
+    let newExpireRaw=prompt(
+      'Nova data de vencimento do ticket '+newTicket+' (formato MM/DD/YYYY):\n\n'+
+      'Ticket antigo expirava em: '+(oldExpire||'sem data'),
+      ''
+    );
+    if(newExpireRaw===null){
+      // Cancelou o prompt — aborta a renovação inteira sem deixar lixo
+      toast('Renovação cancelada.','warn');
+      return;
+    }
+    const newExpire=normalizeExpire(newExpireRaw);
+    if(!newExpire){
+      toast('Data inválida — renovação cancelada. Use MM/DD/YYYY.','danger');
+      return;
+    }
+    t.expire=newExpire;
+  }else{
+    // IN/FL: zera pra scraper buscar do portal
+    t.expire='';
+  }
   if(t.projectId)t.project_locked=true;// trava projeto ao renovar
   t.history=t.history||[];
   t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(merged?' (mesclado)':'')+' (graça até '+oldExpire+')',color:'#7c3aed'});
   const ok=await saveTicketToDb(t);
   if(ok){
-    toast('✅ Ticket renovado: '+oldNum+' → '+newTicket+' — aguardando sync 811 pra confirmar vencimento','success');
+    const isIL=(t.state||'').toUpperCase()==='IL';
+    toast(
+      '✅ Ticket renovado: '+oldNum+' → '+newTicket+
+      (isIL ? ' (vence '+t.expire+')' : ' — aguardando sync 811 pra confirmar vencimento'),
+      'success'
+    );
     closeModal('ov-detail');syncAll();
     setTimeout(()=>openTicketDetail(t.id),300);
   }else{
@@ -1639,51 +1668,54 @@ function newTicketFullyCleared(t){
 /**
  * Status efetivo — durante período de carência de renovação.
  *
- * Ordem de avaliação (mais recente/completo sempre ganha, segurança em 1º lugar):
- *   1. Status travado manualmente → respeita sempre
- *   2. Em graça + novo tem Pending → força Open (segurança: novo mostra pendência real)
- *   3. Em graça + novo TOTALMENTE Clear (todas utilities respondidas, todas Clear)
- *      → força Clear (novo foi resolvido, sobrepõe antigo)
- *   4. Em graça + antigo totalmente Clear → mantém Clear (proteção: respostas legais do antigo)
- *   5. Em graça + fallback → statusOld (mantém comportamento antigo)
- *   6. Fora de graça → status real do novo
+ * Regra do usuário (legal):
+ *   "A lei reconhece o ticket Clear até o vencimento. Por isso a carência existe."
  *
- * Regra do usuário: "se o antigo está clear, mantém até o vencimento. Depois segue novo.
- * Se o novo ficar clear antes disso, sobrepõe o antigo já que temos clear para trabalhar."
+ *   1. ANTIGO não-Clear + NOVO não-Clear → Open + pendências do novo
+ *      (não há carência protetora — ambos têm problema, mostra a verdade do novo)
+ *
+ *   2. ANTIGO Clear + NOVO qualquer coisa → Clear durante toda a carência
+ *      (a carência DO ANTIGO continua valendo legalmente até a data de vencimento;
+ *       a equipe pode cavar com base no certificado do antigo. Pendências do novo
+ *       ficam visíveis pelas tags, mas o STATUS continua Clear até fim da carência.
+ *       Quando a carência expirar, isInRenewalGrace() volta false e a regra natural
+ *       do código vê o status real do novo — que pode ser Open com pendências.)
+ *
+ *   3. ANTIGO qualquer + NOVO totalmente Clear → Clear sem carência
+ *      (novo já foi resolvido por completo, sobrepõe — temos clear pra trabalhar)
+ *
+ *   4. Status travado manualmente → respeita sempre (override absoluto)
  */
 function effectiveStatus(t){
   // Status travado manualmente = sempre respeitar
   if(t.status_locked)return t.status;
 
   if(isRenewed(t)&&isInRenewalGrace(t)){
-    if(utilCacheLoaded){
-      const newKey=String(t.ticket||'').trim();
-      const newUtils=utilCache[newKey]||[];
+    // Regra 3: novo já totalmente resolvido — sobrepõe carência
+    if(utilCacheLoaded&&newTicketFullyCleared(t))return 'Clear';
 
-      // REGRA RIGOROSA (segurança): se o ticket NOVO tem utilities Pending, força Open.
-      // Não adianta mostrar Clear baseado no antigo se o novo já mostra pendências.
-      if(newUtils.some(u=>u.status==='Pending'))return 'Open';
+    // Regra 2: antigo era Clear → mantém Clear durante TODA a carência,
+    // independente do que o novo está mostrando.
+    // Status do antigo vem de statusOld (snapshot da hora da renovação)
+    // OU do cache em runtime (se as utilities do antigo continuam liberadas).
+    const oldStatusSnapshot=(t.statusOld||t.status_old||'').trim();
+    if(oldStatusSnapshot==='Clear')return 'Clear';
 
-      // REGRA DE SOBREPOSIÇÃO: se o novo foi totalmente resolvido (todas utilities
-      // responderam e todas em status liberador), sobrepõe a graça e mostra Clear.
-      // Reflete a regra: "se o novo ficou clear, temos clear pra trabalhar —
-      // não precisa esperar expirar o antigo." (ver helper newTicketFullyCleared)
-      if(newTicketFullyCleared(t))return 'Clear';
-    }
-    // Novo ainda incompleto — aplicar lógica de graça: checa antigo.
+    // Mesmo se o snapshot não dizia Clear, pode ser que o antigo tenha
+    // virado Clear depois (ex: utility respondeu Clear no antigo mesmo
+    // após a renovação). Cache em runtime checa.
     if(utilCacheLoaded){
       const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
       if(oldNum){
         const oldUtils=utilCache[oldNum]||[];
-        if(oldUtils.length>0){
-          const hasPending=oldUtils.some(u=>u.status==='Pending');
-          if(!hasPending)return 'Clear';
+        if(oldUtils.length>0&&!oldUtils.some(u=>u.status==='Pending')){
+          return 'Clear';
         }
       }
     }
-    // Fallback: status armazenado do ticket antigo
-    const oldStatus=t.statusOld||t.status_old||'';
-    return oldStatus||t.status;
+
+    // Regra 1: antigo não-Clear → mostra status real do novo (sem proteção de carência)
+    return t.status;
   }
   return t.status;
 }
@@ -2103,7 +2135,7 @@ function renderTable(){
       +`<td style="color:var(--text2);font-size:12px">${esc(t.client)}</td>`
       +`<td style="color:var(--muted);font-size:12px">${esc(t.prime||'—')}</td>`
       +`<td>${esc(t.location)}, ${esc(t.state)}</td>`
-      +`<td class="tc-${es.toLowerCase()}">${esc(es)}${inGrace?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}${!inGrace?pendChips:''}</td>`
+      +`<td class="tc-${es.toLowerCase()}">${esc(es)}${inGrace?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}${pendChips}</td>`
       +`<td style="font-family:var(--mono)">${t.footage} ft</td>`
       +`<td style="font-family:var(--mono);font-size:12px">${esc(t.expire||'—')}</td>`
       +`<td style="color:var(--muted)">${esc(t.tipo||'—')}</td>`

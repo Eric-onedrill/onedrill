@@ -831,7 +831,26 @@ async function resolveRole(user){
   }
 }
 
-function enterViewer(){isAdmin=false;role='viewer';document.getElementById('login-screen').style.display='none';enterApp();}
+// Senha pra acessar como Manager / Visualizador.
+// Hardcoded por simplicidade — pra trocar, edita aqui e dá push no GitHub.
+// Não protege contra alguém com F12 (a senha é visível em texto puro no JS),
+// mas barra acesso casual de quem só descobriu a URL do app.
+const VIEWER_PASSWORD = '#Onedrill@2020';
+
+function enterViewer(){
+  // Pula senha se a pessoa já estava no shared view (via ?p=ID válido) e
+  // está só voltando — UX. Mas como o botão "Abrir app completo" foi removido
+  // da topbar do shared, esse caminho não é mais alcançável pela UI.
+  const pw = prompt('Digite a senha de acesso:');
+  if(pw === null) return; // cancelou
+  if(pw !== VIEWER_PASSWORD){
+    alert('Senha incorreta.');
+    return;
+  }
+  isAdmin=false;role='viewer';
+  document.getElementById('login-screen').style.display='none';
+  enterApp();
+}
 
 async function doLogout(){
   await sb.auth.signOut();
@@ -2568,7 +2587,17 @@ function checkProjectUrl(){
 function enterSharedView(pid){
   isSharedView=true;sharedProjectId=pid;
   const p=projects.find(x=>x.id===pid||x.name===pid);
-  if(!p){toast('Projeto não encontrado','danger');enterViewer();return;}
+  if(!p){
+    // ID inválido — mostra tela de login normal em vez de pular pro app
+    // (era enterViewer() antes, mas agora viewer pede senha; não faz sentido
+    // pedir senha em fallback de URL inválida).
+    toast('Projeto não encontrado','danger');
+    isSharedView=false;sharedProjectId=null;
+    history.replaceState(null,'',window.location.pathname);
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('login-screen').style.display='flex';
+    return;
+  }
   sharedProjectId=p.id;
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app-shell').style.display='none';

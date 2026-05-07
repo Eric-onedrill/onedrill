@@ -79,6 +79,7 @@ let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoor
 let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
+let inGraceOnly=false;  // Filtro: mostrar só tickets em carência de renovação (toggle na aba Tickets)
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
 let map,satL,strL,hybL,mkrs=[],lines=[],labels=[];
 let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
@@ -141,6 +142,7 @@ function isSuperseded(t){
  * @param {boolean} opts.excludeSuperseded - Excluir superseded (default: true)
  * @param {Object}  opts.statusFilter - Map de status booleans (ex: {open:true,clear:true,...})
  * @param {string}  opts.mapUtilFilter - Filtro de utility no mapa
+ * @param {boolean} opts.inGraceOnly - Mostrar só tickets em carência de renovação (default: false)
  */
 function filterTickets(opts={}){
   const {
@@ -153,7 +155,8 @@ function filterTickets(opts={}){
     excludeSuperseded=true,
     excludeCompleted=true,
     statusFilter=null,
-    mapUtilFilter=''
+    mapUtilFilter='',
+    inGraceOnly=false
   }=opts;
 
   // Pre-compute completed project IDs for fast lookup
@@ -217,6 +220,12 @@ function filterTickets(opts={}){
       const pu=getTicketPendingUtils(tkey);
       if(mapUtilFilter==='__pending__'){if(!pu.length)return false;}
       else{if(!pu.some(p=>p.utility_name===mapUtilFilter))return false;}
+    }
+
+    // Filtro "Em carência" — só tickets renovados em período ativo de carência.
+    // Combina com utility filter pra responder "tickets em carência onde X não respondeu".
+    if(inGraceOnly){
+      if(!isRenewed(t) || !isInRenewalGrace(t)) return false;
     }
 
     return true;
@@ -2130,7 +2139,7 @@ function renderTable(){
   const ut=document.getElementById('tbl-util')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,excludeCompleted:!isCompletedProj});
+  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,inGraceOnly,excludeCompleted:!isCompletedProj});
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}
@@ -3088,7 +3097,7 @@ function exportFiltered(){
   const pr=document.getElementById('tbl-proj')?.value||'';
   const cl=document.getElementById('tbl-cli')?.value||'';
   const ut=document.getElementById('tbl-util')?.value||'';
-  const f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut});
+  const f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,inGraceOnly});
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
@@ -4164,6 +4173,30 @@ function renderHealthCard(){
 }
 
 function filterByUtil(utilName){nav('tickets');setTimeout(()=>{const sel=document.getElementById('tbl-util');if(sel){sel.value=utilName;renderTable();}},100);}
+
+/**
+ * Toggle do filtro "Em carência" — mostra só tickets renovados em período de carência ativa.
+ * Combina com o dropdown tbl-util pra responder "tickets em carência onde X não respondeu".
+ * Visual: usa a classe .ftog (botão toggle) com inline style roxo quando ativo
+ * (carência usa roxo em todo o app — ver .on-cancel e cor #7c3aed nos chips).
+ */
+function toggleGraceFilter(){
+  inGraceOnly=!inGraceOnly;
+  const btn=document.getElementById('tbl-grace-toggle');
+  if(btn){
+    if(inGraceOnly){
+      btn.style.background='var(--purple-bg)';
+      btn.style.color='var(--purple)';
+      btn.style.borderColor='var(--purple-border)';
+    }else{
+      btn.style.background='';
+      btn.style.color='';
+      btn.style.borderColor='';
+    }
+    btn.setAttribute('aria-pressed', inGraceOnly ? 'true' : 'false');
+  }
+  renderTable();
+}
 
 /* ═══════════ 27. SYNC HELPERS ═══════════ */
 function syncProjectSelects(){

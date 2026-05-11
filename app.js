@@ -79,7 +79,6 @@ let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoor
 let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
-let inGraceOnly=false;  // Filtro: mostrar só tickets em carência de renovação (toggle na aba Tickets)
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
 let map,satL,strL,hybL,mkrs=[],lines=[],labels=[];
 let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
@@ -142,7 +141,6 @@ function isSuperseded(t){
  * @param {boolean} opts.excludeSuperseded - Excluir superseded (default: true)
  * @param {Object}  opts.statusFilter - Map de status booleans (ex: {open:true,clear:true,...})
  * @param {string}  opts.mapUtilFilter - Filtro de utility no mapa
- * @param {boolean} opts.inGraceOnly - Mostrar só tickets em carência de renovação (default: false)
  */
 function filterTickets(opts={}){
   const {
@@ -155,8 +153,7 @@ function filterTickets(opts={}){
     excludeSuperseded=true,
     excludeCompleted=true,
     statusFilter=null,
-    mapUtilFilter='',
-    inGraceOnly=false
+    mapUtilFilter=''
   }=opts;
 
   // Pre-compute completed project IDs for fast lookup
@@ -220,12 +217,6 @@ function filterTickets(opts={}){
       const pu=getTicketPendingUtils(tkey);
       if(mapUtilFilter==='__pending__'){if(!pu.length)return false;}
       else{if(!pu.some(p=>p.utility_name===mapUtilFilter))return false;}
-    }
-
-    // Filtro "Em carência" — só tickets renovados em período ativo de carência.
-    // Combina com utility filter pra responder "tickets em carência onde X não respondeu".
-    if(inGraceOnly){
-      if(!isRenewed(t) || !isInRenewalGrace(t)) return false;
     }
 
     return true;
@@ -2139,7 +2130,7 @@ function renderTable(){
   const ut=document.getElementById('tbl-util')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,inGraceOnly,excludeCompleted:!isCompletedProj});
+  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,excludeCompleted:!isCompletedProj});
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}
@@ -2368,8 +2359,10 @@ function renderProjects(){
     const pctDamage=projTotal>0?Math.round(damageFtV/projTotal*100):0;
     const locations=[...new Set(ts.map(t=>cleanLoc(t.location)).filter(Boolean))];
     const locsFiltered=locations.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
-    const locStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
-    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">📍 ${esc(locStr)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">${esc(p.name)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
+    const aggLocStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
+    // Prioriza a localidade descrita no modal (p.desc); só usa cidades agregadas dos tickets como fallback.
+    const locStr=p.desc||aggLocStr;
+    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
   g.innerHTML=active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>';
@@ -2508,9 +2501,17 @@ function editProject(pid){
   editingProjectId=pid;
   const p=projects.find(x=>x.id===pid);if(!p)return;
   document.getElementById('proj-modal-title').textContent='Editar projeto';
-  const parts=p.name.split(' — ');
-  if(parts.length>=2){document.getElementById('pm-loc').value=parts[0].trim();document.getElementById('pm-num').value=parts.slice(1).join(' — ').trim();}
-  else{document.getElementById('pm-loc').value='';document.getElementById('pm-num').value=p.name;}
+  // Localidade vem direto de p.desc (campo dedicado).
+  // Retrocompat: pra projetos antigos onde desc está vazio mas o name foi salvo concatenado
+  // ("LOC — NUM"), faz split como antes. Eric salvando esses projetos uma vez já "limpa".
+  if(p.desc){
+    document.getElementById('pm-loc').value=p.desc;
+    document.getElementById('pm-num').value=p.name;
+  }else{
+    const parts=p.name.split(' — ');
+    if(parts.length>=2){document.getElementById('pm-loc').value=parts[0].trim();document.getElementById('pm-num').value=parts.slice(1).join(' — ').trim();}
+    else{document.getElementById('pm-loc').value='';document.getElementById('pm-num').value=p.name;}
+  }
   document.getElementById('pm-client').value=p.client;
   document.getElementById('pm-state').value=p.state;
   document.getElementById('pm-status').value=p.status;
@@ -2522,11 +2523,15 @@ async function saveProject(){
   const loc=document.getElementById('pm-loc').value.trim();
   const num=document.getElementById('pm-num').value.trim();
   if(!loc&&!num){toast('Preencha localidade ou número.','danger');return;}
-  const name=loc&&num?`${loc} — ${num}`:loc||num;
+  // Nome do projeto = exatamente o "NÚMERO DO PROJETO" inserido.
+  // Localidade só é usada como fallback caso o número esteja vazio.
+  const name=num||loc;
   const coordStr=document.getElementById('pm-coords').value.trim();
   let centerCoords=null;
   if(coordStr){const m=coordStr.match(/([-\d.]+)\s*,\s*([-\d.]+)/);if(m)centerCoords=[parseFloat(m[1]),parseFloat(m[2])];}
-  const data={name,client:document.getElementById('pm-client').value,state:document.getElementById('pm-state').value,status:document.getElementById('pm-status').value,desc:'',totalFeet:parseFloat(document.getElementById('pm-feet').value)||0,centerCoords,_manual:true};
+  // Localidade armazenada no campo `desc` (coluna `description` no Supabase) — é o que aparece
+  // no card como linha cinza embaixo do nome. Fica separada das cidades agregadas dos tickets.
+  const data={name,client:document.getElementById('pm-client').value,state:document.getElementById('pm-state').value,status:document.getElementById('pm-status').value,desc:loc,totalFeet:parseFloat(document.getElementById('pm-feet').value)||0,centerCoords,_manual:true};
   if(editingProjectId){
     const p=projects.find(x=>x.id===editingProjectId);
     if(p)Object.assign(p,data);
@@ -3097,7 +3102,7 @@ function exportFiltered(){
   const pr=document.getElementById('tbl-proj')?.value||'';
   const cl=document.getElementById('tbl-cli')?.value||'';
   const ut=document.getElementById('tbl-util')?.value||'';
-  const f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,inGraceOnly});
+  const f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut});
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
@@ -4173,30 +4178,6 @@ function renderHealthCard(){
 }
 
 function filterByUtil(utilName){nav('tickets');setTimeout(()=>{const sel=document.getElementById('tbl-util');if(sel){sel.value=utilName;renderTable();}},100);}
-
-/**
- * Toggle do filtro "Em carência" — mostra só tickets renovados em período de carência ativa.
- * Combina com o dropdown tbl-util pra responder "tickets em carência onde X não respondeu".
- * Visual: usa a classe .ftog (botão toggle) com inline style roxo quando ativo
- * (carência usa roxo em todo o app — ver .on-cancel e cor #7c3aed nos chips).
- */
-function toggleGraceFilter(){
-  inGraceOnly=!inGraceOnly;
-  const btn=document.getElementById('tbl-grace-toggle');
-  if(btn){
-    if(inGraceOnly){
-      btn.style.background='var(--purple-bg)';
-      btn.style.color='var(--purple)';
-      btn.style.borderColor='var(--purple-border)';
-    }else{
-      btn.style.background='';
-      btn.style.color='';
-      btn.style.borderColor='';
-    }
-    btn.setAttribute('aria-pressed', inGraceOnly ? 'true' : 'false');
-  }
-  renderTable();
-}
 
 /* ═══════════ 27. SYNC HELPERS ═══════════ */
 function syncProjectSelects(){

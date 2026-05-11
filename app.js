@@ -3136,7 +3136,9 @@ function _bulkSplitRow(line){
 /** Normaliza header pra comparar (lowercase, sem espaço/acento). */
 function _bulkNk(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
 
-/** Resolve nome/ID de projeto pra projectId real (ou string vazia se remover). */
+/** Resolve nome/ID de projeto pra projectId real (ou string vazia se remover).
+ *  Retorna {change, projectId, projectName, partial?, error?}.
+ *  Se houver múltiplos matches parciais, marca erro de ambiguidade (mais seguro). */
 function _bulkResolveProject(raw){
   const v=String(raw||'').trim();
   if(!v)return{change:false};
@@ -3144,15 +3146,22 @@ function _bulkResolveProject(raw){
   if(low==='-'||low==='—'||low==='none'||low==='null'||low==='sem projeto'||low==='nenhum'){
     return{change:true,projectId:''};
   }
-  // Tenta ID exato
+  // 1) ID exato
   let p=projects.find(x=>x.id===v);
   if(p)return{change:true,projectId:p.id,projectName:p.name};
-  // Tenta nome exato case-insensitive
+  // 2) Nome exato case-insensitive — preferido, único
   p=projects.find(x=>(x.name||'').toLowerCase()===low);
   if(p)return{change:true,projectId:p.id,projectName:p.name};
-  // Tenta nome contendo (partial match)
-  p=projects.find(x=>(x.name||'').toLowerCase().includes(low));
-  if(p)return{change:true,projectId:p.id,projectName:p.name,partial:true};
+  // 3) Match parcial — só aceita se for ÚNICO. Múltiplos = ambíguo (erro).
+  const partials=projects.filter(x=>(x.name||'').toLowerCase().includes(low));
+  if(partials.length===1){
+    return{change:true,projectId:partials[0].id,projectName:partials[0].name,partial:true};
+  }
+  if(partials.length>1){
+    const names=partials.slice(0,4).map(p=>p.name).join(' | ');
+    const more=partials.length>4?` (+${partials.length-4})`:'';
+    return{change:false,error:`ambíguo — ${partials.length} projetos casam: ${names}${more}`};
+  }
   return{change:false,error:'projeto não encontrado'};
 }
 
@@ -3178,17 +3187,19 @@ function previewBulkUpdate(){
   const lines=raw.split(/\r?\n/).filter(l=>l.trim());
   if(!lines.length){toast('Planilha vazia.','warn');return;}
 
-  // Detecta header: 1ª linha tem palavras-chave (ticket/footage/projeto) → trata como header
+  // Detecta header: 1ª linha tem palavras-chave (ticket/footage/projeto/cliente/prime) → trata como header
   const firstCells=_bulkSplitRow(lines[0]).map(_bulkNk);
-  const hasHeader=firstCells.some(c=>c==='ticket'||c==='footage'||c==='feet'||c==='ft'||c==='projeto'||c==='project');
-  let idxTicket=-1, idxFootage=-1, idxProject=-1;
+  const hasHeader=firstCells.some(c=>c==='ticket'||c==='footage'||c==='feet'||c==='ft'||c==='projeto'||c==='project'||c==='cliente'||c==='client'||c==='prime');
+  let idxTicket=-1, idxFootage=-1, idxProject=-1, idxClient=-1, idxPrime=-1;
   if(hasHeader){
     idxTicket=firstCells.findIndex(c=>c==='ticket'||c==='tickets'||c==='ticketnum'||c==='ticketnumber');
     idxFootage=firstCells.findIndex(c=>c==='footage'||c==='feet'||c==='ft'||c==='comprimento');
     idxProject=firstCells.findIndex(c=>c==='projeto'||c==='project'||c==='projectid'||c==='projectname');
+    idxClient=firstCells.findIndex(c=>c==='cliente'||c==='client'||c==='clientname');
+    idxPrime=firstCells.findIndex(c=>c==='prime'||c==='primecontractor');
     lines.shift();
   }else{
-    // Sem header: assume ordem ticket, footage, projeto
+    // Sem header: assume ordem ticket, footage, projeto (cliente/prime requerem header)
     idxTicket=0; idxFootage=1; idxProject=2;
   }
 
@@ -3196,6 +3207,7 @@ function previewBulkUpdate(){
 
   const plan=[];
   const errors=[];
+  const noChange=[];// tickets encontrados mas todos os campos já estão corretos
   for(let li=0;li<lines.length;li++){
     const cells=_bulkSplitRow(lines[li]);
     const tnumRaw=(cells[idxTicket]||'').trim();
@@ -3238,7 +3250,34 @@ function previewBulkUpdate(){
       }
     }
 
-    if(row.changes.length||row.warn)plan.push(row);
+    // Cliente (string simples)
+    if(idxClient>=0){
+      const clRaw=(cells[idxClient]||'').trim();
+      if(clRaw!==''){
+        if(clRaw!==(t.client||'')){
+          row.changes.push({field:'cliente',from:t.client||'(vazio)',to:clRaw});
+          row.newClient=clRaw;
+        }
+      }
+    }
+
+    // Prime (string simples)
+    if(idxPrime>=0){
+      const prRaw=(cells[idxPrime]||'').trim();
+      if(prRaw!==''){
+        if(prRaw!==(t.prime||'')){
+          row.changes.push({field:'prime',from:t.prime||'(vazio)',to:prRaw});
+          row.newPrime=prRaw;
+        }
+      }
+    }
+
+    if(row.changes.length||row.warn){
+      plan.push(row);
+    }else{
+      // Encontrado no banco mas tudo já está como pedido — vai pro resumo "já corretos"
+      noChange.push(tnumRaw);
+    }
   }
 
   __bulkUpdatePlan=plan;
@@ -3249,30 +3288,51 @@ function previewBulkUpdate(){
   const lbl=document.getElementById('bu-preview-label');
   const willChange=plan.filter(r=>r.changes.length).length;
   const errCount=errors.length+plan.filter(r=>r.warn&&!r.changes.length).length;
-  lbl.innerHTML=`Pré-visualização — <strong>${willChange}</strong> ticket(s) serão atualizados`
-    +(errCount?` · <span style="color:var(--red)">${errCount} com erro</span>`:'');
+  const totalProcessed=willChange+errCount+noChange.length;
+  let summary=`<strong>${totalProcessed}</strong> linha(s) processada(s) — `
+    +`<span style="color:var(--accent)"><strong>${willChange}</strong> atualizar</span>`;
+  if(noChange.length)summary+=` · <span style="color:var(--green)">${noChange.length} já correto(s)</span>`;
+  if(errCount)summary+=` · <span style="color:var(--red)">${errCount} com erro</span>`;
+  lbl.innerHTML=summary;
 
   let html='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg);position:sticky;top:0">'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Ticket</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Footage</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Projeto</th>'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Cliente</th>'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Prime</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Aviso</th>'
     +'</tr></thead><tbody>';
 
   // Erros primeiro
   for(const e of errors){
-    html+=`<tr style="background:var(--red-bg)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(e.ticket)}</td><td>—</td><td>—</td><td style="padding:5px 8px;color:var(--red)">⚠ ${esc(e.error)}</td></tr>`;
+    html+=`<tr style="background:var(--red-bg)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(e.ticket)}</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="padding:5px 8px;color:var(--red)">⚠ ${esc(e.error)}</td></tr>`;
   }
   for(const r of plan){
     const ftChange=r.changes.find(c=>c.field==='footage');
     const prChange=r.changes.find(c=>c.field==='projeto');
+    const clChange=r.changes.find(c=>c.field==='cliente');
+    const piChange=r.changes.find(c=>c.field==='prime');
     const ftCell=ftChange?`<span style="color:var(--muted)">${(ftChange.from||0).toLocaleString()}</span> → <strong>${ftChange.to.toLocaleString()}</strong>`:'—';
     const prCell=prChange?`<span style="color:var(--muted)">${esc(prChange.from)}</span> → <strong>${esc(prChange.to)}</strong>${prChange.partial?' <span style="color:var(--amber);font-size:10px">(match parcial)</span>':''}`:'—';
+    const clCell=clChange?`<span style="color:var(--muted)">${esc(clChange.from)}</span> → <strong>${esc(clChange.to)}</strong>`:'—';
+    const piCell=piChange?`<span style="color:var(--muted)">${esc(piChange.from)}</span> → <strong>${esc(piChange.to)}</strong>`:'—';
     const warn=r.warn?`<span style="color:var(--amber)">⚠ ${esc(r.warn)}</span>`:'';
-    html+=`<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(r.ticket)}</td><td style="padding:5px 8px">${ftCell}</td><td style="padding:5px 8px">${prCell}</td><td style="padding:5px 8px">${warn}</td></tr>`;
+    html+=`<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(r.ticket)}</td><td style="padding:5px 8px">${ftCell}</td><td style="padding:5px 8px">${prCell}</td><td style="padding:5px 8px">${clCell}</td><td style="padding:5px 8px">${piCell}</td><td style="padding:5px 8px">${warn}</td></tr>`;
   }
   html+='</tbody></table>';
-  if(!plan.length&&!errors.length)html='<div style="padding:20px;text-align:center;color:var(--muted)">Nenhuma alteração detectada.</div>';
+
+  // Lista de "já corretos" — mostrada como nota colapsável no rodapé
+  if(noChange.length){
+    html+=`<details style="margin-top:8px;padding:6px 10px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--r)">`
+      +`<summary style="cursor:pointer;font-size:11px;color:var(--green);font-weight:600">✓ ${noChange.length} ticket(s) já estavam com os valores corretos (clica pra ver)</summary>`
+      +`<div style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;word-break:break-all">${noChange.map(esc).join(', ')}</div>`
+      +`</details>`;
+  }
+
+  if(!plan.length&&!errors.length&&!noChange.length){
+    html='<div style="padding:20px;text-align:center;color:var(--muted)">Nenhuma linha válida detectada.</div>';
+  }
   tbl.innerHTML=html;
   area.style.display='block';
 
@@ -3312,6 +3372,8 @@ async function applyBulkUpdate(){
         r.t.projectId=r.newProjectId;
         r.t.project_locked=!!r.newProjectId;// alocação manual sempre tranca
       }
+      if(r.newClient!==undefined)r.t.client=r.newClient;
+      if(r.newPrime!==undefined)r.t.prime=r.newPrime;
       if(!r.t.history)r.t.history=[];
       const changesStr=r.changes.map(c=>`${c.field}: ${c.from} → ${c.to}`).join(' · ');
       r.t.history.push({ts:Date.now(),action:'Atualização em massa: '+changesStr,color:'#7c3aed'});
@@ -3323,6 +3385,8 @@ async function applyBulkUpdate(){
         upd.project_id=r.newProjectId||null;
         upd.project_locked=!!r.newProjectId;
       }
+      if(r.newClient!==undefined)upd.client=r.newClient;
+      if(r.newPrime!==undefined)upd.prime=r.newPrime;
 
       const{error}=await sb.from('tickets').update(upd).eq('id',r.t.id);
       if(error){

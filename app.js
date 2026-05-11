@@ -3113,6 +3113,210 @@ function exportFiltered(){
   toast('Excel filtrado: '+f.length+' tickets · '+totalFt.toLocaleString()+' ft','success');
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// BULK UPDATE — Atualizar projeto/footage de múltiplos tickets via planilha
+// ════════════════════════════════════════════════════════════════════════════
+// Fluxo: usuário cola CSV/TSV (do Excel) com colunas (ticket, footage, projeto).
+// 1) openBulkUpdate    → abre o modal e limpa estado
+// 2) previewBulkUpdate → parse + valida + mostra tabela de diff
+// 3) applyBulkUpdate   → salva via saveTicketBatch e atualiza UI
+//
+// Aceita projeto por NOME (exato, case-insensitive) ou por ID (id interno).
+// Campos vazios não mudam. "-" / "sem projeto" / "none" remove do projeto.
+
+let __bulkUpdatePlan=[];  // resultado do preview, usado pelo apply
+
+/** Parse uma linha de planilha. Detecta TAB, vírgula ou ponto-e-vírgula. */
+function _bulkSplitRow(line){
+  if(line.includes('\t'))return line.split('\t').map(s=>s.trim());
+  if(line.includes(';'))return line.split(';').map(s=>s.trim());
+  return line.split(',').map(s=>s.trim());
+}
+
+/** Normaliza header pra comparar (lowercase, sem espaço/acento). */
+function _bulkNk(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+
+/** Resolve nome/ID de projeto pra projectId real (ou string vazia se remover). */
+function _bulkResolveProject(raw){
+  const v=String(raw||'').trim();
+  if(!v)return{change:false};
+  const low=v.toLowerCase();
+  if(low==='-'||low==='—'||low==='none'||low==='null'||low==='sem projeto'||low==='nenhum'){
+    return{change:true,projectId:''};
+  }
+  // Tenta ID exato
+  let p=projects.find(x=>x.id===v);
+  if(p)return{change:true,projectId:p.id,projectName:p.name};
+  // Tenta nome exato case-insensitive
+  p=projects.find(x=>(x.name||'').toLowerCase()===low);
+  if(p)return{change:true,projectId:p.id,projectName:p.name};
+  // Tenta nome contendo (partial match)
+  p=projects.find(x=>(x.name||'').toLowerCase().includes(low));
+  if(p)return{change:true,projectId:p.id,projectName:p.name,partial:true};
+  return{change:false,error:'projeto não encontrado'};
+}
+
+function openBulkUpdate(){
+  document.getElementById('bu-input').value='';
+  document.getElementById('bu-preview-area').style.display='none';
+  document.getElementById('bu-apply-btn').disabled=true;
+  __bulkUpdatePlan=[];
+  openModal('ov-bulk-update');
+}
+
+function clearBulkUpdate(){
+  document.getElementById('bu-input').value='';
+  document.getElementById('bu-preview-area').style.display='none';
+  document.getElementById('bu-apply-btn').disabled=true;
+  __bulkUpdatePlan=[];
+}
+
+function previewBulkUpdate(){
+  const raw=document.getElementById('bu-input').value.trim();
+  if(!raw){toast('Cole o conteúdo da planilha primeiro.','warn');return;}
+
+  const lines=raw.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length){toast('Planilha vazia.','warn');return;}
+
+  // Detecta header: 1ª linha tem palavras-chave (ticket/footage/projeto) → trata como header
+  const firstCells=_bulkSplitRow(lines[0]).map(_bulkNk);
+  const hasHeader=firstCells.some(c=>c==='ticket'||c==='footage'||c==='feet'||c==='ft'||c==='projeto'||c==='project');
+  let idxTicket=-1, idxFootage=-1, idxProject=-1;
+  if(hasHeader){
+    idxTicket=firstCells.findIndex(c=>c==='ticket'||c==='tickets'||c==='ticketnum'||c==='ticketnumber');
+    idxFootage=firstCells.findIndex(c=>c==='footage'||c==='feet'||c==='ft'||c==='comprimento');
+    idxProject=firstCells.findIndex(c=>c==='projeto'||c==='project'||c==='projectid'||c==='projectname');
+    lines.shift();
+  }else{
+    // Sem header: assume ordem ticket, footage, projeto
+    idxTicket=0; idxFootage=1; idxProject=2;
+  }
+
+  if(idxTicket<0){toast('Coluna "ticket" não encontrada no cabeçalho.','danger');return;}
+
+  const plan=[];
+  const errors=[];
+  for(let li=0;li<lines.length;li++){
+    const cells=_bulkSplitRow(lines[li]);
+    const tnumRaw=(cells[idxTicket]||'').trim();
+    if(!tnumRaw)continue;
+
+    const t=tickets.find(x=>String(x.ticket).trim()===tnumRaw);
+    if(!t){errors.push({ticket:tnumRaw,error:'ticket não encontrado'});continue;}
+
+    const row={ticket:tnumRaw,t,changes:[]};
+
+    // Footage
+    if(idxFootage>=0){
+      const ftRaw=(cells[idxFootage]||'').trim();
+      if(ftRaw!==''){
+        const ft=parseFloat(ftRaw.replace(/[,.](?=\d{3}\b)/g,'').replace(',','.'));
+        if(!isNaN(ft)&&ft>=0){
+          if(ft!==(t.footage||0)){
+            row.changes.push({field:'footage',from:t.footage||0,to:ft});
+            row.newFootage=ft;
+          }
+        }else{
+          row.warn=(row.warn||'')+'footage inválido; ';
+        }
+      }
+    }
+
+    // Projeto
+    if(idxProject>=0){
+      const projRaw=(cells[idxProject]||'').trim();
+      const resolved=_bulkResolveProject(projRaw);
+      if(resolved.change){
+        const fromName=projects.find(p=>p.id===t.projectId)?.name||'(sem projeto)';
+        const toName=resolved.projectId?resolved.projectName:'(remover)';
+        if(resolved.projectId!==t.projectId){
+          row.changes.push({field:'projeto',from:fromName,to:toName,partial:resolved.partial});
+          row.newProjectId=resolved.projectId;
+        }
+      }else if(projRaw&&resolved.error){
+        row.warn=(row.warn||'')+resolved.error+'; ';
+      }
+    }
+
+    if(row.changes.length||row.warn)plan.push(row);
+  }
+
+  __bulkUpdatePlan=plan;
+
+  // Renderiza preview
+  const area=document.getElementById('bu-preview-area');
+  const tbl=document.getElementById('bu-preview-table');
+  const lbl=document.getElementById('bu-preview-label');
+  const willChange=plan.filter(r=>r.changes.length).length;
+  const errCount=errors.length+plan.filter(r=>r.warn&&!r.changes.length).length;
+  lbl.innerHTML=`Pré-visualização — <strong>${willChange}</strong> ticket(s) serão atualizados`
+    +(errCount?` · <span style="color:var(--red)">${errCount} com erro</span>`:'');
+
+  let html='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg);position:sticky;top:0">'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Ticket</th>'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Footage</th>'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Projeto</th>'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Aviso</th>'
+    +'</tr></thead><tbody>';
+
+  // Erros primeiro
+  for(const e of errors){
+    html+=`<tr style="background:var(--red-bg)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(e.ticket)}</td><td>—</td><td>—</td><td style="padding:5px 8px;color:var(--red)">⚠ ${esc(e.error)}</td></tr>`;
+  }
+  for(const r of plan){
+    const ftChange=r.changes.find(c=>c.field==='footage');
+    const prChange=r.changes.find(c=>c.field==='projeto');
+    const ftCell=ftChange?`<span style="color:var(--muted)">${(ftChange.from||0).toLocaleString()}</span> → <strong>${ftChange.to.toLocaleString()}</strong>`:'—';
+    const prCell=prChange?`<span style="color:var(--muted)">${esc(prChange.from)}</span> → <strong>${esc(prChange.to)}</strong>${prChange.partial?' <span style="color:var(--amber);font-size:10px">(match parcial)</span>':''}`:'—';
+    const warn=r.warn?`<span style="color:var(--amber)">⚠ ${esc(r.warn)}</span>`:'';
+    html+=`<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(r.ticket)}</td><td style="padding:5px 8px">${ftCell}</td><td style="padding:5px 8px">${prCell}</td><td style="padding:5px 8px">${warn}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  if(!plan.length&&!errors.length)html='<div style="padding:20px;text-align:center;color:var(--muted)">Nenhuma alteração detectada.</div>';
+  tbl.innerHTML=html;
+  area.style.display='block';
+
+  document.getElementById('bu-apply-btn').disabled=!willChange;
+}
+
+async function applyBulkUpdate(){
+  const plan=__bulkUpdatePlan.filter(r=>r.changes.length);
+  if(!plan.length){toast('Nada pra aplicar.','warn');return;}
+  if(!await requireAuth())return;
+
+  const btn=document.getElementById('bu-apply-btn');
+  btn.disabled=true;
+  btn.textContent='Aplicando...';
+
+  // Atualiza em memória
+  for(const r of plan){
+    if(r.newFootage!==undefined)r.t.footage=r.newFootage;
+    if(r.newProjectId!==undefined){
+      r.t.projectId=r.newProjectId;
+      r.t.project_locked=!!r.newProjectId;  // alocação manual sempre tranca pra não voltar
+    }
+    // Log histórico no ticket pra rastreabilidade
+    if(!r.t.history)r.t.history=[];
+    const changesStr=r.changes.map(c=>`${c.field}: ${c.from} → ${c.to}`).join(' · ');
+    r.t.history.push({ts:Date.now(),action:'Atualização em massa: '+changesStr,color:'#7c3aed'});
+  }
+
+  // Salva em batch no Supabase
+  const ticketsToSave=plan.map(r=>r.t);
+  const res=await saveTicketBatch(ticketsToSave);
+
+  btn.textContent='Aplicar';
+  if(!res.ok){
+    btn.disabled=false;
+    toast('Erro ao salvar no banco. Verifique conexão e tente de novo.','danger');
+    return;
+  }
+
+  closeModal('ov-bulk-update');
+  syncAll();
+  toast(`✓ ${plan.length} ticket(s) atualizado(s)`,'success');
+}
+
 function exportExcel(){
   const wb=XLSX.utils.book_new();
   const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||''])];

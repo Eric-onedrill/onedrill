@@ -57,7 +57,6 @@
       ONEDRILL
     </div>
     <div class="shared-proj-name" id="shared-proj-name"></div>
-    <button class="btn btn-sm" id="shared-enter-btn" data-action="exit-shared">Abrir app completo →</button>
   </header>
 
   <div class="shared-body shared-body--relative">
@@ -309,6 +308,8 @@
         <select class="fi fi--max-180" id="tbl-proj" data-filter="tbl-proj"><option value="">Todos projetos</option></select>
         <select class="fi fi--max-150" id="tbl-cli" data-filter="tbl-client"><option value="">Todos clientes</option></select>
         <select class="fi fi--max-200" id="tbl-util" data-filter="tbl-utility"><option value="">Todas utilities</option></select>
+        <button class="ftog" id="tbl-grace-toggle" data-action="toggle-grace-filter" title="Mostrar só tickets em carência de renovação">🔄 Em carência</button>
+        <button class="btn btn-sm" data-action="open-bulk-update" title="Atualizar projeto/footage de múltiplos tickets via planilha">📋 Atualizar em massa</button>
         <button class="btn btn-sm tbar-export" data-action="export-filtered">↓ Excel filtrado</button>
         <span class="tbar-count" id="tbl-count"></span>
       </div>
@@ -426,6 +427,37 @@
     <div class="factions">
       <button class="btn" data-close="ov-proj">Cancelar</button>
       <button class="btn btn-primary" data-action="save-project">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Bulk update tickets (projeto + footage) -->
+<div class="overlay" id="ov-bulk-update">
+  <div class="modal" style="max-width:780px">
+    <div class="modal-head">
+      <div class="mtitle">📋 Atualizar tickets em massa</div>
+      <button class="modal-close" data-close="ov-bulk-update">×</button>
+    </div>
+    <div style="padding:0 4px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">
+        Cole uma planilha do Excel/Google Sheets (Ctrl+C/Cmd+C → Ctrl+V/Cmd+V aqui) com as colunas
+        <strong>ticket</strong>, <strong>footage</strong> e <strong>projeto</strong> (nome ou ID).
+        A primeira linha pode ser cabeçalho ou já os dados.<br>
+        Campos vazios não são alterados. Pra remover do projeto, escreva <code>-</code> ou <code>sem projeto</code> na coluna projeto.
+      </div>
+      <textarea id="bu-input" class="finp" rows="8" placeholder="Exemplo (cole direto do Excel):&#10;ticket&#9;footage&#9;projeto&#10;26050601318&#9;624&#9;Street lights&#10;26050601370&#9;478&#9;Street lights&#10;26050601391&#9;644&#9;2505472" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-sm" data-action="preview-bulk-update">👁 Pré-visualizar</button>
+        <button class="btn btn-sm" data-action="clear-bulk-update" style="margin-left:auto">Limpar</button>
+      </div>
+      <div id="bu-preview-area" style="display:none;margin-top:14px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px" id="bu-preview-label">Pré-visualização</div>
+        <div id="bu-preview-table" style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--bg)"></div>
+      </div>
+    </div>
+    <div class="factions">
+      <button class="btn" data-close="ov-bulk-update">Cancelar</button>
+      <button class="btn btn-primary" id="bu-apply-btn" data-action="apply-bulk-update" disabled>Aplicar</button>
     </div>
   </div>
 </div>
@@ -701,6 +733,11 @@
     'open-detail-from-panel':() => openTicketDetail(currentPanelId),
     'navigate-from-panel':   () => openNavigation(currentPanelId),
     'export-filtered':       () => exportFiltered(),
+    'toggle-grace-filter':   () => toggleGraceFilter(),
+    'open-bulk-update':      () => openBulkUpdate(),
+    'preview-bulk-update':   () => previewBulkUpdate(),
+    'apply-bulk-update':     () => applyBulkUpdate(),
+    'clear-bulk-update':     () => clearBulkUpdate(),
     'export-contacts':       () => exportContacts(),
     'new-contact':           () => openContactModal(),
     'save-ticket':           () => saveTicket(),

@@ -3286,35 +3286,74 @@ async function applyBulkUpdate(){
 
   const btn=document.getElementById('bu-apply-btn');
   btn.disabled=true;
-  btn.textContent='Aplicando...';
+  btn.textContent='Aplicando... 0/'+plan.length;
 
-  // Atualiza em memória
-  for(const r of plan){
-    if(r.newFootage!==undefined)r.t.footage=r.newFootage;
-    if(r.newProjectId!==undefined){
-      r.t.projectId=r.newProjectId;
-      r.t.project_locked=!!r.newProjectId;  // alocação manual sempre tranca pra não voltar
-    }
-    // Log histórico no ticket pra rastreabilidade
-    if(!r.t.history)r.t.history=[];
-    const changesStr=r.changes.map(c=>`${c.field}: ${c.from} → ${c.to}`).join(' · ');
-    r.t.history.push({ts:Date.now(),action:'Atualização em massa: '+changesStr,color:'#7c3aed'});
+  // ── ESTRATÉGIA: UPDATE direto via id (PK, sempre tem unique constraint) ──
+  // O onConflict:'ticket' do saveTicketBatch falha porque a coluna `ticket` não
+  // tem unique constraint no banco (erro 42P10). UPDATE WHERE id=X funciona sempre
+  // porque `id` é PK. Roda em chunks de 10 paralelos pra balancear velocidade vs
+  // rate limit do Supabase.
+
+  let saved=0;
+  const failed=[];
+  const CONCURRENT=10;
+
+  for(let i=0;i<plan.length;i+=CONCURRENT){
+    const chunk=plan.slice(i,i+CONCURRENT);
+    const promises=chunk.map(async r=>{
+      if(!r.t.id){
+        failed.push({ticket:r.ticket,error:'ticket sem id no banco'});
+        return;
+      }
+
+      // Atualiza objeto em memória primeiro
+      if(r.newFootage!==undefined)r.t.footage=r.newFootage;
+      if(r.newProjectId!==undefined){
+        r.t.projectId=r.newProjectId;
+        r.t.project_locked=!!r.newProjectId;// alocação manual sempre tranca
+      }
+      if(!r.t.history)r.t.history=[];
+      const changesStr=r.changes.map(c=>`${c.field}: ${c.from} → ${c.to}`).join(' · ');
+      r.t.history.push({ts:Date.now(),action:'Atualização em massa: '+changesStr,color:'#7c3aed'});
+
+      // Monta payload com APENAS os campos que mudaram (mais seguro que update completo)
+      const upd={history:r.t.history};
+      if(r.newFootage!==undefined)upd.footage=r.newFootage;
+      if(r.newProjectId!==undefined){
+        upd.project_id=r.newProjectId||null;
+        upd.project_locked=!!r.newProjectId;
+      }
+
+      const{error}=await sb.from('tickets').update(upd).eq('id',r.t.id);
+      if(error){
+        failed.push({ticket:r.ticket,error:error.message});
+        console.error(`[BulkUpdate] ${r.ticket}:`,error);
+      }else{
+        saved++;
+      }
+    });
+
+    await Promise.all(promises);
+    btn.textContent=`Aplicando... ${saved+failed.length}/${plan.length}`;
   }
-
-  // Salva em batch no Supabase
-  const ticketsToSave=plan.map(r=>r.t);
-  const res=await saveTicketBatch(ticketsToSave);
 
   btn.textContent='Aplicar';
-  if(!res.ok){
-    btn.disabled=false;
-    toast('Erro ao salvar no banco. Verifique conexão e tente de novo.','danger');
-    return;
-  }
 
-  closeModal('ov-bulk-update');
-  syncAll();
-  toast(`✓ ${plan.length} ticket(s) atualizado(s)`,'success');
+  if(failed.length===0){
+    closeModal('ov-bulk-update');
+    syncAll();
+    toast(`✓ ${saved} ticket(s) atualizado(s)`,'success');
+  }else if(saved>0){
+    syncAll();
+    toast(`Parcial: ${saved} salvos, ${failed.length} falharam (ver console)`,'warn');
+    console.error('[BulkUpdate] Tickets que falharam:',failed);
+    btn.disabled=false;
+  }else{
+    btn.disabled=false;
+    const msg=failed[0]?.error||'erro desconhecido';
+    toast(`Erro: ${msg.slice(0,80)}`,'danger');
+    console.error('[BulkUpdate] Falhou em todos. Primeiro erro:',failed[0]);
+  }
 }
 
 function exportExcel(){

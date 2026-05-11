@@ -106,6 +106,7 @@ let miniMap=null;
 let _expAlertEl=null;
 let _t2; // toast timer
 let _autoRefreshId=null; // fix bug #2: guardar ID do setInterval de auto-refresh pra limpar antes de recriar
+let _sharedRefreshId=null; // mesmo padrão pro auto-refresh do shared view (link público)
 let _syncTimerId=null;   // fix bug #3: guardar ID do setTimeout de updateSyncTimer pra evitar cascata
 
 // Debounced renderers
@@ -2617,6 +2618,40 @@ function enterSharedView(pid){
   document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
   document.getElementById('pg-shared').classList.add('active');
+
+  // ── FIX: carregar utilCache no shared view ──
+  // Sem isso, `newTicketFullyCleared()` retorna sempre false (linha do check
+  // `if(!utilCacheLoaded)return false`) → o sistema acha que o ticket novo ainda
+  // está em carência e mostra utilities pendentes do ticket antigo, divergindo do
+  // que aparece no admin. Fire-and-forget pra não bloquear o render inicial; quando
+  // termina, re-renderiza a lista lateral e (se aberto) o modal de detalhe.
+  loadUtilCache().then(()=>{
+    if(!isSharedView)return;
+    if(typeof renderSharedList==='function')renderSharedList();
+    if(currentDetailId){
+      const tt=tickets.find(x=>x.id===currentDetailId);
+      if(tt&&typeof renderUtils==='function')renderUtils(tt);
+    }
+  });
+
+  // ── Auto-refresh do shared view (mesmo intervalo do admin) ──
+  // Quem deixar o link aberto recebe atualização automática. Pula refresh enquanto
+  // há modal aberto pra não interromper leitura do detalhe do ticket.
+  if(_sharedRefreshId){clearInterval(_sharedRefreshId);_sharedRefreshId=null;}
+  _sharedRefreshId=setInterval(async()=>{
+    if(!isSharedView){clearInterval(_sharedRefreshId);_sharedRefreshId=null;return;}
+    if(document.querySelector('.overlay.open'))return;
+    try{
+      const{data:pp}=await sb.from('projects').select('*').order('name');
+      const{data:tt}=await sb.from('tickets').select('*').order('ticket');
+      if(pp)projects=pp.map(dbToProject);
+      if(tt)tickets=tt.map(dbToTicket);
+      rebuildSupersededSet();
+      await loadUtilCache();
+      if(typeof renderSharedList==='function')renderSharedList();
+      console.log('[SharedRefresh] OK');
+    }catch(e){console.error('[SharedRefresh]',e);}
+  },AUTO_REFRESH_MS);
   const ts0=tickets.filter(t=>t.projectId===p.id);
   const allLocs0=[...new Set(ts0.map(t=>t.location).filter(Boolean).map(l=>cleanLoc(l)))];
   const filtLocs0=allLocs0.filter(l=>l.toUpperCase()!==((p.state||'').toUpperCase()));
@@ -2693,6 +2728,7 @@ function enterSharedView(pid){
 
 function exitSharedView(){
   isSharedView=false;
+  if(_sharedRefreshId){clearInterval(_sharedRefreshId);_sharedRefreshId=null;}
   document.getElementById('pg-shared').classList.remove('active');
   history.replaceState(null,'',window.location.pathname);
   const fb=document.getElementById('field-expiring-banner');if(fb)fb.remove();

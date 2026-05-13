@@ -1,0 +1,78 @@
+# ════════════════════════════════════════════════════════════════
+# OneDrill 811 - .gitignore
+# Repo público: Eric-onedrill/onedrill (GitHub Pages)
+# ════════════════════════════════════════════════════════════════
+
+# Segredos
+.env
+.env.*
+*.env
+secrets.*
+*.pem
+*.key
+
+# Backend Python (não vai pro GitHub Pages)
+811_sync.py
+811_sync.py.backup
+811_sync.backup_*.py
+counties_data.json
+canceled_cache.json
+OneDrill_Sync_Task.xml
+
+# Scripts .bat (uso local)
+rodar_*.bat
+onedrill_*.bat
+setup_git.bat
+deploy.bat
+
+# Perfis Chrome / Playwright
+chrome_profile_*/
+.playwright/
+playwright-report/
+
+# Logs
+*.log
+*.log.*
+logs_audit/
+logs/
+
+# Backups locais
+backups/
+Backup/
+_pdf_tmp/
+
+# PDFs gerados
+pdfs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Testes
+Tests/
+
+# Projeto BI separado
+BI/
+
+# Lock files e sobras
+*.lock
+tickets_*_found.txt
+python
+
+# Windows / OneDrive
+desktop.ini
+Thumbs.db
+ehthumbs.db
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Doc local
+GIT_SETUP.txt

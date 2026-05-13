@@ -17,8 +17,9 @@
    ══════════════════════════════════════════════ */
 
 /* ═══════════ 1. CONFIG ═══════════ */
-const SUPABASE_URL='https://ofbqtaulvzeltfpqcjhh.supabase.co';
-const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE';
+// Item 4: config via meta tag no HTML (fallback hardcoded mantido por seguranca)
+const SUPABASE_URL=document.querySelector('meta[name="supabase-url"]')?.content||'https://ofbqtaulvzeltfpqcjhh.supabase.co';
+const SUPABASE_KEY=document.querySelector('meta[name="supabase-anon-key"]')?.content||'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE';
 const ADMIN_EMAILS=['engineering@onedrill.us','carlos@onedrill.us'];
 const BATCH_SIZE=200;
 const AUTO_REFRESH_MS=300000;

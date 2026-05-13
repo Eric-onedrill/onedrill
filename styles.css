@@ -164,6 +164,135 @@
 
 
 
+
+/* ══════════════════════════════════════════════
+   29c. Mobile v3 — sobrescreve inline styles (2026-05-13)
+   Os widgets do dashboard usam style="..." inline.
+   Inline style WIN sempre sobre CSS — exceto com !important.
+   ══════════════════════════════════════════════ */
+
+/* Classe nova pros cards de Cleared (substitui grid inline) */
+.cleared-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 768px) {
+
+  /* === DASHBOARD — agressivo === */
+  /* Cards Cleared empilham vertical em mobile */
+  .cleared-cards-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+
+  /* Dash-row sempre 1 coluna */
+  .dash-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* Cards do dashboard com padding menor */
+  .dash-card {
+    padding: 12px !important;
+  }
+  .dash-card-title {
+    font-size: 14px !important;
+  }
+
+  /* === DASHBOARD: esconde widgets pesados === */
+  /* Grid 1fr 1fr dentro dos cards de Cleared (Cleared por dia + Util list) — empilha */
+  .dash-card [style*="grid-template-columns:1fr 1fr"],
+  .dash-card [style*="grid-template-columns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Esconde a util list (não cabe no mobile) */
+  .dash-card .util-summary-html,
+  .dash-card [style*="utilListHtml"] {
+    display: none !important;
+  }
+
+  /* === ANALYTICS PESADA — esconder gráficos extras === */
+  #pg-analytics .dash-card:nth-of-type(n+4) {
+    display: none;
+  }
+
+  /* === CARDS de stat individuais inline === */
+  /* Botões de "▼ clique p/ expandir" menores no mobile */
+  .cleared-cards-grid > div {
+    padding: 10px !important;
+  }
+  .cleared-cards-grid > div > div:first-child {
+    font-size: 26px !important;
+  }
+
+  /* === MAPA mobile === */
+  /* Sidebar bottom sheet com handle visível */
+  .sidebar {
+    height: 60vh !important;
+  }
+  /* Botões de layer (Satélite/Híbrido/Ruas) compactos */
+  .mctrl--top-right .mbtn,
+  .mctrl .mbtn {
+    font-size: 11px !important;
+    padding: 6px 8px !important;
+  }
+  /* Legenda colapsável */
+  .map-legend {
+    max-width: 140px !important;
+    font-size: 10px !important;
+  }
+
+  /* === DETAIL MODAL (ticket) — colunas empilham === */
+  .det-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* === BARRAS DE STATUS no dashboard === */
+  /* Stack pills de status verticalmente */
+  .status-pills {
+    flex-direction: column;
+  }
+
+  /* === GENERIC: força wrap de qualquer flex/grid pesado === */
+  [style*="display:flex"][style*="flex-wrap:wrap"] {
+    gap: 4px !important;
+  }
+
+  /* === FONT BASE MENOR === */
+  body {
+    font-size: 14px;
+  }
+
+  /* === Reduz padding geral === */
+  .page {
+    padding: 0 !important;
+  }
+  .dash-inner,
+  .proj-inner,
+  .contacts-inner {
+    padding: 10px !important;
+  }
+}
+
+/* === EXTRA pequeno (≤ 480px) === */
+@media (max-width: 480px) {
+  .cleared-cards-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .cleared-cards-grid > div > div:first-child {
+    font-size: 22px !important;
+  }
+  /* Dashboard ainda mais minimalista */
+  .dash-card {
+    padding: 10px !important;
+  }
+}
+
+
+
 /* ══════════════════════════════════════════════
    OneDrill — Ticket Management System
    ══════════════════════════════════════════════

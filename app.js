@@ -864,15 +864,23 @@ async function resolveRole(user){
 const VIEWER_PASSWORD = '#Onedrill@2020';
 
 function enterViewer(){
-  // Pula senha se a pessoa já estava no shared view (via ?p=ID válido) e
-  // está só voltando — UX. Mas como o botão "Abrir app completo" foi removido
-  // da topbar do shared, esse caminho não é mais alcançável pela UI.
-  const pw = prompt('Digite a senha de acesso:');
-  if(pw === null) return; // cancelou
+  // UX (2026-05-13): se ja autorizou nesse dispositivo, pula a senha.
+  // Salva flag em localStorage apos primeiro acerto. doLogout limpa.
+  try {
+    if (localStorage.getItem('viewer-auth') === 'true') {
+      isAdmin=false;role='viewer';
+      document.getElementById('login-screen').style.display='none';
+      enterApp();
+      return;
+    }
+  } catch(e) {}
+  const pw = prompt('Digite a senha de acesso (so na primeira vez):');
+  if(pw === null) return;
   if(pw !== VIEWER_PASSWORD){
     alert('Senha incorreta.');
     return;
   }
+  try { localStorage.setItem('viewer-auth', 'true'); } catch(e) {}
   isAdmin=false;role='viewer';
   document.getElementById('login-screen').style.display='none';
   enterApp();
@@ -880,6 +888,7 @@ function enterViewer(){
 
 async function doLogout(){
   await sb.auth.signOut();
+  try { localStorage.removeItem('viewer-auth'); } catch(e) {}
   // Fix bug #2: limpar auto-refresh e sync timer ao fazer logout.
   // Evita que o interval continue rodando (e tentando fetchar dados) após logout.
   if(_autoRefreshId){clearInterval(_autoRefreshId);_autoRefreshId=null;}
@@ -4014,7 +4023,7 @@ function renderClearedStats(fTickets){
   }
 
   return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="dash-card-title" style="margin-bottom:0">✅ Tickets Clareados</div>'+projSel+'</div>'
-    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'
+    +'<div class="cleared-cards-grid">'
     +_renderClearedCard('today',cToday.length,ftToday,'hoje',_clearedExpand==='today')
     +_renderClearedCard('7d',c7.length,ft7,'últimos 7 dias',_clearedExpand==='7d')
     +_renderClearedCard('30d',c30.length,ft30,'últimos 30 dias',_clearedExpand==='30d')

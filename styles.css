@@ -1,3 +1,169 @@
+
+
+/* ══════════════════════════════════════════════
+   29b. Mobile v2 — UX agressiva (Safari iOS + Android)
+   Adicionado 2026-05-13 — resolve:
+     - tabela cortando colunas
+     - dashboard sobrecarregado
+     - Safari nao oferecia "Salvar senha"
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* === LOGIN — font 16px anti-zoom Safari + touch targets === */
+  .login-inp {
+    font-size: 16px !important;
+    padding: 14px 12px !important;
+    min-height: 48px;
+  }
+  .login-admin-btn,
+  .login-btn,
+  .login-view-btn {
+    font-size: 16px !important;
+    min-height: 50px !important;
+    padding: 14px 16px !important;
+  }
+  .login-box {
+    padding: 18px !important;
+    width: calc(100% - 24px);
+    max-width: 360px;
+  }
+  .login-brand-name {
+    font-size: 22px !important;
+  }
+
+  /* === TOUCH TARGETS minimo 44x44 === */
+  .btn,
+  .snav-item,
+  .mbtn,
+  .ftog,
+  .modal-close,
+  .snav-action-btn {
+    min-height: 44px;
+  }
+  .btn-sm { min-height: 38px; }
+
+  /* === TICKETS — esconde colunas pesadas === */
+  #pg-tickets table { font-size: 13px; }
+  #pg-tickets thead th:nth-child(2),
+  #pg-tickets thead th:nth-child(3),
+  #pg-tickets thead th:nth-child(4),
+  #pg-tickets thead th:nth-child(6),
+  #pg-tickets thead th:nth-child(7),
+  #pg-tickets thead th:nth-child(8),
+  #pg-tickets thead th:nth-child(9),
+  #pg-tickets tbody td:nth-child(2),
+  #pg-tickets tbody td:nth-child(3),
+  #pg-tickets tbody td:nth-child(4),
+  #pg-tickets tbody td:nth-child(6),
+  #pg-tickets tbody td:nth-child(7),
+  #pg-tickets tbody td:nth-child(8),
+  #pg-tickets tbody td:nth-child(9) {
+    display: none;
+  }
+  #pg-tickets tbody td:nth-child(1) { padding: 12px 10px !important; }
+  #pg-tickets tbody td:nth-child(5) { text-align: center; }
+  #pg-tickets tbody tr { border-bottom: 1px solid var(--border); }
+
+  /* Filtros da tabela: empilhados */
+  .tbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px;
+    gap: 6px;
+  }
+  .tbar > * {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .tbar-count {
+    text-align: center;
+    font-size: 13px;
+    padding: 4px 0;
+  }
+
+  /* === DASHBOARD — esconder widgets secundarios === */
+  #pg-dash .sync-health-card,
+  #pg-dash .recent-activity,
+  #pg-dash .weekly-evolution,
+  #pg-dash .risk-analytics,
+  #pg-dash .clear-time-metrics,
+  #pg-dash .private-locator-alert,
+  #pg-dash .watch-protect-alert {
+    display: none;
+  }
+  .dash-inner { padding: 12px !important; }
+  .stat-card { padding: 10px !important; }
+  .stat-val { font-size: 22px !important; }
+  .stat-label { font-size: 11px !important; }
+
+  /* === MODAIS — tela cheia === */
+  .overlay .modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+  .modal-head {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .factions {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--surface);
+    padding: 12px !important;
+    border-top: 1px solid var(--border);
+  }
+  .factions .btn {
+    flex: 1;
+    min-height: 48px;
+    font-size: 15px;
+  }
+
+  /* === INPUTS — anti-zoom Safari === */
+  input.fi,
+  input.finp,
+  select.fsel,
+  textarea.ftxt {
+    font-size: 16px !important;
+  }
+
+  /* === SIDEBAR drawer === */
+  .snav { width: 280px !important; }
+  .snav-item {
+    padding: 14px 16px !important;
+    font-size: 15px !important;
+  }
+
+  /* === TOPBAR === */
+  .mob-topbar { height: 56px !important; }
+  .mob-menu-btn {
+    font-size: 22px !important;
+    padding: 8px 14px !important;
+    min-width: 48px;
+    min-height: 44px;
+  }
+
+  /* === MODAL CLOSE === */
+  .modal-close {
+    width: 44px;
+    height: 44px;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+
+
 /* ══════════════════════════════════════════════
    OneDrill — Ticket Management System
    ══════════════════════════════════════════════

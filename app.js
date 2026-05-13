@@ -422,7 +422,24 @@ function projectToDb(p){
 
 async function initSupabase(){
   try{
-    sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    // Config explicita de auth (item login persistente):
+    //  - persistSession: salva token no localStorage entre sessoes
+    //  - autoRefreshToken: renova automatico antes de expirar
+    //  - storageKey unico: nao colide com outros apps Supabase
+    sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{
+      auth:{
+        persistSession:true,
+        autoRefreshToken:true,
+        detectSessionInUrl:true,
+        storage:window.localStorage,
+        storageKey:'sb-onedrill-auth'
+      }
+    });
+    // Listener pra detectar refresh/logout em qualquer aba
+    sb.auth.onAuthStateChange((event,session)=>{
+      if(event==='TOKEN_REFRESHED')console.log('[Auth] token renovado');
+      if(event==='SIGNED_OUT'){isAdmin=false;role='viewer';}
+    });
     // Fix bug #13: 8s é agressivo demais em 4G no campo (tablets de supervisor em obra).
     // 15s dá margem mas ainda detecta servidor down em tempo razoável.
     const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),15000));

@@ -2,7 +2,15 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1a6cf0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OneDrill">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <title>OneDrill</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,13 +48,13 @@
       <button class="login-view-btn" data-action="enter-viewer">Continuar como Manager / Visualizador</button>
     </div>
     <div class="login-divider"><span>Admin</span></div>
-    <div class="login-admin-section">
+    <form class="login-admin-section" id="login-form" autocomplete="on" onsubmit="event.preventDefault();tryLogin();">
       <div class="login-admin-label">Acesso administrativo</div>
-      <input class="login-inp" type="email" id="admin-email" placeholder="Email" data-next-focus="admin-pw">
-      <input class="login-inp" type="password" id="admin-pw" placeholder="Senha" data-action="try-login">
-      <button class="login-admin-btn" data-action="try-login">Entrar como Admin</button>
+      <input class="login-inp" type="email" id="admin-email" name="email" placeholder="Email" autocomplete="username" required data-next-focus="admin-pw">
+      <input class="login-inp" type="password" id="admin-pw" name="password" placeholder="Senha" autocomplete="current-password" required data-action="try-login">
+      <button type="submit" class="login-admin-btn" data-action="try-login">Entrar como Admin</button>
       <div class="login-err" id="login-err">Senha incorreta</div>
-    </div>
+    </form>
   </div>
   <div class="login-footer">OneDrill Ticket Management System</div>
 </div>
@@ -681,7 +689,7 @@
   <span id="tmsg"></span>
 </div>
 
-<script src="app.js?v=0dc555c7"></script>
+<script src="app.js?v=a2d555b6"></script>
 
 <!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
 <script>
@@ -850,6 +858,16 @@
   }
 
 })();
+</script>
+<!-- Service Worker para PWA (instalavel + offline) -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('[SW] registrado, scope:', reg.scope))
+      .catch(err => console.warn('[SW] falhou:', err));
+  });
+}
 </script>
 </body>
 </html>

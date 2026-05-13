@@ -80,6 +80,7 @@ let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
+let _graceFilterActive=false; // Toggle "🔄 Em carência" na aba Tickets — mostra só tickets renovados ainda em período de graça
 let map,satL,strL,hybL,mkrs=[],lines=[],labels=[];
 let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
 let clusterGroup=null;
@@ -154,7 +155,8 @@ function filterTickets(opts={}){
     excludeSuperseded=true,
     excludeCompleted=true,
     statusFilter=null,
-    mapUtilFilter=''
+    mapUtilFilter='',
+    onlyGrace=false
   }=opts;
 
   // Pre-compute completed project IDs for fast lookup
@@ -219,6 +221,11 @@ function filterTickets(opts={}){
       if(mapUtilFilter==='__pending__'){if(!pu.length)return false;}
       else{if(!pu.some(p=>p.utility_name===mapUtilFilter))return false;}
     }
+
+    // "Em carência" — só tickets renovados que ainda estão no período de graça.
+    // Depende de utilCacheLoaded indiretamente (via isInRenewalGrace → newTicketFullyCleared);
+    // o toggleGraceFilter já guarda contra clique prematuro.
+    if(onlyGrace && !(isRenewed(t) && isInRenewalGrace(t))) return false;
 
     return true;
   });
@@ -1151,6 +1158,33 @@ function toggleMF(key){
   const oc={open:'on-open',damage:'on-damage',clear:'on-clear',closed:'on-closed',cancel:'on-cancel'};
   btn.className='ftog'+(mf[key]?' '+oc[key]:'');
   redrawAll();
+}
+
+/** Toggle do botão "🔄 Em carência" na aba Tickets.
+ *  Mostra apenas tickets renovados (oldTicket2 preenchido) ainda dentro do
+ *  período de graça do antigo. Útil pra revisar status efetivo antes da cutover.
+ *  Guarda contra clique prematuro: se utilCache não carregou, o filtro funcionaria
+ *  com dados parciais (newTicketFullyCleared retorna false enquanto carrega).
+ */
+function toggleGraceFilter(){
+  if(!utilCacheLoaded){
+    toast('Aguarde — dados 811 ainda carregando','warn');
+    return;
+  }
+  _graceFilterActive=!_graceFilterActive;
+  const btn=document.getElementById('tbl-grace-toggle');
+  if(btn){
+    if(_graceFilterActive){
+      btn.style.background='#7c3aed';
+      btn.style.color='#fff';
+      btn.style.borderColor='#7c3aed';
+    }else{
+      btn.style.background='';
+      btn.style.color='';
+      btn.style.borderColor='';
+    }
+  }
+  renderTable();
 }
 function redrawAll(){renderList();renderMap();}
 
@@ -2131,7 +2165,7 @@ function renderTable(){
   const ut=document.getElementById('tbl-util')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,excludeCompleted:!isCompletedProj});
+  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}

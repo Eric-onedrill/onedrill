@@ -866,7 +866,7 @@
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js?v=v10', {updateViaCache: 'none'})
+    navigator.serviceWorker.register('sw.js?v=v11', {updateViaCache: 'none'})
       .then(reg => {
         console.log('[SW] registrado, scope:', reg.scope);
         reg.update(); // forca check imediato

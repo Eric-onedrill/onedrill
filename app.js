@@ -2264,9 +2264,6 @@ function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
   const fTickets=filterTickets({state:dsf});
-  // Fix 2026-05-14: pra 'Cleared Hoje/7d/30d' inclui tickets SUPERSEDED (renovados),
-  // pq se um ticket foi clareado e renovado depois, ainda eh um clear que precisa contar.
-  const fTicketsForClear=filterTickets({state:dsf,excludeSuperseded:false});
   const now=Date.now();const week=7*86400000;
 
   const total=fTickets.length;
@@ -2376,7 +2373,7 @@ function renderDash(){
   +'</div>'
 
   // Cleared stats, W&P alert, private locator, sync timer
-  +renderClearedStats(fTicketsForClear)
+  +renderClearedStats(fTickets)
   +renderWatchAndProtectAlert(fTickets)
   +renderPrivateLocatorAlert(fTickets)
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';

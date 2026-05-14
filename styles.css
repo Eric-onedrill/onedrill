@@ -631,6 +631,54 @@
 }
 
 
+
+/* ══════════════════════════════════════════════
+   29g. Mobile v8 — esconder expand do dashboard
+   2026-05-13 — Eric reportou tabela "tickets clear" no dashboard
+   passando da tela. A tabela apareceu porque _clearedExpand
+   estava ativo. Solucao: em mobile, esconde a expand area.
+   Cards Hoje/7d/30d continuam clicaveis, mas nao mostram lista.
+   Pra ver a lista, usa filtros da aba Tickets.
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* Esconde a area expandida dos cards Cleared no mobile */
+  /* Identificada pelo style="margin-top:12px;padding:12px;..." que
+     aparece DEPOIS dos cards na renderClearedStats */
+  .dash-card > div > div[style*="margin-top:12px"][style*="overflow-y:auto"],
+  .dash-card div[style*="border:1px solid var(--green-border)"][style*="margin-top:12px"] {
+    display: none !important;
+  }
+
+  /* O DAY-EXPAND do bar chart tambem esconde */
+  .dash-card div[style*="margin-top:12px"][style*="padding:12px"][style*="green-border"] {
+    display: none !important;
+  }
+
+  /* Hint visual: card Cleared mostra "Toque pra filtrar" em vez de expandir */
+  .cleared-cards-grid > div:hover {
+    opacity: 1 !important;
+  }
+
+  /* Defesa contra qualquer overflow */
+  .dash-inner,
+  .dash-card,
+  .dash-row,
+  .dash-content,
+  #dash-content {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Tabelas de qualquer container nao podem causar scroll horizontal */
+  .dash-card > div {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+}
+
+
 /* ══════════════════════════════════════════════
    OneDrill — Ticket Management System
    ══════════════════════════════════════════════

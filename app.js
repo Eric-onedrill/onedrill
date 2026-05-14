@@ -2130,12 +2130,11 @@ async function renderUtils(t){
       if(sm)sm.textContent='';
       return;
     }
-    // Fix 2026-05-14: Not Participating badge laranja APENAS pra WI.
-    // FL tem 3U 'Not service provider' = Clear valido (verde, nao laranja).
-    // IL/IN nao usam Not Participating como resposta de status.
-    const _isWI = (t.state || '') === 'WI';
-    const isNotPart = u => _isWI && (u.response_text || '').toLowerCase().includes('not participating');
-    data.forEach(u => { u._isNotPart = u.status === 'Clear' && isNotPart(u); });
+    // Fix 2026-05-14: detecta Not Participating como variante visual (badge laranja)
+    // Continua sendo status Clear no banco/sistema, so muda o visual no detalhe
+    const isNotPart=u=>((u.response_text||'').toLowerCase().includes('not participating')||
+                        (u.response_text||'').toLowerCase().includes('not service provider'));
+    data.forEach(u=>{ u._isNotPart=u.status==='Clear'&&isNotPart(u); });
     const pending=data.filter(u=>u.status==='Pending');
     const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
     const notpart=data.filter(u=>u._isNotPart);
@@ -2265,6 +2264,9 @@ function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
   const dsf=dashStateVal;
   const fTickets=filterTickets({state:dsf});
+  // Fix 2026-05-14: pra 'Cleared Hoje/7d/30d' inclui tickets SUPERSEDED (renovados),
+  // pq se um ticket foi clareado e renovado depois, ainda eh um clear que precisa contar.
+  const fTicketsForClear=filterTickets({state:dsf,excludeSuperseded:false});
   const now=Date.now();const week=7*86400000;
 
   const total=fTickets.length;
@@ -2374,7 +2376,7 @@ function renderDash(){
   +'</div>'
 
   // Cleared stats, W&P alert, private locator, sync timer
-  +renderClearedStats(fTickets)
+  +renderClearedStats(fTicketsForClear)
   +renderWatchAndProtectAlert(fTickets)
   +renderPrivateLocatorAlert(fTickets)
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';

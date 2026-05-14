@@ -1,10 +1,10 @@
-/* SW NUCLEAR v11 - 2026-05-13
+/* SW NUCLEAR v12 - 2026-05-13
  * Eric reportou cache do Safari iOS nao atualiza.
  * Estrategia: ZERO cache de assets do site - sempre fetch da rede.
  * Cache so pra recursos externos (Leaflet, etc) e quando offline.
  */
 
-const CACHE_VERSION = 'onedrill-v11';
+const CACHE_VERSION = 'onedrill-v12';
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {

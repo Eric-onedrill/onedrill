@@ -595,6 +595,69 @@
 }
 
 
+
+
+/* ══════════════════════════════════════════════
+   29j. Mobile v12 - display:block agressivo + tbar reset
+   - tbar vira BLOCK (nao flex)
+   - Cada filho display:block com altura fixa
+   - height so em input/select/btn (nao em span)
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* tbar como BLOCK, nao flex */
+  #pg-tickets .tbar {
+    display: block !important;
+    padding: 8px !important;
+    background: var(--white) !important;
+    border-bottom: none !important;
+    flex: none !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Todos filhos block + margem inferior */
+  #pg-tickets .tbar > * {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 0 6px 0 !important;
+    box-sizing: border-box !important;
+    flex: none !important;
+    float: none !important;
+  }
+
+  /* Input/select/btn altura fixa */
+  #pg-tickets .tbar > input,
+  #pg-tickets .tbar > select,
+  #pg-tickets .tbar > button {
+    height: 42px !important;
+    line-height: 1.2 !important;
+    padding: 8px 12px !important;
+    font-size: 14px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    background: var(--white) !important;
+    color: var(--text) !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    outline: none !important;
+  }
+
+  /* Span do count: sem height fixo, sem background */
+  #pg-tickets .tbar > span,
+  #pg-tickets .tbar > .tbar-count {
+    height: auto !important;
+    padding: 4px 0 !important;
+    text-align: center !important;
+    font-size: 12px !important;
+    background: transparent !important;
+    border: none !important;
+  }
+}
+
+
 /* ══════════════════════════════════════════════
    OneDrill — Ticket Management System
    ══════════════════════════════════════════════

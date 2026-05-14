@@ -10,7 +10,7 @@
    troca os hashes nos query strings ?v=... que invalidam o cache).
    ════════════════════════════════════════════════════════════════ */
 
-const CACHE_VERSION = 'onedrill-v4';
+const CACHE_VERSION = 'onedrill-v5';
 const STATIC_ASSETS = [
   './',
   './index.html',

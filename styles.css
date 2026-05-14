@@ -217,6 +217,113 @@
 }
 
 
+
+/* ══════════════════════════════════════════════
+   29d. Mobile v5 — fix tabelas extrapolando tela
+   2026-05-13 — Eric reportou que aba Tickets + Tickets Cleared
+   precisavam deitar o celular pra ler. Causa: min-width:700px
+   na tabela (regra antiga linha 3249) + 6 colunas inline na
+   tabela do card Cleared expand.
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* ──── TABELA DE TICKETS (#pg-tickets) ──── */
+
+  /* Sobrescreve min-width:700px da regra antiga */
+  #pg-tickets table {
+    min-width: 0 !important;
+    width: 100% !important;
+    table-layout: fixed;
+  }
+  .tbl-wrap {
+    overflow-x: hidden !important;
+    padding: 4px !important;
+  }
+  .tbl-inner {
+    border-radius: 0 !important;
+  }
+
+  /* Esconde colunas pesadas — mantem Ticket(1), Status(5), Ações(10) */
+  #pg-tickets thead th:nth-child(2),
+  #pg-tickets thead th:nth-child(3),
+  #pg-tickets thead th:nth-child(4),
+  #pg-tickets thead th:nth-child(6),
+  #pg-tickets thead th:nth-child(7),
+  #pg-tickets thead th:nth-child(8),
+  #pg-tickets thead th:nth-child(9),
+  #pg-tickets tbody td:nth-child(2),
+  #pg-tickets tbody td:nth-child(3),
+  #pg-tickets tbody td:nth-child(4),
+  #pg-tickets tbody td:nth-child(6),
+  #pg-tickets tbody td:nth-child(7),
+  #pg-tickets tbody td:nth-child(8),
+  #pg-tickets tbody td:nth-child(9) {
+    display: none !important;
+  }
+
+  /* Forca wrap das células */
+  #pg-tickets td,
+  #pg-tickets th {
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 11px !important;
+    padding: 6px !important;
+  }
+
+  /* Botões de ação compactos */
+  #pg-tickets tbody td:nth-child(10) {
+    width: 80px;
+  }
+  #pg-tickets tbody td:nth-child(10) .btn-sm {
+    font-size: 10px !important;
+    padding: 4px 6px !important;
+    min-height: 32px;
+  }
+
+  /* ──── TABELA DENTRO DE CARDS (Cleared Expand do Dashboard) ──── */
+  .dash-card table {
+    width: 100% !important;
+    table-layout: fixed;
+    font-size: 10px !important;
+  }
+  .dash-card table th,
+  .dash-card table td {
+    white-space: normal !important;
+    word-break: break-word;
+    padding: 4px 6px !important;
+  }
+  /* Esconde Estado(2), Projeto(4), Liberado em(6).
+     Mantem: Ticket(1), Location(3), Footage(5) */
+  .dash-card table thead th:nth-child(2),
+  .dash-card table thead th:nth-child(4),
+  .dash-card table thead th:nth-child(6),
+  .dash-card table tbody td:nth-child(2),
+  .dash-card table tbody td:nth-child(4),
+  .dash-card table tbody td:nth-child(6) {
+    display: none !important;
+  }
+
+  /* Container das tabelas internas: hide horizontal scroll */
+  .dash-card div[style*="overflow-x:auto"] {
+    overflow-x: hidden !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Em celulares bem pequenos, font ainda menor pras tabelas */
+  #pg-tickets td,
+  #pg-tickets th {
+    font-size: 10px !important;
+    padding: 5px 4px !important;
+  }
+  #pg-tickets tbody td:nth-child(10) {
+    width: 70px;
+  }
+}
+
+
 /* ══════════════════════════════════════════════
    OneDrill — Ticket Management System
    ══════════════════════════════════════════════

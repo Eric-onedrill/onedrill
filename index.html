@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1a6cf0">
 <meta name="format-detection" content="telephone=no">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta name="apple-touch-fullscreen" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,7 +23,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
 <meta name="supabase-url" content="https://ofbqtaulvzeltfpqcjhh.supabase.co">
 <meta name="supabase-anon-key" content="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE">
-<link rel="stylesheet" href="styles.css?v=8027c3d8">
+<link rel="stylesheet" href="styles.css?v=4a46a845">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -861,13 +862,37 @@
 
 })();
 </script>
-<!-- Service Worker para PWA (instalavel + offline) -->
+<!-- Service Worker para PWA (instalavel + offline) + auto-reload quando ha nova versao -->
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('[SW] registrado, scope:', reg.scope))
+    navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'})
+      .then(reg => {
+        console.log('[SW] registrado, scope:', reg.scope);
+        reg.update(); // forca check imediato
+        // Quando ha um SW novo aguardando, ativa imediatamente
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (nw) {
+            nw.addEventListener('statechange', () => {
+              if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('[SW] nova versao instalada, recarregando...');
+                // Evita loop: so reload se sessionStorage nao tiver flag
+                if (!sessionStorage.getItem('sw-reloaded-once')) {
+                  sessionStorage.setItem('sw-reloaded-once', '1');
+                  // Aguarda 500ms pro SW novo assumir control, dai reload
+                  setTimeout(() => location.reload(), 500);
+                }
+              }
+            });
+          }
+        });
+      })
       .catch(err => console.warn('[SW] falhou:', err));
+    // Limpa flag quando vai navegar pra fora (pra permitir reload em proxima visita)
+    window.addEventListener('beforeunload', () => {
+      // Nao limpa o flag aqui - deixa expirar com a sessao
+    });
   });
 }
 </script>

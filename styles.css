@@ -324,6 +324,66 @@
 }
 
 
+
+/* ══════════════════════════════════════════════
+   29e. Mobile v6 — defesa cards Cleared + botão Ver
+   2026-05-13 — Screenshots mostraram cards Cleared VAZIOS
+   e coluna Ações sem botão. Suspeita: CSS antigo em cache.
+   Aqui usamos !important pra forçar visibilidade.
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* === DEFESA: cards Cleared SEMPRE visíveis === */
+  .cleared-cards-grid > div {
+    opacity: 1 !important;
+    visibility: visible !important;
+    min-height: 70px !important;
+    padding: 10px !important;
+    display: block !important;
+  }
+  .cleared-cards-grid > div > div {
+    opacity: 1 !important;
+    visibility: visible !important;
+    display: block !important;
+  }
+  /* Número grande sempre visível */
+  .cleared-cards-grid > div > div:first-child {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+  }
+
+  /* === DEFESA: botão Ver na coluna Ações === */
+  #pg-tickets tbody td:nth-child(10) {
+    width: auto !important;
+    padding: 6px !important;
+  }
+  #pg-tickets tbody td:nth-child(10) > div {
+    display: flex !important;
+    gap: 4px !important;
+    flex-wrap: wrap !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  #pg-tickets tbody td:nth-child(10) .btn,
+  #pg-tickets tbody td:nth-child(10) .btn-sm,
+  #pg-tickets tbody td:nth-child(10) button {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+    min-height: 32px !important;
+    background: var(--accent) !important;
+    color: white !important;
+    border: 1px solid var(--accent) !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+  }
+}
+
+
 /* ══════════════════════════════════════════════
    OneDrill — Ticket Management System
    ══════════════════════════════════════════════

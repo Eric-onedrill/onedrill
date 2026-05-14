@@ -2130,11 +2130,12 @@ async function renderUtils(t){
       if(sm)sm.textContent='';
       return;
     }
-    // Fix 2026-05-14: detecta Not Participating como variante visual (badge laranja)
-    // Continua sendo status Clear no banco/sistema, so muda o visual no detalhe
-    const isNotPart=u=>((u.response_text||'').toLowerCase().includes('not participating')||
-                        (u.response_text||'').toLowerCase().includes('not service provider'));
-    data.forEach(u=>{ u._isNotPart=u.status==='Clear'&&isNotPart(u); });
+    // Fix 2026-05-14: Not Participating badge laranja APENAS pra WI.
+    // FL tem 3U 'Not service provider' = Clear valido (verde, nao laranja).
+    // IL/IN nao usam Not Participating como resposta de status.
+    const _isWI = (t.state || '') === 'WI';
+    const isNotPart = u => _isWI && (u.response_text || '').toLowerCase().includes('not participating');
+    data.forEach(u => { u._isNotPart = u.status === 'Clear' && isNotPart(u); });
     const pending=data.filter(u=>u.status==='Pending');
     const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
     const notpart=data.filter(u=>u._isNotPart);

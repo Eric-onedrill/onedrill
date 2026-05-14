@@ -2130,29 +2130,43 @@ async function renderUtils(t){
       if(sm)sm.textContent='';
       return;
     }
+    // Fix 2026-05-14: detecta Not Participating como variante visual (badge laranja)
+    // Continua sendo status Clear no banco/sistema, so muda o visual no detalhe
+    const isNotPart=u=>((u.response_text||'').toLowerCase().includes('not participating')||
+                        (u.response_text||'').toLowerCase().includes('not service provider'));
+    data.forEach(u=>{ u._isNotPart=u.status==='Clear'&&isNotPart(u); });
     const pending=data.filter(u=>u.status==='Pending');
-    const cleared=data.filter(u=>u.status==='Clear'||u.status==='Private');
+    const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
+    const notpart=data.filter(u=>u._isNotPart);
     const marked=data.filter(u=>u.status==='Marked');
     if(sm){
       const parts=[];
       if(inGrace)parts.push('<span style="color:#7c3aed">🔄 graça'+(novoClareado?' (novo clareou)':'')+'</span>');
       if(pending.length)parts.push(`<span style="color:var(--red)">${pending.length} pendente${pending.length>1?'s':''}</span>`);
       if(marked.length)parts.push(`<span style="color:var(--amber)">${marked.length} marcada${marked.length>1?'s':''}</span>`);
+      if(notpart.length)parts.push(`<span style="color:#d97706">⚠ ${notpart.length} não participa</span>`);
       if(cleared.length)parts.push(`<span style="color:var(--green)">${cleared.length} clear</span>`);
       sm.innerHTML=parts.join(' · ');
     }
     const badgeClass={Pending:'ub-pending',Clear:'ub-clear',Marked:'ub-marked',Private:'ub-private',Unmarked:'ub-clear'};
     const label={Pending:'Pendente',Clear:'Clear',Marked:'Marcado',Private:'Privado',Unmarked:'Desmarcado'};
+    // Override pra Not Participating: badge laranja + label especifico
+    const getBadgeClass=u=>u._isNotPart?'ub-notpart':(badgeClass[u.status]||'ub-pending');
+    const getLabel=u=>u._isNotPart?'⚠ Não Participa':(label[u.status]||u.status);
     const order={Pending:0,Marked:1,Private:2,Clear:3,Unmarked:4};
     data.sort((a,b)=>(order[a.status]||9)-(order[b.status]||9));
     el.innerHTML=graceBanner+data.map(u=>{
       const resp=(u.response_text||'').trim();
       let detail='';
-      if(resp && u.status==='Clear'){
+      // Detail em LARANJA pro Not Participating (mais visivel)
+      if(resp && u._isNotPart){
+        const short=resp.length>80?resp.substring(0,80)+'…':resp;
+        detail=`<div style="font-size:10px;color:#d97706;margin-top:2px;line-height:1.3;font-weight:600">⚠ ${esc(short)}</div>`;
+      } else if(resp && u.status==='Clear'){
         const short=resp.length>80?resp.substring(0,80)+'…':resp;
         detail=`<div style="font-size:10px;color:var(--green);margin-top:2px;line-height:1.3;opacity:.85">${esc(short)}</div>`;
       }
-      return`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><span class="util-name" style="display:block">${esc(u.utility_name)}</span>${detail}</div><span class="util-badge ${badgeClass[u.status]||'ub-pending'}" style="flex-shrink:0;margin-top:2px">${label[u.status]||esc(u.status)}</span></div>`;
+      return`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><span class="util-name" style="display:block">${esc(u.utility_name)}</span>${detail}</div><span class="util-badge ${getBadgeClass(u)}" style="flex-shrink:0;margin-top:2px">${esc(getLabel(u))}</span></div>`;
     }).join('');
   }catch(e){el.innerHTML='<div style="color:var(--muted);font-size:12px">Erro ao carregar utilities</div>';}
 }

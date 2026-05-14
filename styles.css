@@ -166,6 +166,14 @@
 
 
 
+
+.util-badge.ub-notpart {
+  background: #fff7ed !important;
+  color: #d97706 !important;
+  border: 1px solid #fdba74 !important;
+  font-weight: 700 !important;
+}
+
 /* ══════════════════════════════════════════════
    29c. Mobile v4 — conservador (NAO esconde conteudo)
    2026-05-13 — v3 escondia cards Cleared. Refeito sem display:none.

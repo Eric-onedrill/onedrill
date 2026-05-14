@@ -1078,7 +1078,9 @@ function buildPopup(t,c){
   const es=effectiveStatus(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const isStale=expireIsStale(t);
-  const isExp=t.expire&&t.expire!=='—'&&(es==='Open'||es==='Damage')&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  // FIX 2026-05-13: vencido e vencido independente do status (exceto Closed/Cancel).
+  // Eric reportou: ticket Clear vencido nao mostrava popup, mas precisa renovar antes de trabalhar.
+  const isExp=t.expire&&t.expire!=='—'&&es!=='Closed'&&es!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data não confirmada</div>':'')
@@ -1155,7 +1157,8 @@ function showPanel(t){
   const isStale=expireIsStale(t);
   const proj=projects.find(p=>p.id===t.projectId);
   currentPanelId=t.id;
-  const isExp=t.expire&&t.expire!=='—'&&(es==='Open'||es==='Damage')&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  // FIX 2026-05-13: vencido independente de status (exceto Closed/Cancel)
+  const isExp=t.expire&&t.expire!=='—'&&es!=='Closed'&&es!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
@@ -1371,10 +1374,11 @@ function openTicketDetail(id){
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const es=effectiveStatus(t);
   const c=scol(es);
-  // isExpired: só dispara banner vermelho "NÃO TRABALHAR" se status efetivo é
-  // Open ou Damage. Ticket Clear (mesmo com expire passado) não precisa alerta
-  // alarmante — o trabalho já está liberado.
-  const isExpired=t.expire&&t.expire!=='—'&&(es==='Open'||es==='Damage')&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  // FIX 2026-05-13: isExpired dispara banner + popup fullscreen
+  // pra QUALQUER ticket vencido (exceto Closed/Cancel).
+  // Antes: so Open/Damage. Eric reportou que ticket Clear vencido
+  // tambem precisa avisar pra renovar antes de trabalhar.
+  const isExpired=t.expire&&t.expire!=='—'&&es!=='Closed'&&es!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
   if(isExpired)showExpiredAlert(t);
 
   const proj=projects.find(p=>p.id===t.projectId);

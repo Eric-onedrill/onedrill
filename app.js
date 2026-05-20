@@ -1508,11 +1508,18 @@ function openTicketDetail(id){
     const renewBtn=document.getElementById('det-renew-btn');
     if(t.status!=='Closed'&&t.status!=='Cancel')renewBtn.classList.remove('hidden');
     else renewBtn.classList.add('hidden');
+    // Botao 'Editar Renovacao' aparece SO em tickets que ja foram renovados
+    const editRenewBtn=document.getElementById('det-edit-renewal-btn');
+    if(editRenewBtn){
+      if(isRenewed(t))editRenewBtn.classList.remove('hidden');
+      else editRenewBtn.classList.add('hidden');
+    }
     document.getElementById('field-status-section').style.display='';
   }else{
     document.getElementById('det-edit-btn').classList.add('hidden');
     document.getElementById('det-draw-btn').classList.add('hidden');
     document.getElementById('det-renew-btn').classList.add('hidden');
+    const erb=document.getElementById('det-edit-renewal-btn');if(erb)erb.classList.add('hidden');
     document.getElementById('field-status-section').style.display='none';
   }
   renderHistory(t);renderMiniMap(t);renderUtils(t);openModal('ov-detail');
@@ -1685,6 +1692,77 @@ async function renewTicket(){
     toast('Erro ao salvar renovação. Tente dar Refresh (⟳) e tentar novamente.','danger');
   }
 }
+// ── EDIT/UNDO RENEWAL ──
+// Permite editar manualmente os campos da renovação (oldTicket2, statusOld, expireOld)
+// ou desfazer a renovação inteira (limpa os 3 campos -> ticket deixa de ser renovado).
+// Útil quando o auto-sync inferiu renovação errada ou quando o operador quer ajustar
+// a data de vencimento do ticket antigo (afeta cálculo de grace period).
+async function editRenewal(){
+  const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
+  if(!isRenewed(t)){toast('Esse ticket não tem renovação registrada.','warn');return;}
+  const curOld=(t.oldTicket2||t.old_ticket2||'').trim();
+  const curStatus=(t.statusOld||'').trim();
+  const curExpire=(t.expireOld||'').trim();
+  const action=prompt(
+    'EDITAR RENOVAÇÃO do ticket '+t.ticket+'\n\n'+
+    'Atual:\n'+
+    '  Ticket Antigo: '+curOld+'\n'+
+    '  Status Antigo: '+(curStatus||'(vazio)')+'\n'+
+    '  Expira Antigo: '+(curExpire||'(vazio)')+'\n\n'+
+    'O que fazer?\n'+
+    '  1 = Editar dados da renovação (campos individuais)\n'+
+    '  2 = DESFAZER renovação (limpa os 3 campos — o ticket antigo deixa de aparecer como superseded)\n'+
+    '  (cancelar pra sair sem mudar)',
+    '1'
+  );
+  if(!action)return;
+  const choice=action.trim();
+  if(choice==='2'){
+    if(!confirm('DESFAZER renovação?\n\nVai limpar:\n  Ticket Antigo: '+curOld+'\n  Status Antigo: '+curStatus+'\n  Expira Antigo: '+curExpire+'\n\nO ticket '+t.ticket+' deixa de aparecer como renovação. Não cria/apaga outros tickets — só limpa essa relação.\n\nContinuar?'))return;
+    t.oldTicket2='';t.statusOld='';t.expireOld='';
+    t.history=t.history||[];
+    t.history.push({ts:Date.now(),action:'[RENOVAÇÃO DESFEITA] limpou: antigo='+curOld+' / status='+curStatus+' / expira='+curExpire,color:'#dc2626'});
+    const ok=await saveTicketToDb(t);
+    if(ok){
+      toast('Renovação desfeita.','success');
+      // Rebuilds set de superseded — o ticket antigo deixa de ser superseded se nada mais aponta pra ele
+      rebuildSupersededSet();
+      closeModal('ov-detail');syncAll();
+      setTimeout(()=>openTicketDetail(t.id),300);
+    }else{
+      // Rollback
+      t.oldTicket2=curOld;t.statusOld=curStatus;t.expireOld=curExpire;t.history.pop();
+      toast('Erro ao salvar. Tente Refresh (⟳) e novamente.','danger');
+    }
+    return;
+  }
+  if(choice!=='1'){toast('Opção inválida — só 1 ou 2.','warn');return;}
+  // Edita campo a campo
+  const newOld=prompt('Ticket Antigo (número, em chain use " → " entre números mais antigos)\n\nDeixe vazio = limpar:',curOld);
+  if(newOld===null)return;
+  const newStatus=prompt('Status do Ticket Antigo (Open, Clear, Damage, Closed, Cancel):',curStatus||'Clear');
+  if(newStatus===null)return;
+  const newExpireRaw=prompt('Expira do Ticket Antigo (MM/DD/AAAA) — usado pra calcular o grace period:',curExpire);
+  if(newExpireRaw===null)return;
+  const newExpire=normalizeExpire((newExpireRaw||'').trim());
+  if(newExpireRaw.trim()&&!newExpire){toast('Data inválida. Use MM/DD/AAAA.','danger');return;}
+  t.oldTicket2=newOld.trim();
+  t.statusOld=newStatus.trim();
+  t.expireOld=newExpire;
+  t.history=t.history||[];
+  t.history.push({ts:Date.now(),action:'[RENOVAÇÃO EDITADA] antigo: '+curOld+'→'+t.oldTicket2+' / status: '+curStatus+'→'+t.statusOld+' / expira: '+curExpire+'→'+t.expireOld,color:'#b45309'});
+  const ok=await saveTicketToDb(t);
+  if(ok){
+    toast('Renovação atualizada.','success');
+    rebuildSupersededSet();
+    closeModal('ov-detail');syncAll();
+    setTimeout(()=>openTicketDetail(t.id),300);
+  }else{
+    t.oldTicket2=curOld;t.statusOld=curStatus;t.expireOld=curExpire;t.history.pop();
+    toast('Erro ao salvar. Tente Refresh (⟳) e novamente.','danger');
+  }
+}
+
 function isInRenewalGrace(t){
   if(!isRenewed(t))return false;
   let cutoverMs=0;
@@ -2928,6 +3006,7 @@ function openNewTicket(){
   ['tm-t','tm-c','tm-co','tm-l','tm-st','tm-f','tm-notes','tm-tipo','tm-job','tm-prime','tm-addr'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('tm-s').value='Open';
   document.getElementById('tm-e').value='';
+  const eo=document.getElementById('tm-expireOld');if(eo)eo.value='';
   document.getElementById('tm-proj').value='';
   openModal('ov-ticket');
 }
@@ -2950,6 +3029,7 @@ function editCurrentTicket(){
   document.getElementById('tm-job').value=t.job||'';
   document.getElementById('tm-prime').value=t.prime||'';
   document.getElementById('tm-addr').value=t.address||'';
+  const eoEl=document.getElementById('tm-expireOld');if(eoEl)eoEl.value=t.expireOld||'';
   openModal('ov-ticket');
 }
 async function saveTicket(){
@@ -2962,6 +3042,14 @@ async function saveTicket(){
     toast('Data de expiração inválida. Use MM/DD/AAAA (ex: 05/13/2026).','danger');
     return;
   }
+  // Campo expireOld editavel — pra ajustar data de vencimento do ticket ANTIGO
+  // (snapshot do renovado). Importante pra recalcular grace period.
+  const rawExpireOld=(document.getElementById('tm-expireOld')?.value||'').trim();
+  const normalizedExpireOld=normalizeExpire(rawExpireOld);
+  if(rawExpireOld && !normalizedExpireOld){
+    toast('Data antigo invalida. Use MM/DD/AAAA.','danger');
+    return;
+  }
   const newStatus=document.getElementById('tm-s').value;
   let savedId=null;
   if(editingTicketId){
@@ -2970,11 +3058,13 @@ async function saveTicket(){
       const old=t.status;
       const newProjId=document.getElementById('tm-proj').value;
       const projChanged=newProjId!==t.projectId;
+      const oldExpireOld=t.expireOld||'';
       Object.assign(t,{
         ticket:tnum,projectId:newProjId,
         client:document.getElementById('tm-c').value,company:document.getElementById('tm-co').value,
         location:document.getElementById('tm-l').value,state:document.getElementById('tm-st').value,
         footage:parseInt(document.getElementById('tm-f').value)||0,expire:normalizedExpire,
+        expireOld:normalizedExpireOld,
         notes:document.getElementById('tm-notes').value,status:newStatus,
         tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,
         prime:document.getElementById('tm-prime').value,address:document.getElementById('tm-addr').value
@@ -2982,6 +3072,9 @@ async function saveTicket(){
       if(projChanged&&newProjId)t.project_locked=true;// trava ao trocar projeto manualmente
       t.history=t.history||[];// Fix bug #20: garante array antes dos pushes abaixo
       if(old!==newStatus)t.history.push({ts:Date.now(),action:`Status: ${old} → ${newStatus}`,color:scol(newStatus)});
+      if(oldExpireOld!==normalizedExpireOld){
+        t.history.push({ts:Date.now(),action:`Expira (Antigo): ${oldExpireOld||'—'} → ${normalizedExpireOld||'—'}`,color:'#b45309'});
+      }
       t.history.push({ts:Date.now(),action:'Editado',color:'#9a9888'});
       await saveTicketToDb(t);savedId=t.id;
     }
@@ -3605,8 +3698,17 @@ function globalSearch(q){
   for(const t of tickets){
     if(results.length>=10)break;
     // Fix bug #7: (t.ticket||'') evita crash se ticket vier null. Adiciona job também (bug #22).
-    if((t.ticket||'').toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)||(t.job||'').toLowerCase().includes(q)){
-      results.push({type:'ticket',id:t.id,title:t.ticket,sub:t.client+' · '+t.location+' · '+effectiveStatus(t),status:effectiveStatus(t)});
+    // Adiciona match em oldTicket2 (chain de tickets antigos renovados) — permite buscar pelo numero
+    // antigo e cair no ticket NOVO que carrega aquele historico. (issue: ticket renovado 20261906533)
+    const oldChain=(t.oldTicket2||t.old_ticket2||'').toLowerCase();
+    const matchOld=oldChain&&oldChain.includes(q);
+    if((t.ticket||'').toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)||(t.job||'').toLowerCase().includes(q)||matchOld){
+      const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+      // Quando matchou pelo numero antigo, sub mostra "renovou ANTIGO → NOVO" pra deixar claro
+      const sub=matchOld
+        ?('🔄 renovou '+oldNum+' · '+(t.client||'')+' · '+(t.location||'')+' · '+effectiveStatus(t))
+        :((t.client||'')+' · '+(t.location||'')+' · '+effectiveStatus(t));
+      results.push({type:'ticket',id:t.id,title:t.ticket,sub,status:effectiveStatus(t)});
     }
   }
   for(const p of projects){

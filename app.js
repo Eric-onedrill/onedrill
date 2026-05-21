@@ -4067,7 +4067,7 @@ function renderClearedStats(fTickets){
   var cToday=[],c24=[],c7=[],c30=[],byU7={};
   var seenToday={},seen24={},seen7={},seen30={};
   for(var i=0;i<ft2.length;i++){
-    var t=ft2[i];if(t.status==='Cancel')continue;
+    var t=ft2[i];if(t.status!=='Clear')continue;
     var cd=getTicketClearDate(t);if(!cd)continue;
     var tk=t.ticket;
     if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}

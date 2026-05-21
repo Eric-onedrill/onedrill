@@ -633,6 +633,42 @@ def classify(status_text, response_text=""):
     return "Pending", True  # ⚠ UNRECOGNIZED: nenhum padrão reconhecido
 
 
+def is_in_renewal_grace(ticket, ref_date=None):
+    """Determina se um ticket renovado ainda está em período de carência.
+
+    Args:
+        ticket: dict com campos old_ticket2, expire_old
+        ref_date: data de referência (default: hoje). Injetável para testes.
+
+    Returns: (in_grace, old_ticket_num)
+        in_grace: True se renovado E dentro do período de carência
+        old_ticket_num: número do ticket antigo (str) ou "" se não aplicável
+    """
+    old_chain = (ticket.get("old_ticket2") or "").strip()
+    if not old_chain:
+        return False, ""
+    old_num = old_chain.split(" → ")[0].strip()
+    old_expire_str = (ticket.get("expire_old") or "").strip()
+    if not old_expire_str or old_expire_str == "—":
+        return False, old_num
+    try:
+        exp_str = old_expire_str.split("Time:")[0].strip()
+        for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+            try:
+                exp_dt = datetime.strptime(exp_str, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return False, old_num
+    except Exception:
+        return False, old_num
+    today = ref_date or datetime.now().date()
+    if isinstance(today, datetime):
+        today = today.date()
+    return exp_dt.date() >= today, old_num
+
+
 def _is_valid_utility_name(name):
     """Valida que uma string é nome real de utility (não lixo de UI do portal).
 
@@ -654,8 +690,9 @@ def _is_valid_utility_name(name):
     # Prefixo ID ex: "ID2227"
     if n.startswith("ID") and re.match(r"^ID\d+$", n):
         return False
-    # Código puro letras+números sem espaço: "NI0005", "COMCN", "ID8000"
-    if re.match(r"^[A-Z0-9]{2,10}$", n) and re.search(r"[0-9]", n):
+    # Código puro letras+números sem espaço: "NI0005", "ID8000"
+    # Ou sigla curta só-letras (≤5 chars): "COMCN", "AEP", "TECO"
+    if re.match(r"^[A-Z0-9]{2,10}$", n) and (re.search(r"[0-9]", n) or len(n) <= 5):
         return False
     # Lixo da UI do portal: "All (6)", "Current (3)", "Show all (9)"
     if re.match(r"^(All|Current|Show\s+all|Show|Hide|Filter|Previous|Next|Page)\s*\(?\s*\d*\s*\)?\s*$", n, re.IGNORECASE):
@@ -2338,6 +2375,24 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
             for resp in deduped_responses:
                 log.info(f"  [{state}] {tnum} | {resp['utility']}: {resp['status']} ({resp.get('response', '')[:60]})")
 
+            # ── SEGURANÇA: cruzar com banco para detectar Pending que o scrape perdeu ──
+            # Se o scrape retornou tudo Clear, verifica se o banco tem Pending
+            # que NÃO apareceu neste scrape (ex: portal truncou a lista de utilities).
+            # Se encontrar, bloqueia o auto-clear — dados incompletos.
+            if none_pending and not ticket_locked:
+                scraped_utils = {r["utility"] for r in deduped_responses}
+                try:
+                    db_pending = sb_get("ticket_811_responses",
+                                       f"&ticket_num=eq.{tnum}&status=eq.Pending&select=utility_name")
+                    missed_pending = {r["utility_name"] for r in db_pending} - scraped_utils
+                    if missed_pending:
+                        log.warning(f"[{state}] {tnum}: ⚠ SEGURANÇA — {len(missed_pending)} utility(s) Pending no banco ausente(s) no scrape: {list(missed_pending)}")
+                        log.warning(f"[{state}] {tnum}: Bloqueando auto-clear (scrape incompleto: {len(deduped_responses)} capturadas, banco tem Pending que faltou)")
+                        none_pending = False
+                except Exception as e:
+                    log.warning(f"[{state}] {tnum}: Erro ao verificar Pending no banco (conservador: bloqueando auto-clear): {e}")
+                    none_pending = False
+
             # ── DETECTAR RESPOSTAS NÃO RECONHECIDAS ──
             for resp in deduped_responses:
                 if resp.get("_unrecognized"):
@@ -2393,18 +2448,8 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                 continue
 
             # ── RENOVAÇÃO: Período de graça ──
-            old_expire_str = t.get("expire_old") or ""
             old_status = (t.get("status_old") or "").strip()
-            is_renewed = bool(t.get("old_ticket2"))
-            in_grace = False
-            if is_renewed and old_expire_str and old_expire_str != "—":
-                try:
-                    # Tenta parsear a data de vencimento do ticket antigo
-                    exp_str = old_expire_str.split("Time:")[0].strip()
-                    exp_dt = datetime.strptime(exp_str, "%m/%d/%Y")
-                    in_grace = exp_dt.date() >= datetime.now().date()
-                except Exception:
-                    pass
+            in_grace, old_ticket_num = is_in_renewal_grace(t)
 
             if in_grace:
                 # Primeiro: checa se o ticket NOVO tem Pending. Se sim, NÃO protege —
@@ -2415,8 +2460,6 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                     log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO em graça, MAS ticket novo tem pendências — processando normalmente (graça não protege falso-Clear)")
                     # Cai fora do branch de graça, segue pro auto-clear/revert abaixo
                 else:
-                    # Checa as respostas REAIS das utilities do ticket antigo (não confia só no status_old)
-                    old_ticket_num = (t.get("old_ticket2") or "").split(" → ")[0].strip()
                     real_old_clear = False
                     if old_ticket_num:
                         try:
@@ -2431,12 +2474,12 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                             log.debug(f"[{state}] {tnum}: Erro ao checar utilities do antigo: {e}")
 
                     if old_status == "Clear" or real_old_clear:
-                        log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {old_expire_str}) — antigo {'Clear (verificado)' if real_old_clear else 'Clear'}, mantém")
+                        log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {t.get('expire_old', '')}) — antigo {'Clear (verificado)' if real_old_clear else 'Clear'}, mantém")
                         if needs_patch:
                             ticket_patches.append(patch)
                         continue
                     else:
-                        log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {old_expire_str}) — antigo era {old_status or 'Open'}, processando normalmente")
+                        log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {t.get('expire_old', '')}) — antigo era {old_status or 'Open'}, processando normalmente")
 
             if none_pending and all_responded and t.get("status") == "Open":
                 # AUTO-CLEAR (Fix 2026-05-14): clear_ts = now (quando ticket mudou pra Clear)
@@ -3143,24 +3186,13 @@ async def sync_state(state, triggered_by="manual"):
 
         # ── Inclui tickets ANTIGOS de renovações em carência (respostas podem ter atualizado) ──
         grace_old_map = {}  # old_ticket_num → new_ticket_id
+        nums_set = set(nums)
         for t in all_tickets:
-            old_chain = t.get("old_ticket2") or ""
-            if not old_chain:
-                continue
-            old_num = old_chain.split(" → ")[0].strip()
-            if not old_num or old_num in set(nums):
-                continue
-            old_expire = t.get("expire_old") or ""
-            if not old_expire or old_expire == "—":
-                continue
-            try:
-                exp_str = old_expire.split("Time:")[0].strip()
-                exp_dt = datetime.strptime(exp_str, "%m/%d/%Y")
-                if exp_dt.date() < datetime.now().date():
-                    continue
-            except Exception:
+            in_grace, old_num = is_in_renewal_grace(t)
+            if not in_grace or not old_num or old_num in nums_set:
                 continue
             nums.append(old_num)
+            nums_set.add(old_num)
             grace_old_map[old_num] = t["id"]
             log.info(f"[{state}] Incluindo ticket antigo {old_num} (carência de {t['ticket']})")
 
@@ -5506,22 +5538,9 @@ def _pdf_query_number(t):
     Retorna (query_number, is_old). is_old=True significa que usou o antigo.
     """
     tnum_new = (t.get("ticket") or "").strip()
-    old_chain = (t.get("old_ticket2") or "").strip()
-    if not old_chain:
-        return tnum_new, False
-    old_expire_str = (t.get("expire_old") or "").strip()
-    if not old_expire_str or old_expire_str == "—":
-        return tnum_new, False
-    try:
-        exp_str = old_expire_str.split("Time:")[0].strip()
-        exp_dt = datetime.strptime(exp_str, "%m/%d/%Y")
-        in_grace = exp_dt.date() >= datetime.now().date()
-    except Exception:
-        in_grace = False
-    if in_grace:
-        old_num = old_chain.split(" → ")[0].strip()
-        if old_num:
-            return old_num, True
+    in_grace, old_num = is_in_renewal_grace(t)
+    if in_grace and old_num:
+        return old_num, True
     return tnum_new, False
 
 
@@ -5967,6 +5986,28 @@ def run_self_tests():
     _assert("replaced by", True, is_ticket_canceled("CANCELED ticket\nREPLACED BY TICKET NUMBER 12345678"))
     _assert("normal ticket", False, is_ticket_canceled("Normal ticket body\nLocation: Main St"))
     _assert("empty", False, is_ticket_canceled(""))
+
+    # ── is_in_renewal_grace() tests ──
+    from datetime import date
+    print("\nis_in_renewal_grace():")
+    today = date(2026, 5, 21)
+    _assert("sem old_ticket2", (False, ""), is_in_renewal_grace({}, ref_date=today))
+    _assert("com old mas sem expire", (False, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": ""}, ref_date=today))
+    _assert("expire_old = traço", (False, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "—"}, ref_date=today))
+    _assert("em grace (futuro)", (True, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "06/15/2026"}, ref_date=today))
+    _assert("em grace (hoje)", (True, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "05/21/2026"}, ref_date=today))
+    _assert("fora de grace (ontem)", (False, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "05/20/2026"}, ref_date=today))
+    _assert("fora de grace (passado)", (False, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "01/01/2026"}, ref_date=today))
+    _assert("expire poluído Time:", (True, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "06/15/26 Time: 23:59"}, ref_date=today))
+    _assert("chain com seta", (True, "11111111"), is_in_renewal_grace({"old_ticket2": "11111111 → 22222222", "expire_old": "06/15/2026"}, ref_date=today))
+    _assert("expire lixo", (False, "12345678"), is_in_renewal_grace({"old_ticket2": "12345678", "expire_old": "nao e data"}, ref_date=today))
+
+    # ── _pdf_query_number() tests ──
+    print("\n_pdf_query_number():")
+    _assert("sem renovação", ("NEW123", False), _pdf_query_number({"ticket": "NEW123"}))
+    _assert("renovado em grace", ("OLD123", True), _pdf_query_number({"ticket": "NEW123", "old_ticket2": "OLD123", "expire_old": "12/31/2030"}))
+    _assert("renovado fora de grace", ("NEW123", False), _pdf_query_number({"ticket": "NEW123", "old_ticket2": "OLD123", "expire_old": "01/01/2020"}))
+    _assert("renovado sem expire", ("NEW123", False), _pdf_query_number({"ticket": "NEW123", "old_ticket2": "OLD123", "expire_old": ""}))
 
     # ── append_auto_note() tests ──
     print("\nappend_auto_note():")

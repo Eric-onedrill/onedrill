@@ -175,9 +175,12 @@ function filterTickets(opts={}){
     // Status exato (usa status real — effectiveStatus é só visual)
     if(status && t.status!==status) return false;
 
-    // Status filter (mapa checkboxes) — usa status real
+    // Status filter (mapa checkboxes) — usa effectiveStatus pra respeitar
+    // a carencia: ticket renovado em grace com status=Open mas effective=Clear
+    // deve aparecer quando filtro = Clear (visualmente esta Clear pro operador).
+    // Closed/Cancel sao raw (effectiveStatus nao muda eles).
     if(statusFilter){
-      const sl=(t.status||'').toLowerCase();
+      const sl=(effectiveStatus(t)||'').toLowerCase();
       if(sl==='open'    && !statusFilter.open)    return false;
       if(sl==='damage'  && !statusFilter.damage)  return false;
       if(sl==='clear'   && !statusFilter.clear)   return false;
@@ -2505,12 +2508,16 @@ function renderProjects(){
 
   const renderCard=(p)=>{
     const ts=filterTickets({projectId:p.id});
-    const openC=ts.filter(t=>t.status==='Open').length,clearC=ts.filter(t=>t.status==='Clear').length,damageC=ts.filter(t=>t.status==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
+    // Conta status pelo effectiveStatus — tickets renovados em grace com
+    // status=Open mas effective=Clear devem aparecer como Clear no card.
+    // Pra Closed/Cancel usa raw (effectiveStatus nao muda eles).
+    const _es=(t)=>effectiveStatus(t);
+    const openC=ts.filter(t=>_es(t)==='Open').length,clearC=ts.filter(t=>_es(t)==='Clear').length,damageC=ts.filter(t=>_es(t)==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
-    const clearFtP=ts.filter(t=>t.status==='Clear').reduce((s,t)=>s+(t.footage||0),0);
-    const openFtP=ts.filter(t=>t.status==='Open').reduce((s,t)=>s+(t.footage||0),0);
+    const clearFtP=ts.filter(t=>_es(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    const openFtP=ts.filter(t=>_es(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
     const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
-    const damageFtV=ts.filter(t=>t.status==='Damage').reduce((s,t)=>s+(t.footage||0),0);
+    const damageFtV=ts.filter(t=>_es(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);
     const pctConcluido=projTotal>0?Math.round(concluidoFt/projTotal*100):0;
     const pctClear=projTotal>0?Math.round(clearFtP/projTotal*100):0;
     const pctOpen=projTotal>0?Math.round(openFtP/projTotal*100):0;

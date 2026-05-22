@@ -1,10 +1,11 @@
-/* SW NUCLEAR v12 - 2026-05-13
- * Eric reportou cache do Safari iOS nao atualiza.
- * Estrategia: ZERO cache de assets do site - sempre fetch da rede.
- * Cache so pra recursos externos (Leaflet, etc) e quando offline.
+/* SW v13 - 2026-05-22
+ * v12: NUCLEAR — zero cache de assets, sempre rede.
+ * v13: + cache offline pra Supabase REST (shared view funciona sem internet).
+ *      Assets do site continuam network-first, CDN cache com revalidação.
  */
 
-const CACHE_VERSION = 'onedrill-v12';
+const CACHE_VERSION = 'onedrill-v13';
+const API_CACHE = 'onedrill-api-v1';
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -19,7 +20,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k)));
+    await Promise.all(keys.filter(k => k !== CACHE_VERSION && k !== API_CACHE).map(k => caches.delete(k)));
     await self.clients.claim();
     // Notifica clients pra recarregar
     const clients = await self.clients.matchAll();
@@ -32,10 +33,38 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // API e mapas externos: SEMPRE rede, sem cache
-  if (url.hostname.includes('supabase') || url.hostname.includes('nominatim')
-   || url.hostname.includes('openstreetmap') || url.hostname.includes('googleapis')
-   || url.hostname.includes('arcgisonline') || url.hostname.includes('tile.')) {
+  // Mapas e geocoding: SEMPRE rede, sem cache
+  if (url.hostname.includes('nominatim') || url.hostname.includes('openstreetmap')
+   || url.hostname.includes('googleapis') || url.hostname.includes('arcgisonline')
+   || url.hostname.includes('tile.')) {
+    return;
+  }
+
+  // Supabase REST API: network-first, cache pra offline (shared view)
+  if (url.hostname.includes('supabase') && url.pathname.includes('/rest/')) {
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(req);
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(API_CACHE).then(c => c.put(req, clone));
+        }
+        return res;
+      } catch (e) {
+        const cached = await caches.match(req);
+        if (cached) {
+          console.log('[SW] Supabase offline — servindo do cache:', url.pathname);
+          return cached;
+        }
+        return new Response(JSON.stringify({message:'Offline — sem dados em cache'}),
+          {status:503, headers:{'Content-Type':'application/json'}});
+      }
+    })());
+    return;
+  }
+
+  // Supabase Auth/outros endpoints: SEMPRE rede
+  if (url.hostname.includes('supabase')) {
     return;
   }
 

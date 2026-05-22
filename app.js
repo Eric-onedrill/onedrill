@@ -157,7 +157,8 @@ function filterTickets(opts={}){
     excludeCompleted=true,
     statusFilter=null,
     mapUtilFilter='',
-    onlyGrace=false
+    onlyGrace=false,
+    expireDays=''
   }=opts;
 
   // Pre-compute completed project IDs for fast lookup
@@ -230,6 +231,16 @@ function filterTickets(opts={}){
     // Depende de utilCacheLoaded indiretamente (via isInRenewalGrace → newTicketFullyCleared);
     // o toggleGraceFilter já guarda contra clique prematuro.
     if(onlyGrace && !(isRenewed(t) && isInRenewalGrace(t))) return false;
+
+    if(expireDays){
+      const exp=t.expire;
+      if(!exp||exp==='—')return false;
+      const ed=_eod(exp);
+      if(!ed||isNaN(ed.getTime()))return false;
+      const now=new Date();
+      if(expireDays==='expired'){if(ed>=now)return false;}
+      else{const days=parseInt(expireDays,10);const cutoff=new Date();cutoff.setDate(cutoff.getDate()+days);if(ed<now||ed>cutoff)return false;}
+    }
 
     return true;
   });
@@ -308,6 +319,12 @@ function dbToProject(r){
     centerCoords:(r.center_lat&&r.center_lon)?[r.center_lat,r.center_lon]:null,
     _manual:r.is_manual||false
   };
+}
+function _toIsoDate(mmddyyyy){
+  if(!mmddyyyy)return'';
+  const m=String(mmddyyyy).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(!m)return'';
+  return m[3]+'-'+m[1].padStart(2,'0')+'-'+m[2].padStart(2,'0');
 }
 /** Normaliza valores de expire vindos do banco/portal pra 'MM/DD/YYYY' ou ''.
  * Lida com legado poluído (ex: "04/15/26 Time: 23:59", "05/13/26 Time: 23:59ET"),
@@ -963,6 +980,7 @@ function nav(page){
   if(page==='contacts')renderContacts();
   if(page==='analytics')renderAnalytics();
   if(page==='completed')renderCompletedPage();
+  if(page==='timeline')renderTimeline();
 }
 
 // Navega pra aba Contatos já pré-filtrando state+county do ticket atual.
@@ -1096,6 +1114,7 @@ function buildPopup(t,c){
     +`<div><span style="color:#9a9888">Footage: </span>${t.footage} ft</div>`
     +(t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${esc(t.tipo)}</div>`:'')
     +`<div><span style="color:#9a9888">Status: </span><span style="color:${scol(es)};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
+    +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div style="display:flex;flex-wrap:wrap;gap:2px;margin:4px 0">'+pu.slice(0,4).map(p=>'<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#fef2f2;color:#dc2626;font-family:monospace;white-space:nowrap">'+esc(p.utility_name.length>18?p.utility_name.substring(0,18)+'…':p.utility_name)+'</span>').join('')+(pu.length>4?'<span style="font-size:9px;color:#9a9888">+'+( pu.length-4)+'</span>':'')+'</div>';})()
     +`<div><span style="color:#9a9888">Expira: </span><span${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`
     +(t.address?`<div><span style="color:#9a9888">Endereço: </span>${esc(t.address)}</div>`:'')
     +`<div style="margin-top:7px;padding-top:7px;border-top:1px solid #e2e0da;display:flex;gap:8px">`
@@ -1174,6 +1193,7 @@ function showPanel(t){
     +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentPanelId);return false;" title="Clique para editar">${t.footage} ft ✏</span></div>`
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
+    +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
     +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
 }
@@ -2289,9 +2309,10 @@ function renderTable(){
   const pr=document.getElementById('tbl-proj').value;
   const cl=document.getElementById('tbl-cli').value;
   const ut=document.getElementById('tbl-util')?.value||'';
+  const ed=document.getElementById('tbl-exp')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
+  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}
@@ -3030,13 +3051,13 @@ function editCurrentTicket(){
   document.getElementById('tm-l').value=t.location;
   document.getElementById('tm-st').value=t.state;
   document.getElementById('tm-f').value=t.footage;
-  document.getElementById('tm-e').value=t.expire;
+  document.getElementById('tm-e').value=_toIsoDate(t.expire)||t.expire;
   document.getElementById('tm-notes').value=t.notes||'';
   document.getElementById('tm-tipo').value=t.tipo||'';
   document.getElementById('tm-job').value=t.job||'';
   document.getElementById('tm-prime').value=t.prime||'';
   document.getElementById('tm-addr').value=t.address||'';
-  const eoEl=document.getElementById('tm-expireOld');if(eoEl)eoEl.value=t.expireOld||'';
+  const eoEl=document.getElementById('tm-expireOld');if(eoEl)eoEl.value=_toIsoDate(t.expireOld)||t.expireOld||'';
   openModal('ov-ticket');
 }
 async function saveTicket(){
@@ -4632,7 +4653,7 @@ async function renderSyncHealth(){
     const{data:rows,error}=await sb.from('sync_811_log').select('state,status,started_at').order('started_at',{ascending:false}).limit(40);
     if(error||!rows)return;
     const el=document.getElementById('sync-health-widget');if(!el)return;
-    const by={IN:[],FL:[]};
+    const by={IN:[],FL:[],IL:[],WI:[]};
     for(const row of rows){if(by[row.state])by[row.state].push(row);}
     let h='';
     for(const[st,lg]of Object.entries(by)){
@@ -4658,7 +4679,7 @@ async function loadLastSync(){
     if(error||!rows||!rows.length){console.warn('[LastSync]',error?.message||'Nenhum registro');return;}
     const by={};for(const row of rows){if(row.finished_at&&!by[row.state])by[row.state]=row;}
     const parts=[];
-    for(const st of ['IN','FL']){
+    for(const st of ['IN','FL','IL','WI']){
       const row=by[st];if(!row||!row.finished_at){parts.push(st+': —');continue;}
       const d=new Date(row.finished_at);const dm=Math.round((Date.now()-d.getTime())/60000);
       let ago;if(dm<2)ago='agora';else if(dm<60)ago=dm+'min atrás';else if(dm<120)ago='1h atrás';else if(dm<1440)ago=Math.round(dm/60)+'h atrás';else ago=Math.round(dm/1440)+'d atrás';
@@ -4687,7 +4708,7 @@ function renderHealthCard(){
   const h=window._syncHealth;
   if(!h){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Carregando...</div>';return;}
   let html='';
-  for(const st of ['IN','FL']){
+  for(const st of ['IN','FL','IL','WI']){
     const row=h.states[st];
     if(!row){html+='<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:600">'+st+'</span> <span style="color:var(--muted)">— sem dados</span></div>';continue;}
     const d=new Date(row.finished_at);const dm=Math.round((Date.now()-d.getTime())/60000);
@@ -4744,6 +4765,121 @@ function syncLocations(){
   const el=document.getElementById('floc');
   if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${esc(l)}</option>`).join('');
 }
+/* ═══════════ TIMELINE / DIG WINDOW ═══════════ */
+function renderTimeline(){
+  const el=document.getElementById('timeline-content');if(!el)return;
+  const now=new Date();
+  const active=tickets.filter(t=>{
+    const s=(t.status||'').toLowerCase();
+    return s==='open'||s==='damage'||s==='clear';
+  });
+  const withExpire=active.map(t=>{
+    const ed=t.expire?_eod(t.expire):null;
+    return{t,ed};
+  }).filter(x=>x.ed&&!isNaN(x.ed.getTime())).sort((a,b)=>a.ed-b.ed);
+
+  if(!withExpire.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Nenhum ticket com data de vencimento</div>';return;}
+
+  // Range: 14 days back → 45 days ahead
+  const rangeStart=new Date(now);rangeStart.setDate(rangeStart.getDate()-14);
+  const rangeEnd=new Date(now);rangeEnd.setDate(rangeEnd.getDate()+45);
+  const totalDays=Math.round((rangeEnd-rangeStart)/(86400000));
+
+  // Stats
+  const expired=withExpire.filter(x=>x.ed<now).length;
+  const soon7=withExpire.filter(x=>{const d=(x.ed-now)/86400000;return d>=0&&d<=7;}).length;
+  const soon14=withExpire.filter(x=>{const d=(x.ed-now)/86400000;return d>7&&d<=14;}).length;
+
+  // Filters
+  const stateOpts=[...new Set(withExpire.map(x=>x.t.state).filter(Boolean))].sort();
+  const projOpts=[...new Set(withExpire.map(x=>x.t.projectId).filter(Boolean))].map(pid=>{const p=projects.find(x=>x.id===pid);return p?{id:pid,name:p.name}:null;}).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name));
+
+  let h='<div style="margin-bottom:16px">';
+  h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+  h+='<h2 style="margin:0;font-size:18px;font-weight:700">📅 Timeline — Dig Window</h2>';
+  h+='<select class="fi" id="tl-state" onchange="renderTimeline()" style="width:auto;min-width:100px;font-size:12px;padding:4px 8px"><option value="">Todos estados</option>'+stateOpts.map(s=>'<option>'+esc(s)+'</option>').join('')+'</select>';
+  h+='<select class="fi" id="tl-proj" onchange="renderTimeline()" style="width:auto;min-width:140px;font-size:12px;padding:4px 8px"><option value="">Todos projetos</option>'+projOpts.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('')+'</select>';
+  h+='<select class="fi" id="tl-status" onchange="renderTimeline()" style="width:auto;font-size:12px;padding:4px 8px"><option value="">Todos status</option><option>Open</option><option>Clear</option><option>Damage</option></select>';
+  h+='</div>';
+
+  // Stat pills
+  h+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">';
+  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#fef2f2;color:#dc2626;border:1px solid #fecaca">⛔ '+expired+' vencido'+(expired!==1?'s':'')+'</span>';
+  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#fffbeb;color:#d97706;border:1px solid #fde68a">⚠ '+soon7+' em 7d</span>';
+  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe">📋 '+soon14+' em 14d</span>';
+  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0">✅ '+(withExpire.length-expired-soon7-soon14)+' ok</span>';
+  h+='</div></div>';
+
+  // Get active filters (preserve across re-renders)
+  const curState=document.getElementById('tl-state')?.value||'';
+  const curProj=document.getElementById('tl-proj')?.value||'';
+  const curStatus=document.getElementById('tl-status')?.value||'';
+
+  let filtered=withExpire;
+  if(curState)filtered=filtered.filter(x=>x.t.state===curState);
+  if(curProj)filtered=filtered.filter(x=>x.t.projectId===curProj);
+  if(curStatus)filtered=filtered.filter(x=>effectiveStatus(x.t)===curStatus);
+
+  // Date headers
+  h+='<div style="position:relative;overflow-x:auto;padding-bottom:12px">';
+  h+='<div style="display:flex;align-items:center;height:24px;border-bottom:1px solid var(--border);margin-left:200px;position:relative;min-width:'+(totalDays*24)+'px">';
+  for(let i=0;i<=totalDays;i+=7){
+    const d=new Date(rangeStart);d.setDate(d.getDate()+i);
+    const isToday=d.toDateString()===now.toDateString();
+    const leftPx=Math.round((i/totalDays)*totalDays*24);
+    h+='<span style="position:absolute;left:'+leftPx+'px;font-size:9px;font-family:var(--mono);color:'+(isToday?'var(--red)':'var(--muted)')+'">'+d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+'</span>';
+  }
+  h+='</div>';
+
+  // Today line position
+  const todayPct=Math.max(0,Math.min(100,((now-rangeStart)/(rangeEnd-rangeStart))*100));
+
+  // Bars
+  const maxRows=Math.min(filtered.length,150);
+  for(let i=0;i<maxRows;i++){
+    const{t:tk,ed}=filtered[i];
+    const es=effectiveStatus(tk);
+    const daysLeft=Math.round((ed-now)/86400000);
+    const isExp=ed<now;
+    const proj=projects.find(p=>p.id===tk.projectId);
+
+    // Bar position
+    const barEnd=Math.max(0,Math.min(100,((ed-rangeStart)/(rangeEnd-rangeStart))*100));
+    const barStart=Math.max(0,barEnd-8);// Approximate 8% width per ticket
+    const barW=Math.max(2,barEnd-barStart);
+
+    const bc=isExp?'#dc2626':es==='Clear'?'#16a34a':es==='Damage'?'#d97706':'#2563eb';
+    const bgc=isExp?'#fef2f2':es==='Clear'?'#f0fdf4':es==='Damage'?'#fffbeb':'#eff6ff';
+
+    h+='<div style="display:flex;align-items:center;height:26px;border-bottom:1px solid var(--border)" onclick="openTicketDetail('+tk.id+')" title="'+esc(tk.ticket)+' — '+esc(es)+' — vence '+esc(tk.expire||'?')+'" class="tl-row">';
+    // Label
+    h+='<div style="width:200px;min-width:200px;padding:0 8px;display:flex;align-items:center;gap:6px;overflow:hidden">';
+    h+='<span style="font-family:var(--mono);font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+bc+'">'+esc(tk.ticket)+'</span>';
+    h+='<span style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(proj?proj.name:tk.client)+'</span>';
+    h+='</div>';
+    // Bar area
+    h+='<div style="flex:1;position:relative;height:100%;min-width:'+(totalDays*24)+'px">';
+    h+='<div style="position:absolute;left:'+barStart+'%;width:'+barW+'%;top:4px;height:18px;background:'+bc+';border-radius:3px;opacity:0.85"></div>';
+    // Expire label on bar
+    h+='<span style="position:absolute;left:'+(barEnd+0.5)+'%;top:5px;font-size:9px;font-family:var(--mono);color:var(--text2);white-space:nowrap">'+(isExp?'⛔ '+Math.abs(daysLeft)+'d atrás':(daysLeft<=7?'⚠ '+daysLeft+'d':daysLeft+'d'))+'</span>';
+    h+='</div>';
+    h+='</div>';
+  }
+
+  if(filtered.length>maxRows)h+='<div style="text-align:center;padding:8px;color:var(--muted);font-size:11px">... +'+(filtered.length-maxRows)+' tickets</div>';
+
+  // Today vertical line (overlay)
+  h+='<div style="position:absolute;top:0;bottom:0;left:calc(200px + '+todayPct+'%);width:2px;background:var(--red);opacity:0.5;pointer-events:none;z-index:1"></div>';
+  h+='</div>';
+
+  el.innerHTML=h;
+
+  // Restore filter values after innerHTML
+  const tlS=document.getElementById('tl-state');if(tlS&&curState)tlS.value=curState;
+  const tlP=document.getElementById('tl-proj');if(tlP&&curProj)tlP.value=curProj;
+  const tlSt=document.getElementById('tl-status');if(tlSt&&curStatus)tlSt.value=curStatus;
+}
+
 function syncAll(){
   rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();updateCompletedSidebar();
   if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}

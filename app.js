@@ -311,6 +311,26 @@ async function geocodeAddress(address,location,state){
   return null;
 }
 
+/* ═══════════ 6b. HELPERS: Baixa parcial (progresso campo) ═══════════ */
+// Formata footage com progresso parcial: "800 / 1,000 ft (80%)" ou "1,000 ft" se sem baixa
+function fmtProgress(t){
+  const total=t.footage||0;const done=t.completedFeet||0;
+  if(!total&&!done)return'0 ft';
+  if(!done)return total.toLocaleString()+' ft';
+  const pct=total>0?Math.min(Math.round(done/total*100),100):0;
+  return done.toLocaleString()+' / '+total.toLocaleString()+' ft'+(total>0?' ('+pct+'%)':'');
+}
+// Mini barra de progresso inline (HTML). Retorna '' se sem baixa parcial.
+function miniProgressBar(t,width){
+  const total=t.footage||0;const done=t.completedFeet||0;
+  if(!done||!total)return'';
+  const pct=Math.min(Math.round(done/total*100),100);
+  const c=pct>=100?'var(--green)':pct>=50?'#3b82f6':'var(--amber)';
+  const w=width||'100%';
+  return'<div style="width:'+w+';height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:3px">'
+    +'<div style="width:'+pct+'%;height:100%;background:'+c+';border-radius:3px;transition:width .3s"></div></div>';
+}
+
 /* ═══════════ 7. SUPABASE DATA LAYER ═══════════ */
 function dbToProject(r){
   return{
@@ -409,6 +429,7 @@ function dbToTicket(r){
     project_locked:r.project_locked||false,
     damageCount:r.damage_count||0,// Fase 1 do refactor Damage: contador separado do status
     county:r.county||'',// Fase 1 filtro county: auto-derivado pelo Python via base cidade→county
+    completedFeet:r.completed_feet||0,// Baixa parcial: footage concluído no campo
     created_at:r.created_at||null
   };
 }
@@ -427,7 +448,8 @@ function ticketToDb(t){
     history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false,
     project_locked:t.project_locked||false,
     damage_count:Math.max(0,parseInt(t.damageCount)||0),// Fase 1 refactor Damage: força integer não-negativo
-    county:t.county||''// Fase 1 filtro county
+    county:t.county||'',// Fase 1 filtro county
+    completed_feet:Math.max(0,parseInt(t.completedFeet)||0)// Baixa parcial: footage concluído no campo
   };
 }
 function projectToDb(p){
@@ -1111,7 +1133,7 @@ function buildPopup(t,c){
     +(proj?`<div><span style="color:#9a9888">Projeto: </span>${esc(proj.name)}</div>`:'')
     +`<div><span style="color:#9a9888">Cliente: </span>${esc(t.client)}</div>`
     +(t.prime?`<div><span style="color:#9a9888">Prime: </span>${esc(t.prime)}</div>`:'')
-    +`<div><span style="color:#9a9888">Footage: </span>${t.footage} ft</div>`
+    +`<div><span style="color:#9a9888">Footage: </span>${fmtProgress(t)}</div>`+miniProgressBar(t)
     +(t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${esc(t.tipo)}</div>`:'')
     +`<div><span style="color:#9a9888">Status: </span><span style="color:${scol(es)};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div style="display:flex;flex-wrap:wrap;gap:2px;margin:4px 0">'+pu.slice(0,4).map(p=>'<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#fef2f2;color:#dc2626;font-family:monospace;white-space:nowrap">'+esc(p.utility_name.length>18?p.utility_name.substring(0,18)+'…':p.utility_name)+'</span>').join('')+(pu.length>4?'<span style="font-size:9px;color:#9a9888">+'+( pu.length-4)+'</span>':'')+'</div>';})()
@@ -1190,7 +1212,7 @@ function showPanel(t){
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Cliente</span><span class="mp-val">${esc(t.client)}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
-    +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentPanelId);return false;" title="Clique para editar">${t.footage} ft ✏</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentPanelId);return false;" title="Clique para editar">${fmtProgress(t)} ✏</span></div>`+miniProgressBar(t)
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
@@ -1287,7 +1309,8 @@ function renderList(){
     return`<div class="tcard s-${es.toLowerCase()}" data-id="${t.id}" onclick="focusT(${t.id})">`
     +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
-    +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
+    +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${fmtProgress(t)}</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
+    +miniProgressBar(t)
     +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${graceCutoverDate(t)}</div>`:`<div style="font-size:10px;color:#b45309;font-weight:600;margin-top:2px">⚠ Carência (${esc(os)}) até ${graceCutoverDate(t)}</div>`;})():'')
     +(t.pending&&!inGrace?`<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:2px">⏳ ${esc(t.pending)}</div>`:'')
     +`</div>`;
@@ -1450,7 +1473,13 @@ function openTicketDetail(id){
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${esc(t.location)}, ${esc(t.state)}</span></div>`
     +(t.county?`<div class="mp-row"><span class="mp-key">County</span><span class="mp-val" style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="gotoContactsForCounty('${esc(t.county).replace(/'/g,"\\\\'")}','${esc(t.state)}');return false;" title="Ver contatos que atendem ${esc(t.county)} County">📞 ${esc(t.county)} County</span></div>`:'')
-    +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val">${t.footage} ft</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val">${fmtProgress(t)}</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Campo</span><span class="mp-val">`
+    +(isAdmin&&!isSharedView
+      ?`<span style="cursor:pointer;color:var(--accent)" onclick="quickEditProgress(${t.id});return false;" title="Registrar baixa parcial">${t.completedFeet?(t.completedFeet.toLocaleString()+' ft ✏'):'📝 Registrar baixa'}</span>`
+      :(t.completedFeet?t.completedFeet.toLocaleString()+' ft':'—'))
+    +`</span></div>`
+    +(t.completedFeet?miniProgressBar(t):'')
     +`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${esc(t.job||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${esc(t.address||'—')}</span></div>`
@@ -1589,14 +1618,44 @@ function renderHistory(t){
 
 async function quickEditFootage(id){
   const t=tickets.find(x=>x.id===id);if(!t)return;
-  const val=prompt('Footage para '+t.ticket+':',t.footage||0);
+  const val=prompt('Footage total para '+t.ticket+':',t.footage||0);
   if(val===null)return;
   const num=parseInt(val)||0;
   t.footage=num;
   t.history=t.history||[];
   t.history.push({ts:Date.now(),action:'Footage: '+num+' ft',color:'#1a6cf0'});
+  // Pergunta concluído logo em seguida
+  const val2=prompt('Footage CONCLUÍDO no campo (0 = sem baixa parcial):',t.completedFeet||0);
+  if(val2!==null){
+    const done=Math.max(0,parseInt(val2)||0);
+    if(done!==t.completedFeet){
+      const old=t.completedFeet||0;
+      t.completedFeet=done;
+      t.history.push({ts:Date.now(),action:`Progresso campo: ${old} → ${done} ft`,color:'#16a34a'});
+    }
+  }
   const ok=await saveTicketToDb(t);
-  if(ok){toast('Footage atualizado: '+num+' ft','success');openTicketDetail(id);syncAll();}
+  if(ok){toast('Footage atualizado: '+num+' ft'+(t.completedFeet?' ('+t.completedFeet+' concluído)':''),'success');openTicketDetail(id);syncAll();}
+}
+
+// ── QUICK EDIT: Baixa parcial (só concluído) ──
+async function quickEditProgress(id){
+  const t=tickets.find(x=>x.id===id);if(!t)return;
+  const total=t.footage||0;
+  const val=prompt('Footage concluído no campo para '+t.ticket+(total?' (total: '+total+' ft)':'')+':',t.completedFeet||0);
+  if(val===null)return;
+  const done=Math.max(0,parseInt(val)||0);
+  if(done===t.completedFeet)return;
+  const old=t.completedFeet||0;
+  t.completedFeet=done;
+  t.history=t.history||[];
+  t.history.push({ts:Date.now(),action:`Progresso campo: ${old} → ${done} ft`,color:'#16a34a'});
+  const ok=await saveTicketToDb(t);
+  if(ok){
+    const pct=total>0?Math.round(done/total*100):0;
+    toast(`Progresso: ${done}/${total} ft (${pct}%)`,'success');
+    openTicketDetail(id);syncAll();
+  }
 }
 
 // ── TICKET RENEWAL ──
@@ -2322,7 +2381,9 @@ function renderTable(){
     return sortAsc?String(a[sortCol]||'').localeCompare(String(b[sortCol]||'')):String(b[sortCol]||'').localeCompare(String(a[sortCol]||''));
   });
 
-  document.getElementById('tbl-count').textContent=`${f.length} tickets · ${f.reduce((s,t)=>s+(t.footage||0),0).toLocaleString()} ft`;
+  const _totalFtTbl=f.reduce((s,t)=>s+(t.footage||0),0);
+  const _doneFtTbl=f.reduce((s,t)=>s+(t.completedFeet||0),0);
+  document.getElementById('tbl-count').textContent=`${f.length} tickets · ${_doneFtTbl?_doneFtTbl.toLocaleString()+' / ':''}${_totalFtTbl.toLocaleString()} ft`+(_doneFtTbl&&_totalFtTbl?' ('+Math.round(_doneFtTbl/_totalFtTbl*100)+'% campo)':'');
   document.getElementById('tbl-body').innerHTML=f.map(t=>{
     const pends=getTicketPendingUtils(String(t.ticket).trim());
     const pendNames=pends.map(p=>p.utility_name);
@@ -2339,7 +2400,7 @@ function renderTable(){
       +`<td style="color:var(--muted);font-size:12px">${esc(t.prime||'—')}</td>`
       +`<td>${esc(t.location)}, ${esc(t.state)}</td>`
       +`<td class="tc-${es.toLowerCase()}">${esc(es)}${inGrace?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}${pendChips}</td>`
-      +`<td style="font-family:var(--mono)">${t.footage} ft</td>`
+      +`<td style="font-family:var(--mono)">${t.completedFeet?fmtProgress(t):(t.footage+' ft')}</td>`
       +`<td style="font-family:var(--mono);font-size:12px">${esc(t.expire||'—')}</td>`
       +`<td style="color:var(--muted)">${esc(t.tipo||'—')}</td>`
       +`<td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td>`
@@ -2379,6 +2440,8 @@ function renderDash(){
   const openFt=openT.reduce((s,t)=>s+(t.footage||0),0);
   const clearFt=clearT.reduce((s,t)=>s+(t.footage||0),0);
   const damageFt=damageT.reduce((s,t)=>s+(t.footage||0),0);
+  const completedFt=fTickets.reduce((s,t)=>s+(t.completedFeet||0),0);
+  const pctCampo=totalFt>0?Math.round(completedFt/totalFt*100):0;
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
   const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
@@ -2423,7 +2486,7 @@ function renderDash(){
   +'</div>'
 
   // ── STAT CARDS
-  +'<div style="display:grid;grid-template-columns:1fr 1.4fr 1.4fr 1.2fr 1.2fr;gap:8px;margin-bottom:16px">'
+  +'<div style="display:grid;grid-template-columns:1fr 1.4fr 1.4fr 1.2fr 1.2fr 1.2fr;gap:8px;margin-bottom:16px">'
   +'<div class="stat-card" style="padding:10px 12px;cursor:pointer" onclick="nav(\'tickets\')">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Total ativo</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+total+'</div>'
@@ -2443,6 +2506,11 @@ function renderDash(){
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+damageFt.toLocaleString()+' ft</div>'
   +'<div style="margin-top:3px;font-size:10px;color:'+(damage>0?'var(--amber)':'var(--muted)')+'">'+( damage>0?'atenção':'sem mudança')+'</div></div>'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Progresso campo</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+pctCampo+'%</div>'
+  +'<div style="font-size:10px;color:var(--muted)">'+completedFt.toLocaleString()+' / '+totalFt.toLocaleString()+' ft</div>'
+  +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px"><div style="width:'+pctCampo+'%;height:100%;background:#3b82f6;border-radius:3px"></div></div></div>'
   +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--purple);cursor:pointer" onclick="nav(\'map\')">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem trajeto</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--purple)">'+noMap.length+'</div>'
@@ -2537,6 +2605,7 @@ function renderProjects(){
     const _es=(t)=>effectiveStatus(t);
     const openC=ts.filter(t=>_es(t)==='Open').length,clearC=ts.filter(t=>_es(t)==='Clear').length,damageC=ts.filter(t=>_es(t)==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
+    const campoFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);const pctCampoP=projTotal>0?Math.round(campoFt/projTotal*100):0;
     const clearFtP=ts.filter(t=>_es(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
     const openFtP=ts.filter(t=>_es(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
     const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
@@ -2550,7 +2619,7 @@ function renderProjects(){
     const aggLocStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
     // Prioriza a localidade descrita no modal (p.desc); só usa cidades agregadas dos tickets como fallback.
     const locStr=p.desc||aggLocStr;
-    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div><div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
+    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
   g.innerHTML=active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>';
@@ -2850,12 +2919,15 @@ function enterSharedView(pid){
   const clearC=ts.filter(t=>t.status==='Clear').length;
   const damageC=ts.filter(t=>t.status==='Damage').length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
+  const shDoneFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);
+  const shPctCampo=totalFt>0?Math.round(shDoneFt/totalFt*100):0;
   document.getElementById('shared-stats').innerHTML=`
     <div class="shared-stat"><span class="shared-stat-val">${ts.length}</span><span class="shared-stat-lbl">Total</span></div>
     <div class="shared-stat"><span class="shared-stat-val" style="color:var(--red)">${openC}</span><span class="shared-stat-lbl">Open</span></div>
     <div class="shared-stat"><span class="shared-stat-val" style="color:var(--green)">${clearC}</span><span class="shared-stat-lbl">Clear</span></div>
     <div class="shared-stat"><span class="shared-stat-val" style="color:var(--amber)">${damageC}</span><span class="shared-stat-lbl">Damage</span></div>
-    <div class="shared-stat"><span class="shared-stat-val">${totalFt.toLocaleString()}</span><span class="shared-stat-lbl">Feet</span></div>`;
+    <div class="shared-stat"><span class="shared-stat-val">${totalFt.toLocaleString()}</span><span class="shared-stat-lbl">Feet</span></div>`
+    +(shDoneFt?`<div style="margin-top:6px;padding:6px 10px;background:var(--bg);border-radius:var(--r);font-size:11px"><div style="display:flex;justify-content:space-between;align-items:center;color:#3b82f6;font-weight:600;margin-bottom:3px"><span>📐 Progresso campo</span><span>${shPctCampo}%</span></div><div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${shPctCampo}%;height:100%;background:#3b82f6;border-radius:3px"></div></div><div style="text-align:center;font-size:10px;color:var(--muted);margin-top:3px">${shDoneFt.toLocaleString()} / ${totalFt.toLocaleString()} ft</div></div>`:'');
 
   renderSharedList();
   initSharedMap(p);
@@ -2946,7 +3018,8 @@ function renderSharedList(){
     return`<div class="tcard s-${es.toLowerCase()}" data-id="${t.id}" onclick="shFocusTicket(${t.id})">`
     +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
-    +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${t.footage} ft</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
+    +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${fmtProgress(t)}</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
+    +miniProgressBar(t)
     +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${graceCutoverDate(t)}</div>`:`<div style="font-size:10px;color:#b45309;font-weight:600;margin-top:2px">⚠ Carência (${esc(os)}) até ${graceCutoverDate(t)}</div>`;})():'')
     +`</div>`;
   }).join(''):'<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
@@ -3033,7 +3106,7 @@ function shFitAll(){
 function openNewTicket(){
   editingTicketId=null;
   document.getElementById('ticket-modal-title').textContent='Novo ticket';
-  ['tm-t','tm-c','tm-co','tm-l','tm-st','tm-f','tm-notes','tm-tipo','tm-job','tm-prime','tm-addr'].forEach(id=>document.getElementById(id).value='');
+  ['tm-t','tm-c','tm-co','tm-l','tm-st','tm-f','tm-cf','tm-notes','tm-tipo','tm-job','tm-prime','tm-addr'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('tm-s').value='Open';
   document.getElementById('tm-e').value='';
   const eo=document.getElementById('tm-expireOld');if(eo)eo.value='';
@@ -3053,6 +3126,7 @@ function editCurrentTicket(){
   document.getElementById('tm-l').value=t.location;
   document.getElementById('tm-st').value=t.state;
   document.getElementById('tm-f').value=t.footage;
+  document.getElementById('tm-cf').value=t.completedFeet||0;
   document.getElementById('tm-e').value=_toIsoDate(t.expire)||t.expire;
   document.getElementById('tm-notes').value=t.notes||'';
   document.getElementById('tm-tipo').value=t.tipo||'';
@@ -3089,12 +3163,14 @@ async function saveTicket(){
       const newProjId=document.getElementById('tm-proj').value;
       const projChanged=newProjId!==t.projectId;
       const oldExpireOld=t.expireOld||'';
+      const oldCompFeet=t.completedFeet||0;
+      const newCompFeet=Math.max(0,parseInt(document.getElementById('tm-cf').value)||0);
       Object.assign(t,{
         ticket:tnum,projectId:newProjId,
         client:document.getElementById('tm-c').value,company:document.getElementById('tm-co').value,
         location:document.getElementById('tm-l').value,state:document.getElementById('tm-st').value,
         footage:parseInt(document.getElementById('tm-f').value)||0,expire:normalizedExpire,
-        expireOld:normalizedExpireOld,
+        expireOld:normalizedExpireOld,completedFeet:newCompFeet,
         notes:document.getElementById('tm-notes').value,status:newStatus,
         tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,
         prime:document.getElementById('tm-prime').value,address:document.getElementById('tm-addr').value
@@ -3102,6 +3178,7 @@ async function saveTicket(){
       if(projChanged&&newProjId)t.project_locked=true;// trava ao trocar projeto manualmente
       t.history=t.history||[];// Fix bug #20: garante array antes dos pushes abaixo
       if(old!==newStatus)t.history.push({ts:Date.now(),action:`Status: ${old} → ${newStatus}`,color:scol(newStatus)});
+      if(oldCompFeet!==newCompFeet)t.history.push({ts:Date.now(),action:`Progresso campo: ${oldCompFeet} → ${newCompFeet} ft`,color:'#16a34a'});
       if(oldExpireOld!==normalizedExpireOld){
         t.history.push({ts:Date.now(),action:`Expira (Antigo): ${oldExpireOld||'—'} → ${normalizedExpireOld||'—'}`,color:'#b45309'});
       }
@@ -3110,7 +3187,7 @@ async function saveTicket(){
     }
     toast('Ticket atualizado!','success');
   }else{
-    const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:normalizedExpire,footage:parseInt(document.getElementById('tm-f').value)||0,client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false,project_locked:!!document.getElementById('tm-proj').value};
+    const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:normalizedExpire,footage:parseInt(document.getElementById('tm-f').value)||0,completedFeet:Math.max(0,parseInt(document.getElementById('tm-cf').value)||0),client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false,project_locked:!!document.getElementById('tm-proj').value};
     tickets.push(t);await saveTicketToDb(t);savedId=t.id;
     toast('Ticket criado!','success');
   }
@@ -3171,7 +3248,7 @@ function readFile(file){
       const headers=allRows[headerRowIdx].map(h=>nk(h));
       const dataRows=allRows.slice(headerRowIdx+1).filter(r=>r.some(c=>c!==null&&c!==''&&c!==undefined));
       const ci=(...names)=>{for(const n of names){const i=headers.findIndex(h=>h&&h===n);if(i>=0)return i;}for(const n of names){const i=headers.findIndex(h=>h&&h.startsWith(n)&&h.length<=n.length+3);if(i>=0)return i;}return -1;};
-      const idx={ticket:ci('ticket'),company:ci('company'),state:ci('state'),location:ci('location'),status:ci('status'),expire:ci('expireon'),footage:ci('footage'),client:ci('client'),prime:ci('prime'),job:ci('jobnumber'),tipo:ci('tipo'),address:ci('mainaddress'),project:ci('project'),pending:ci('pending'),oldTicket2:ci('oldticket'),statusOld:ci('statusold'),expireOld:ci('oldexpirationdate')};
+      const idx={ticket:ci('ticket'),company:ci('company'),state:ci('state'),location:ci('location'),status:ci('status'),expire:ci('expireon'),footage:ci('footage'),completedFeet:ci('completedfeet','completed','concluido','donefeet','campo'),client:ci('client'),prime:ci('prime'),job:ci('jobnumber'),tipo:ci('tipo'),address:ci('mainaddress'),project:ci('project'),pending:ci('pending'),oldTicket2:ci('oldticket'),statusOld:ci('statusold'),expireOld:ci('oldexpirationdate')};
       const getCell=(row,i)=>{if(i<0||i>=row.length)return'';const v=row[i];if(v===null||v===undefined)return'';if(v instanceof Date)return v.toLocaleDateString('en-US');return String(v).replace(/\xa0/g,'').trim();};
       parsed=dataRows.map(row=>{
         const ticket=getCell(row,idx.ticket);if(!ticket)return null;
@@ -3184,7 +3261,7 @@ function readFile(file){
         // Normaliza expire (formato do Excel pode vir como Date → "4/15/2026" sem zero) e expireOld
         const expire=normalizeExpire(getCell(row,idx.expire));
         const expireOld=normalizeExpire(getCell(row,idx.expireOld));
-        return{ticket,company:getCell(row,idx.company)||'One Drill',state:getCell(row,idx.state),location:getCell(row,idx.location),status,expire,footage:parseFloat(getCell(row,idx.footage))||0,client:getCell(row,idx.client),prime:getCell(row,idx.prime),job:getCell(row,idx.job),tipo:getCell(row,idx.tipo),address:getCell(row,idx.address),projectName:getCell(row,idx.project),pending:getCell(row,idx.pending),oldTicket2:getCell(row,idx.oldTicket2),statusOld:getCell(row,idx.statusOld),expireOld};
+        return{ticket,company:getCell(row,idx.company)||'One Drill',state:getCell(row,idx.state),location:getCell(row,idx.location),status,expire,footage:parseFloat(getCell(row,idx.footage))||0,completedFeet:parseFloat(getCell(row,idx.completedFeet))||0,client:getCell(row,idx.client),prime:getCell(row,idx.prime),job:getCell(row,idx.job),tipo:getCell(row,idx.tipo),address:getCell(row,idx.address),projectName:getCell(row,idx.project),pending:getCell(row,idx.pending),oldTicket2:getCell(row,idx.oldTicket2),statusOld:getCell(row,idx.statusOld),expireOld};
       }).filter(Boolean);
       if(!parsed.length){toast('Nenhuma linha válida.','danger');return;}
       const cols=['ticket','client','prime','status','footage','tipo'];
@@ -3273,7 +3350,7 @@ async function doImport(){
         // Respeita locks: não sobrescreve projeto travado nem status travado
         const newPid=existing.project_locked?existing.projectId:(pid||existing.projectId);
         const newStatus=existing.status_locked?existing.status:r.status;
-        Object.assign(existing,{company:r.company,state:r.state,location:r.location,status:newStatus,expire:r.expire,footage:r.footage,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,projectId:newPid});
+        Object.assign(existing,{company:r.company,state:r.state,location:r.location,status:newStatus,expire:r.expire,footage:r.footage,completedFeet:r.completedFeet||existing.completedFeet||0,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,projectId:newPid});
         if(oldStatus!==newStatus)existing.history.push({ts:Date.now(),action:`Status: ${oldStatus} → ${newStatus}`,color:scol(newStatus)});
         existing.history.push({ts:Date.now(),action:'Atualizado via Excel ✅'+(existing.project_locked?' (projeto travado 🔒)':''),color:'#16a34a'});
         batchBuffer.push(existing);
@@ -3287,7 +3364,7 @@ async function doImport(){
       }
     }
 
-    const t={id:null,ticket:r.ticket,projectId:pid,company:r.company||'One Drill',state:r.state,location:r.location,status:r.status,expire:r.expire,footage:r.footage,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,notes:'',fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Importado via Excel',color:'#1a6cf0'}],attachments:[],status_locked:false,project_locked:false};
+    const t={id:null,ticket:r.ticket,projectId:pid,company:r.company||'One Drill',state:r.state,location:r.location,status:r.status,expire:r.expire,footage:r.footage,completedFeet:r.completedFeet||0,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,notes:'',fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Importado via Excel',color:'#1a6cf0'}],attachments:[],status_locked:false,project_locked:false};
     tickets.push(t);
     batchBuffer.push(t);
     novo.push(t);
@@ -3321,11 +3398,11 @@ function exportExpiring(){
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
   const wb=XLSX.utils.book_new();
-  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes','Old Ticket #','Expire Old']];
+  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes','Old Ticket #','Expire Old']];
   for(const t of f){
     const proj=projects.find(p=>p.id===t.projectId)?.name||'';
     const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
-    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends,t.oldTicket2||'',t.expireOld||'']);
+    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,proj,pends,t.oldTicket2||'',t.expireOld||'']);
   }
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30},{wch:16},{wch:12}];
@@ -3344,7 +3421,8 @@ function exportFiltered(){
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||'']),['','','','','','','TOTAL:',totalFt,'','','','','','','','']];
+  const _doneFtExp=f.reduce((s,t)=>s+(t.completedFeet||0),0);
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||'']),['','','','','','','TOTAL:',totalFt,_doneFtExp,'','','','','','','','']];
   const ws=XLSX.utils.aoa_to_sheet(tData);
   XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   XLSX.writeFile(wb,'OneDrill_Filtrado_'+new Date().toISOString().slice(0,10)+'.xlsx');
@@ -3427,17 +3505,18 @@ function previewBulkUpdate(){
 
   // Detecta header: 1ª linha tem palavras-chave (ticket/footage/projeto/cliente/prime) → trata como header
   const firstCells=_bulkSplitRow(lines[0]).map(_bulkNk);
-  const hasHeader=firstCells.some(c=>c==='ticket'||c==='footage'||c==='feet'||c==='ft'||c==='projeto'||c==='project'||c==='cliente'||c==='client'||c==='prime');
-  let idxTicket=-1, idxFootage=-1, idxProject=-1, idxClient=-1, idxPrime=-1;
+  const hasHeader=firstCells.some(c=>c==='ticket'||c==='footage'||c==='feet'||c==='ft'||c==='projeto'||c==='project'||c==='cliente'||c==='client'||c==='prime'||c==='concluido'||c==='completedfeet'||c==='completed'||c==='done');
+  let idxTicket=-1, idxFootage=-1, idxProject=-1, idxClient=-1, idxPrime=-1, idxCompleted=-1;
   if(hasHeader){
     idxTicket=firstCells.findIndex(c=>c==='ticket'||c==='tickets'||c==='ticketnum'||c==='ticketnumber');
     idxFootage=firstCells.findIndex(c=>c==='footage'||c==='feet'||c==='ft'||c==='comprimento');
+    idxCompleted=firstCells.findIndex(c=>c==='concluido'||c==='completedfeet'||c==='completedfeet'||c==='completed'||c==='done'||c==='donefeet'||c==='campo');
     idxProject=firstCells.findIndex(c=>c==='projeto'||c==='project'||c==='projectid'||c==='projectname');
     idxClient=firstCells.findIndex(c=>c==='cliente'||c==='client'||c==='clientname');
     idxPrime=firstCells.findIndex(c=>c==='prime'||c==='primecontractor');
     lines.shift();
   }else{
-    // Sem header: assume ordem ticket, footage, projeto (cliente/prime requerem header)
+    // Sem header: assume ordem ticket, footage, projeto (cliente/prime/concluido requerem header)
     idxTicket=0; idxFootage=1; idxProject=2;
   }
 
@@ -3468,6 +3547,22 @@ function previewBulkUpdate(){
           }
         }else{
           row.warn=(row.warn||'')+'footage inválido; ';
+        }
+      }
+    }
+
+    // Concluído (baixa parcial)
+    if(idxCompleted>=0){
+      const cfRaw=(cells[idxCompleted]||'').trim();
+      if(cfRaw!==''){
+        const cf=parseFloat(cfRaw.replace(/[,.](?=\d{3}\b)/g,'').replace(',','.'));
+        if(!isNaN(cf)&&cf>=0){
+          if(cf!==(t.completedFeet||0)){
+            row.changes.push({field:'concluído',from:t.completedFeet||0,to:cf});
+            row.newCompletedFeet=cf;
+          }
+        }else{
+          row.warn=(row.warn||'')+'concluído inválido; ';
         }
       }
     }
@@ -3536,6 +3631,7 @@ function previewBulkUpdate(){
   let html='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg);position:sticky;top:0">'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Ticket</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Footage</th>'
+    +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Concluído</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Projeto</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Cliente</th>'
     +'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Prime</th>'
@@ -3544,19 +3640,21 @@ function previewBulkUpdate(){
 
   // Erros primeiro
   for(const e of errors){
-    html+=`<tr style="background:var(--red-bg)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(e.ticket)}</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="padding:5px 8px;color:var(--red)">⚠ ${esc(e.error)}</td></tr>`;
+    html+=`<tr style="background:var(--red-bg)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(e.ticket)}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="padding:5px 8px;color:var(--red)">⚠ ${esc(e.error)}</td></tr>`;
   }
   for(const r of plan){
     const ftChange=r.changes.find(c=>c.field==='footage');
+    const cfChange=r.changes.find(c=>c.field==='concluído');
     const prChange=r.changes.find(c=>c.field==='projeto');
     const clChange=r.changes.find(c=>c.field==='cliente');
     const piChange=r.changes.find(c=>c.field==='prime');
     const ftCell=ftChange?`<span style="color:var(--muted)">${(ftChange.from||0).toLocaleString()}</span> → <strong>${ftChange.to.toLocaleString()}</strong>`:'—';
+    const cfCell=cfChange?`<span style="color:var(--muted)">${(cfChange.from||0).toLocaleString()}</span> → <strong style="color:#3b82f6">${cfChange.to.toLocaleString()}</strong>`:'—';
     const prCell=prChange?`<span style="color:var(--muted)">${esc(prChange.from)}</span> → <strong>${esc(prChange.to)}</strong>${prChange.partial?' <span style="color:var(--amber);font-size:10px">(match parcial)</span>':''}`:'—';
     const clCell=clChange?`<span style="color:var(--muted)">${esc(clChange.from)}</span> → <strong>${esc(clChange.to)}</strong>`:'—';
     const piCell=piChange?`<span style="color:var(--muted)">${esc(piChange.from)}</span> → <strong>${esc(piChange.to)}</strong>`:'—';
     const warn=r.warn?`<span style="color:var(--amber)">⚠ ${esc(r.warn)}</span>`:'';
-    html+=`<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(r.ticket)}</td><td style="padding:5px 8px">${ftCell}</td><td style="padding:5px 8px">${prCell}</td><td style="padding:5px 8px">${clCell}</td><td style="padding:5px 8px">${piCell}</td><td style="padding:5px 8px">${warn}</td></tr>`;
+    html+=`<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 8px;font-family:var(--mono)">${esc(r.ticket)}</td><td style="padding:5px 8px">${ftCell}</td><td style="padding:5px 8px">${cfCell}</td><td style="padding:5px 8px">${prCell}</td><td style="padding:5px 8px">${clCell}</td><td style="padding:5px 8px">${piCell}</td><td style="padding:5px 8px">${warn}</td></tr>`;
   }
   html+='</tbody></table>';
 
@@ -3606,6 +3704,7 @@ async function applyBulkUpdate(){
 
       // Atualiza objeto em memória primeiro
       if(r.newFootage!==undefined)r.t.footage=r.newFootage;
+      if(r.newCompletedFeet!==undefined)r.t.completedFeet=r.newCompletedFeet;
       if(r.newProjectId!==undefined){
         r.t.projectId=r.newProjectId;
         r.t.project_locked=!!r.newProjectId;// alocação manual sempre tranca
@@ -3619,6 +3718,7 @@ async function applyBulkUpdate(){
       // Monta payload com APENAS os campos que mudaram (mais seguro que update completo)
       const upd={history:r.t.history};
       if(r.newFootage!==undefined)upd.footage=r.newFootage;
+      if(r.newCompletedFeet!==undefined)upd.completed_feet=Math.max(0,parseInt(r.newCompletedFeet)||0);
       if(r.newProjectId!==undefined){
         upd.project_id=r.newProjectId||null;
         upd.project_locked=!!r.newProjectId;
@@ -3660,7 +3760,7 @@ async function applyBulkUpdate(){
 
 function exportExcel(){
   const wb=XLSX.utils.book_new();
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||''])];
+  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...tickets.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||''])];
   const ws=XLSX.utils.aoa_to_sheet(tData);XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   const pData=[['Nome','Cliente','Estado','Status','Total Feet','Tickets'],...projects.map(p=>[p.name,p.client,p.state,p.status,p.totalFeet,tickets.filter(t=>t.projectId===p.id).length])];
   const wp=XLSX.utils.aoa_to_sheet(pData);XLSX.utils.book_append_sheet(wb,wp,'Projetos');

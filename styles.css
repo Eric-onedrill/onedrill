@@ -3955,3 +3955,15 @@ tbody td {
    ══════════════════════════════════════════════ */
 .tl-row { cursor: pointer; transition: background .12s; }
 .tl-row:hover { background: var(--bg2); }
+
+/* ══════════════════════════════════════════════
+   PROGRESSO CAMPO (baixa parcial)
+   ══════════════════════════════════════════════ */
+.prog-campo { display:flex; align-items:center; gap:6px; font-size:12px; font-family:var(--mono); }
+.prog-campo-bar { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; min-width:50px; }
+.prog-campo-fill { height:100%; border-radius:3px; transition:width .3s; }
+.prog-campo-pct { font-size:11px; font-weight:700; min-width:36px; text-align:right; }
+/* Cores */
+.prog-campo-fill.pf-done { background:var(--green); }
+.prog-campo-fill.pf-mid  { background:#3b82f6; }
+.prog-campo-fill.pf-low  { background:var(--amber); }

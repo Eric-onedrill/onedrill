@@ -4762,16 +4762,31 @@ def fix_clear_dates():
 # ── SECTION: LOCAL_OVERRIDES ────────────────────────────────────
 # Regras manuais aplicadas DEPOIS do classify do portal 811.
 # Match case-insensitive + substring em location + utility.
-# Pra adicionar regra: append novo dict, rodar --apply-overrides 1 vez.
-LOCAL_OVERRIDES = [
-    {
-        "name": "Frontier Terre Haute",
-        "location_match": "terre haute",
-        "utility_match": "frontier",
-        "force_status": "Clear",
-        "reason": "Override local: Frontier sempre Clear em Terre Haute (validado em campo)",
-    },
-]
+# Pra adicionar regra: editar local_overrides.json e rodar --apply-overrides 1 vez.
+
+_OVERRIDES_JSON = os.path.join(BASE_DIR, "local_overrides.json")
+
+def _load_overrides():
+    if os.path.exists(_OVERRIDES_JSON):
+        try:
+            with open(_OVERRIDES_JSON, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list) and data:
+                log.info(f"[Overrides] {len(data)} regra(s) carregada(s) de local_overrides.json")
+                return data
+        except Exception as e:
+            log.warning(f"[Overrides] Erro ao ler local_overrides.json: {e} — usando fallback hardcoded")
+    return [
+        {
+            "name": "Frontier Terre Haute",
+            "location_match": "terre haute",
+            "utility_match": "frontier",
+            "force_status": "Clear",
+            "reason": "Override local: Frontier sempre Clear em Terre Haute (validado em campo)",
+        },
+    ]
+
+LOCAL_OVERRIDES = _load_overrides()
 
 
 def _apply_local_overrides(ticket, deduped_responses):
@@ -6892,7 +6907,108 @@ def audit_health_and_email():
         print(body)
 
 
+def check_expiring_tickets(days_ahead=5, target_state=None):
+    """Alerta por email sobre tickets Open/Damage que vencem nos próximos N dias.
 
+    Pensado pra rodar diário (Task Scheduler) ou antes de cada sync.
+    Se nenhum ticket expirando, silêncio total.
+    """
+    log.info("=" * 55)
+    log.info(f"  CHECK-EXPIRING: tickets vencendo em {days_ahead} dias")
+    log.info("=" * 55)
+
+    query = "&status=in.(Open,Damage)&order=expire"
+    if target_state:
+        query += f"&state=eq.{_qv(target_state)}"
+
+    tickets_list = sb_get("tickets", query)
+    if not tickets_list:
+        log.info("[Expiring] Nenhum ticket Open/Damage no banco")
+        return
+
+    today = datetime.now().date()
+    cutoff = today + timedelta(days=days_ahead)
+
+    expiring = []
+    already_expired = []
+
+    for t in tickets_list:
+        raw_expire = (t.get("expire") or "").strip()
+        if not raw_expire:
+            continue
+        norm = normalize_expire(raw_expire)
+        if not norm:
+            continue
+        try:
+            m = re.match(r"(\d{2})/(\d{2})/(\d{4})", norm)
+            if not m:
+                continue
+            exp_date = datetime(int(m.group(3)), int(m.group(1)), int(m.group(2))).date()
+        except (ValueError, IndexError):
+            continue
+
+        if exp_date < today:
+            already_expired.append((t, exp_date))
+        elif exp_date <= cutoff:
+            expiring.append((t, exp_date))
+
+    total = len(expiring) + len(already_expired)
+    if total == 0:
+        log.info(f"[Expiring] ✅ Nenhum ticket vencendo até {cutoff.strftime('%m/%d/%Y')}")
+        return
+
+    log.warning(f"[Expiring] ⚠ {len(expiring)} vencendo em {days_ahead}d + {len(already_expired)} já vencido(s)")
+
+    lines = []
+    lines.append(f"OneDrill 811 — Alerta de Vencimento ({datetime.now().strftime('%d/%m/%Y %H:%M')})")
+    lines.append("=" * 60)
+
+    if already_expired:
+        lines.append(f"\n⛔ JÁ VENCIDOS ({len(already_expired)}):")
+        lines.append("-" * 40)
+        for t, d in sorted(already_expired, key=lambda x: x[1]):
+            days_ago = (today - d).days
+            lines.append(f"  [{t.get('state','?')}] {t['ticket']}  venceu {d.strftime('%m/%d/%Y')} ({days_ago}d atrás)  — {t.get('status')} — {t.get('location','')}")
+
+    if expiring:
+        lines.append(f"\n⚠ VENCENDO EM {days_ahead} DIAS ({len(expiring)}):")
+        lines.append("-" * 40)
+        for t, d in sorted(expiring, key=lambda x: x[1]):
+            days_left = (d - today).days
+            lines.append(f"  [{t.get('state','?')}] {t['ticket']}  vence {d.strftime('%m/%d/%Y')} ({days_left}d)  — {t.get('status')} — {t.get('location','')}")
+
+    lines.append("\n" + "=" * 60)
+    lines.append("Ação: renovar tickets antes do vencimento no portal 811.")
+    report = "\n".join(lines)
+
+    print(report)
+
+    import smtplib
+    from email.mime.text import MIMEText
+
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_pass = os.getenv("GMAIL_PASS")
+    alert_to = os.getenv("AUDIT_EMAIL") or os.getenv("ALERT_EMAIL")
+
+    if not all([gmail_user, gmail_pass, alert_to]):
+        log.info("[Expiring] Email não configurado — alerta só no console")
+        return
+
+    prefix = "⛔" if already_expired else "⚠"
+    subject = f"[OneDrill] {prefix} {total} ticket(s) vencendo/vencido(s) — {datetime.now().strftime('%d/%m/%Y')}"
+
+    msg = MIMEText(report, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = gmail_user
+    msg["To"] = alert_to
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(gmail_user, gmail_pass)
+            s.send_message(msg)
+        log.info(f"[Expiring] ✅ Alerta enviado pra {alert_to}")
+    except Exception as e:
+        log.warning(f"[Expiring] Erro ao enviar email: {e}")
 
 
 def clean_ghost_utilities():
@@ -7140,6 +7256,8 @@ if __name__ == "__main__":
     parser.add_argument("--clean-ghost-utilities", action="store_true", help="Remove respostas de utilities fantasmas (lixo 'All (N)', 'Event', etc)")
     parser.add_argument("--audit-health", action="store_true", help="Relatório de anomalias do banco (read-only, não altera nada)")
     parser.add_argument("--audit-health-email", action="store_true", help="Auditoria + email se anomalias > 0 (pra agendador)")
+    parser.add_argument("--check-expiring", action="store_true", help="Alerta de tickets Open/Damage vencendo nos próximos N dias")
+    parser.add_argument("--days-ahead", type=int, default=5, help="Dias pra frente pra checar vencimento (default 5)")
     parser.add_argument("--debug-expire", action="store_true", help="Diagnosticar extração de expire de um ticket — requer --ticket")
     parser.add_argument("--ticket",     type=str, help="Número do ticket alvo (usado com --fix-expires ou --debug-expire)")
     parser.add_argument("--no-cache",   action="store_true", help="Forçar re-scrape de todos (incluindo Clear em cache)")
@@ -7185,6 +7303,11 @@ if __name__ == "__main__":
             audit_health()
         elif getattr(args, 'audit_health_email', False):
             audit_health_and_email()
+        elif getattr(args, 'check_expiring', False):
+            check_expiring_tickets(
+                days_ahead=getattr(args, 'days_ahead', 5),
+                target_state=args.state
+            )
         elif getattr(args, 'debug_expire', False):
             if not args.ticket:
                 log.error("--debug-expire requer --ticket NNNNNN")

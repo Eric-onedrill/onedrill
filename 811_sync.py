@@ -2476,8 +2476,13 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                         if needs_patch:
                             ticket_patches.append(patch)
                         continue
+                    elif old_status:
+                        log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {t.get('expire_old', '')}) — antigo era {old_status}, processando normalmente")
                     else:
-                        log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {t.get('expire_old', '')}) — antigo era {old_status or 'Open'}, processando normalmente")
+                        log.warning(f"[{state}] {tnum}: 🔄 RENOVAÇÃO (graça até {t.get('expire_old', '')}) — status do antigo DESCONHECIDO, protegendo por precaução")
+                        if needs_patch:
+                            ticket_patches.append(patch)
+                        continue
 
             if none_pending and all_responded and t.get("status") == "Open":
                 # AUTO-CLEAR (Fix 2026-05-14): clear_ts = now (quando ticket mudou pra Clear)
@@ -6429,7 +6434,7 @@ async def populate_counties(target_state=None, force=False):
     # Query com filtro
     qs = "&select=id,ticket,state,location,geocoded_lat,geocoded_lon,county"
     if target_state:
-        qs += f"&state=eq.{target_state.upper()}"
+        qs += f"&state=eq.{_qv(target_state.upper())}"
     # Sem force, só pega os que precisam (county vazio ou null)
     if not force:
         qs += "&or=(county.is.null,county.eq.)"

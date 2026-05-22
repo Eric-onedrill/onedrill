@@ -150,13 +150,23 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── │ SECTION: CONSTANTS │ CONSTANTES ─────────────────────────────────────────
+BASE_DIR           = os.path.dirname(os.path.abspath(__file__))
+VALID_STATES       = {"FL", "IN", "IL", "WI"}
 W_SAFETY           = 300      # fallback ms quando não há seletor confiável
 NUM_TABS           = 3        # 3 abas paralelas (reduzir nao ajuda - bug eh do chromium_headless_shell-1217)
 CLEAR_CACHE_HOURS  = 24       # re-verifica Clear tickets 1x por dia
 MAX_AUTO_NOTES     = 10       # máximo de notas automáticas por ticket
 BATCH_SIZE         = 200      # tamanho do lote para bulk upsert
 MAX_IMPORT_PAGES   = 5        # com 100/pagina, 5 paginas = 500 tickets
-LOCK_FILE          = os.path.join(os.path.dirname(os.path.abspath(__file__)), "811_sync.lock")
+LOCK_FILE          = os.path.join(BASE_DIR, "811_sync.lock")
+TIMEOUT_PAGE       = 60000    # Playwright default timeout (ms)
+TIMEOUT_STABLE     = 3000     # wait_stable / wait_tab_content / wait_filter_results
+TIMEOUT_NAV        = 5000     # wait_for / wait_nav
+TIMEOUT_CLICK      = 8000     # click_and_wait
+
+
+def _profile_path(state):
+    return os.path.join(BASE_DIR, f"chrome_profile_{state}")
 
 # ── │ SECTION: LOCK │ LOCK FILE (evita execuções simultâneas) ────────────────
 class ProcessLock:
@@ -227,7 +237,7 @@ class ProcessLock:
 
 
 # ── │ SECTION: CANCEL_CACHE │ CACHE DE TICKETS CANCELADOS ────────────────────
-_CANCELED_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "canceled_cache.json")
+_CANCELED_CACHE_FILE = os.path.join(BASE_DIR, "canceled_cache.json")
 _canceled_cache_mem = None
 
 
@@ -276,7 +286,7 @@ def get_canceled_set(state):
 
 
 # ── │ SECTION: WAIT_HELPERS │ SMART WAIT HELPERS ──────────────────────────────
-async def wait_stable(page, timeout=3000):
+async def wait_stable(page, timeout=TIMEOUT_STABLE):
     """Espera a página estabilizar (rede ociosa). Fallback silencioso."""
     try:
         await page.wait_for_load_state("networkidle", timeout=timeout)
@@ -284,7 +294,7 @@ async def wait_stable(page, timeout=3000):
         await page.wait_for_timeout(W_SAFETY)
 
 
-async def wait_for(page, selector, timeout=5000, state="visible"):
+async def wait_for(page, selector, timeout=TIMEOUT_NAV, state="visible"):
     """Espera seletor aparecer. Retorna True se encontrou."""
     try:
         await page.wait_for_selector(selector, timeout=timeout, state=state)
@@ -293,7 +303,7 @@ async def wait_for(page, selector, timeout=5000, state="visible"):
         return False
 
 
-async def wait_nav(page, timeout=5000):
+async def wait_nav(page, timeout=TIMEOUT_NAV):
     """Espera após navegação: load completo + rede ociosa."""
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=timeout)
@@ -302,7 +312,7 @@ async def wait_nav(page, timeout=5000):
         await page.wait_for_timeout(W_SAFETY)
 
 
-async def wait_tab_content(page, timeout=3000):
+async def wait_tab_content(page, timeout=TIMEOUT_STABLE):
     """Espera conteúdo de aba carregar."""
     try:
         await page.wait_for_load_state("networkidle", timeout=timeout)
@@ -310,7 +320,7 @@ async def wait_tab_content(page, timeout=3000):
         await page.wait_for_timeout(W_SAFETY)
 
 
-async def wait_filter_results(page, timeout=3000):
+async def wait_filter_results(page, timeout=TIMEOUT_STABLE):
     """Espera resultados do filtro carregarem."""
     try:
         await page.wait_for_load_state("networkidle", timeout=timeout)
@@ -318,7 +328,7 @@ async def wait_filter_results(page, timeout=3000):
         await page.wait_for_timeout(W_SAFETY)
 
 
-async def click_and_wait(page, locator, wait_type="stable", timeout=8000):
+async def click_and_wait(page, locator, wait_type="stable", timeout=TIMEOUT_CLICK):
     """Clica num elemento e espera o resultado."""
     await locator.click()
     if wait_type == "nav":
@@ -331,7 +341,60 @@ async def click_and_wait(page, locator, wait_type="stable", timeout=8000):
         await wait_stable(page, timeout)
 
 
-# ── │ SECTION: PLAYWRIGHT_CTX │ PLAYWRIGHT CONTEXT MANAGER (evita Chrome órfão) 
+async def _dismiss_dialog(page, heading_text, label=""):
+    """Fecha modal Angular Material (Exactix FL) tentando 4 estratégias."""
+    dialog = page.locator(f'h1:has-text("{heading_text}")')
+    if not await dialog.count():
+        return True
+    for sel in [
+        'button[mat-dialog-close]', 'button.mat-dialog-close',
+        'button:has-text("Close")', 'button:has-text("OK")',
+        'button:has-text("Dismiss")', 'button:has-text("Cancel")',
+        'mat-dialog-container button.mat-icon-button',
+        'mat-dialog-container button[aria-label*="close" i]',
+        'mat-dialog-container button[aria-label*="dismiss" i]',
+    ]:
+        try:
+            btn = page.locator(sel)
+            if await btn.count():
+                await btn.first.click(timeout=2000)
+                await page.wait_for_timeout(400)
+                if not await dialog.count():
+                    return True
+        except Exception:
+            continue
+    try:
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(400)
+        if not await dialog.count():
+            return True
+    except Exception:
+        pass
+    try:
+        backdrop = page.locator('.cdk-overlay-backdrop').first
+        if await backdrop.count():
+            await backdrop.click(timeout=2000, force=True)
+            await page.wait_for_timeout(400)
+            if not await dialog.count():
+                return True
+    except Exception:
+        pass
+    try:
+        await page.evaluate(
+            "document.querySelectorAll('.cdk-overlay-container mat-dialog-container,"
+            " .cdk-overlay-pane, .cdk-overlay-backdrop').forEach(el => el.remove())"
+        )
+        await page.wait_for_timeout(200)
+        if not await dialog.count():
+            log.warning(f"  {label}: Dialog '{heading_text}' removido via JS (fallback)")
+            return True
+    except Exception as e:
+        log.warning(f"  {label}: Falha ao remover dialog via JS: {e}")
+    log.warning(f"  {label}: NAO conseguiu fechar dialog '{heading_text}'")
+    return False
+
+
+# ── │ SECTION: PLAYWRIGHT_CTX │ PLAYWRIGHT CONTEXT MANAGER (evita Chrome órfão)
 @asynccontextmanager
 async def playwright_context(state, headless=True):
     """Context manager que garante fechamento do browser mesmo com crash.
@@ -340,7 +403,7 @@ async def playwright_context(state, headless=True):
         async with playwright_context("FL") as (p, ctx, page):
             ...
     """
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
     p = ctx = page = None
     try:
         p = await async_playwright().start()
@@ -348,7 +411,7 @@ async def playwright_context(state, headless=True):
             perfil, headless=headless, args=["--no-sandbox"]
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
         yield p, ctx, page
     finally:
         if ctx:
@@ -393,6 +456,11 @@ def _sb_request(method, url, retries=3, **kwargs):
             else:
                 log.error(f"[Supabase] Falha após {retries} tentativas: {e}")
                 raise
+
+
+def _qv(val):
+    """URL-encode um valor pra PostgREST query (safe='' escapa &, =, espaço, etc.)."""
+    return urllib.parse.quote(str(val), safe="")
 
 
 def sb_get(table, qs=""):
@@ -1037,7 +1105,7 @@ def _load_counties_db():
     global _COUNTIES_DB
     if _COUNTIES_DB is not None:
         return _COUNTIES_DB
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "counties_data.json")
+    path = os.path.join(BASE_DIR, "counties_data.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
             _COUNTIES_DB = _json.load(f)
@@ -1277,7 +1345,7 @@ async def auto_login_silent(state):
         log.error(f"[{state}] Credenciais ausentes no .env")
         return False
 
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
 
     stealth_fn = None
     try:
@@ -1313,7 +1381,7 @@ async def auto_login_silent(state):
                 except Exception:
                     pass
 
-            page.set_default_timeout(60000)
+            page.set_default_timeout(TIMEOUT_PAGE)
             await page.goto(PORTALS[state]["url"], wait_until="domcontentloaded")
             await wait_stable(page)
             await _human_wait(1.5, 3.5)
@@ -1435,7 +1503,7 @@ async def auto_login_silent(state):
 
 async def auto_login(state):
     log.warning(f"[{state}] Sessão expirada — abrindo janela para renovação rápida...")
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
     try:
         async with async_playwright() as p:
             ctx2 = await p.chromium.launch_persistent_context(
@@ -1604,7 +1672,7 @@ async def back_to_dashboard(page, state):
 
 async def ensure_login(page, ctx, p, state):
     """Verifica login e renova se necessário. Retorna (page, ctx) atualizados."""
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
     if "login" in page.url.lower():
         await ctx.close()
         await asyncio.sleep(1)
@@ -1618,7 +1686,7 @@ async def ensure_login(page, ctx, p, state):
         await asyncio.sleep(1)
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
         if "login" in page.url.lower():
@@ -1645,7 +1713,7 @@ async def fast_back(page, state):
 # ── │ SECTION: SCRAPE │ SCRAPE (PARALELO) ────────────────────────────────────
 async def scrape(state, ticket_numbers, tickets_data=None):
     results = {}
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
 
     # Tickets que precisam de notes (Text tab)
     needs_notes = set()
@@ -1664,7 +1732,7 @@ async def scrape(state, ticket_numbers, tickets_data=None):
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -1685,7 +1753,7 @@ async def scrape(state, ticket_numbers, tickets_data=None):
             await asyncio.sleep(1)
             ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
+            page.set_default_timeout(TIMEOUT_PAGE)
             await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
             await wait_stable(page)
             if "login" in page.url.lower():
@@ -1755,81 +1823,7 @@ async def scrape(state, ticket_numbers, tickets_data=None):
                                 pass
                             await wait_tab_content(pg)
 
-                            # Fecha dialog "Marking delay" se existir (bloqueia cliques).
-                            # O modal do Exactix FL usa Angular Material — pode aparecer
-                            # com ou sem botão de fechar visível. Tenta múltiplas
-                            # estratégias e VERIFICA que fechou antes de seguir.
-                            try:
-                                md_dialog = pg.locator('h1:has-text("Marking delay")')
-                                if await md_dialog.count():
-                                    closed = False
-
-                                    # Estratégia 1: botões explícitos de fechar
-                                    close_selectors = [
-                                        'button[mat-dialog-close]',
-                                        'button.mat-dialog-close',
-                                        'button:has-text("Close")',
-                                        'button:has-text("OK")',
-                                        'button:has-text("Dismiss")',
-                                        'button:has-text("Cancel")',
-                                        'mat-dialog-container button.mat-icon-button',  # X icon
-                                        'mat-dialog-container button[aria-label*="close" i]',
-                                        'mat-dialog-container button[aria-label*="dismiss" i]',
-                                    ]
-                                    for sel in close_selectors:
-                                        try:
-                                            btn = pg.locator(sel)
-                                            if await btn.count():
-                                                await btn.first.click(timeout=2000)
-                                                await pg.wait_for_timeout(400)
-                                                if not await md_dialog.count():
-                                                    closed = True
-                                                    break
-                                        except Exception:
-                                            continue
-
-                                    # Estratégia 2: tecla ESC
-                                    if not closed:
-                                        try:
-                                            await pg.keyboard.press("Escape")
-                                            await pg.wait_for_timeout(400)
-                                            if not await md_dialog.count():
-                                                closed = True
-                                        except Exception:
-                                            pass
-
-                                    # Estratégia 3: clicar no backdrop (fora do modal)
-                                    if not closed:
-                                        try:
-                                            backdrop = pg.locator('.cdk-overlay-backdrop').first
-                                            if await backdrop.count():
-                                                await backdrop.click(timeout=2000, force=True)
-                                                await pg.wait_for_timeout(400)
-                                                if not await md_dialog.count():
-                                                    closed = True
-                                        except Exception:
-                                            pass
-
-                                    # Estratégia 4: remover o overlay via JavaScript
-                                    # (último recurso — nunca falha, mas é agressivo)
-                                    if not closed:
-                                        try:
-                                            await pg.evaluate("""
-                                                document.querySelectorAll('.cdk-overlay-container mat-dialog-container, .cdk-overlay-pane, .cdk-overlay-backdrop').forEach(el => el.remove());
-                                            """)
-                                            await pg.wait_for_timeout(200)
-                                            if not await md_dialog.count():
-                                                closed = True
-                                                log.warning(f"  {tnum}: Dialog 'Marking delay' removido via JS (fallback)")
-                                        except Exception as e:
-                                            log.warning(f"  {tnum}: Falha ao remover dialog via JS: {e}")
-
-                                    if closed:
-                                        log.debug(f"  {tnum}: Dialog 'Marking delay' fechado")
-                                    else:
-                                        log.warning(f"  {tnum}: NAO conseguiu fechar dialog 'Marking delay' — clique em 'All' pode falhar")
-                            except Exception as e:
-                                log.debug(f"  {tnum}: Erro ao tentar fechar dialog: {e}")
+                            await _dismiss_dialog(pg, "Marking delay", label=tnum)
 
                             # Clica "All" pra capturar TODAS as utilities
                             filter_clicked = False
@@ -1998,11 +1992,15 @@ async def scrape(state, ticket_numbers, tickets_data=None):
             return tab_results
 
         # Roda todas as abas em paralelo
-        chunk_results = await asyncio.gather(*[process_chunk(c, i) for i, c in enumerate(chunks)])
-        for cr in chunk_results:
-            results.update(cr)
-
-        await ctx.close()
+        try:
+            chunk_results = await asyncio.gather(*[process_chunk(c, i) for i, c in enumerate(chunks)])
+            for cr in chunk_results:
+                results.update(cr)
+        finally:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
     return results
 
 
@@ -2383,7 +2381,7 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                 scraped_utils = {r["utility"] for r in deduped_responses}
                 try:
                     db_pending = sb_get("ticket_811_responses",
-                                       f"&ticket_num=eq.{tnum}&status=eq.Pending&select=utility_name")
+                                       f"&ticket_num=eq.{_qv(tnum)}&status=eq.Pending&select=utility_name")
                     missed_pending = {r["utility_name"] for r in db_pending} - scraped_utils
                     if missed_pending:
                         log.warning(f"[{state}] {tnum}: ⚠ SEGURANÇA — {len(missed_pending)} utility(s) Pending no banco ausente(s) no scrape: {list(missed_pending)}")
@@ -2463,7 +2461,7 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                     real_old_clear = False
                     if old_ticket_num:
                         try:
-                            old_resps = sb_get("ticket_811_responses", f"&ticket_num=eq.{old_ticket_num}&select=status")
+                            old_resps = sb_get("ticket_811_responses", f"&ticket_num=eq.{_qv(old_ticket_num)}&select=status")
                             if old_resps and len(old_resps) > 0:
                                 has_pending = any(r.get("status") == "Pending" for r in old_resps)
                                 if not has_pending:
@@ -2590,7 +2588,7 @@ async def import_new_tickets(state, triggered_by="manual"):
     projects = sb_get("projects")
     new_tickets = []
     scraped_this_session = set()
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
 
     canceled_set = get_canceled_set(state)
     if canceled_set:
@@ -2599,7 +2597,7 @@ async def import_new_tickets(state, triggered_by="manual"):
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -2612,7 +2610,10 @@ async def import_new_tickets(state, triggered_by="manual"):
         ok = await goto_dashboard(page, state)
         if not ok:
             log.error(f"[{state}] Não conseguiu acessar dashboard — abortando importação")
-            await ctx.close()
+            try:
+                await ctx.close()
+            except Exception:
+                pass
             return 0
 
         await set_items_per_page(page, 100)
@@ -2770,7 +2771,7 @@ async def import_new_tickets(state, triggered_by="manual"):
                     if old_ticket_num:
                         log.info(f"[{state}] {tnum_ext}: Substitui ticket anterior {old_ticket_num}")
                         try:
-                            old_tickets = sb_get("tickets", f"&ticket=eq.{old_ticket_num}&state=eq.{state_code}")
+                            old_tickets = sb_get("tickets", f"&ticket=eq.{_qv(old_ticket_num)}&state=eq.{_qv(state_code)}")
                             if old_tickets:
                                 ot = old_tickets[0]
                                 # Herda trajeto
@@ -2840,7 +2841,10 @@ async def import_new_tickets(state, triggered_by="manual"):
             else:
                 break
 
-        await ctx.close()
+        try:
+            await ctx.close()
+        except Exception:
+            pass
 
     # Fix bug #4: insert em batch via upsert (era N+1 HTTP requests sequenciais).
     # Filtra duplicatas primeiro (pra manter os warnings) e depois envia em 1 request por batch.
@@ -2885,7 +2889,7 @@ async def import_new_tickets(state, triggered_by="manual"):
 
 # ── │ SECTION: RESCRAPE │ REESCRAPER: ATUALIZA NOTES + EXPIRE ─────────────────
 async def rescrape_notes(state, force=False):
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
     tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Open,Damage,Clear)&order=ticket")
     if not tickets:
         log.info(f"[{state}] Nenhum ticket ativo para re-scrape")
@@ -2909,7 +2913,7 @@ async def rescrape_notes(state, force=False):
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -2978,7 +2982,7 @@ async def rescrape_notes(state, force=False):
 
 # ── │ SECTION: CLEANUP │ LIMPAR TICKETS CANCELADOS ────────────────────────────
 async def cleanup_canceled(state):
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
     canceled = 0
 
     # Fase 1: REMOVIDA — tickets com status=Cancel ficam no banco como histórico.
@@ -2998,7 +3002,7 @@ async def cleanup_canceled(state):
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -3213,7 +3217,7 @@ async def validate_sessions():
     """Valida sessões FL e IN sequencialmente antes do sync paralelo.
     Se alguma sessão expirou, abre janela de login uma de cada vez."""
     for state in ["FL", "IN"]:
-        perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+        perfil = _profile_path(state)
         log.info(f"[{state}] Validando sessão...")
         try:
             async with async_playwright() as p:
@@ -3557,7 +3561,7 @@ async def save_ticket_pdfs_il(force=False):
     log.info(f"  SAVE-PDF IL (JULIE): {len(all_tickets)} tickets Clear/Damage")
     log.info("=" * 55)
 
-    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdfs")
+    base_dir = os.path.join(BASE_DIR, "pdfs")
     saved = 0
     errors = 0
 
@@ -3715,7 +3719,7 @@ async def scrape_diggers_ticket(page, tnum, retry=True, debug_dump=False):
     except Exception:
         if debug_dump:
             try:
-                base = os.path.dirname(os.path.abspath(__file__))
+                base = BASE_DIR
                 ss = os.path.join(base, f"debug_wi_{tnum}_no_button.png")
                 await page.screenshot(path=ss, full_page=True)
                 log.error(f"[WI] {tnum}: botão Find Tickets não apareceu — debug: {ss}")
@@ -3750,7 +3754,7 @@ async def scrape_diggers_ticket(page, tnum, retry=True, debug_dump=False):
     if not target_frame or not inp:
         if debug_dump:
             try:
-                base = os.path.dirname(os.path.abspath(__file__))
+                base = BASE_DIR
                 ss_path = os.path.join(base, f"debug_wi_{tnum}_no_input.png")
                 html_path = os.path.join(base, f"debug_wi_{tnum}_no_input.html")
                 await page.screenshot(path=ss_path, full_page=True)
@@ -4262,7 +4266,7 @@ def parse_contact_table(body, ticket_num, state):
 
 async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
     """Scrape contatos de utilities via Find Ticket (FL + IN)."""
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
 
     if not ticket_numbers:
         tickets_db = sb_get("tickets", f"&state=eq.{state}&status=in.(Open,Damage,Clear)&order=ticket")
@@ -4300,7 +4304,7 @@ async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=False, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -4320,7 +4324,7 @@ async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
             await asyncio.sleep(1)
             ctx = await p.chromium.launch_persistent_context(perfil, headless=False, args=["--no-sandbox"])
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
+            page.set_default_timeout(TIMEOUT_PAGE)
 
         for idx, tnum in enumerate(ticket_numbers):
             log.info(f"[{state}] Contatos ({idx+1}/{len(ticket_numbers)}) Ticket {tnum}")
@@ -4376,7 +4380,7 @@ async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
                         await page.wait_for_timeout(3000)
 
                     if idx < 2:
-                        ss2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"debug_after_search_{state}_{tnum}.png")
+                        ss2 = os.path.join(BASE_DIR, f"debug_after_search_{state}_{tnum}.png")
                         await page.screenshot(path=ss2, full_page=True)
                         log.info(f"[{state}] Screenshots salvos")
 
@@ -4393,7 +4397,7 @@ async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
                 body = await page.locator("body").inner_text()
 
                 if idx < 2:
-                    debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"debug_contacts_{state}_{tnum}.txt")
+                    debug_path = os.path.join(BASE_DIR, f"debug_contacts_{state}_{tnum}.txt")
                     with open(debug_path, "w", encoding="utf-8") as f:
                         f.write(f"URL: {page.url}\n\n{body}")
                     log.info(f"[{state}] Debug salvo: {debug_path}")
@@ -4444,7 +4448,7 @@ async def scrape_contacts(state="FL", ticket_numbers=None, force=False):
 # ── │ SECTION: UTILITY_HELPERS │ UTILITY HELPERS ──────────────────────────────
 def get_contacts_for_utility(utility_name, state="FL"):
     try:
-        data = sb_get("utility_contacts", f"&utility_name=eq.{utility_name}&state=eq.{state}")
+        data = sb_get("utility_contacts", f"&utility_name=eq.{_qv(utility_name)}&state=eq.{_qv(state)}")
         return data[0] if data else None
     except Exception:
         return None
@@ -4530,7 +4534,7 @@ def export_excel():
 
 # ── │ SECTION: DEBUG_SCREENSHOT │ DEBUG ───────────────────────────────────────
 async def debug_screenshot(state):
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
     if not os.path.exists(perfil):
         print(f"Perfil não encontrado: {perfil}")
         return
@@ -5017,7 +5021,7 @@ def debug_ticket_history(ticket_num):
     log.info(f"  DEBUG HISTORICO - Ticket: {ticket_num}")
     log.info("=" * 55)
 
-    tickets = sb_get("tickets", f"&ticket=eq.{ticket_num}&select=id,ticket,state,status,location,history,old_ticket2")
+    tickets = sb_get("tickets", f"&ticket=eq.{_qv(ticket_num)}&select=id,ticket,state,status,location,history,old_ticket2")
     if not tickets:
         log.info(f"Ticket {ticket_num} nao achado")
         return
@@ -5049,7 +5053,7 @@ def debug_ticket_history(ticket_num):
     log.info("=" * 55)
     log.info("  Responses (utilities):")
     log.info("=" * 55)
-    responses = sb_get("ticket_811_responses", f"&ticket_num=eq.{ticket_num}&select=utility_name,status,response_text,synced_at&order=utility_name")
+    responses = sb_get("ticket_811_responses", f"&ticket_num=eq.{_qv(ticket_num)}&select=utility_name,status,response_text,synced_at&order=utility_name")
     for r in responses:
         log.info(f"  {r.get('utility_name'):40} {r.get('status'):8} synced={r.get('synced_at','')[:19]}")
         rt = (r.get('response_text') or '')[:80]
@@ -5304,7 +5308,7 @@ def scan_emails_for_responses(commit=False, state_filter=None, days_back=7):
                 skipped_neg += 1
                 continue
 
-            tickets = sb_get("tickets", f"&ticket=eq.{ticket_num}&select=id,state,ticket")
+            tickets = sb_get("tickets", f"&ticket=eq.{_qv(ticket_num)}&select=id,state,ticket")
             if not tickets:
                 log.warning(f"    -> ticket {ticket_num} nao achado no banco")
                 skipped_no_ticket += 1
@@ -5587,8 +5591,8 @@ async def save_ticket_pdfs(state="FL", force=False):
     log.info(f"  ⚠ NÃO USE mouse/teclado enquanto roda")
     log.info("=" * 55)
 
-    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdfs")
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    base_dir = os.path.join(BASE_DIR, "pdfs")
+    perfil = _profile_path(state)
     saved = 0
     errors = 0
 
@@ -5598,7 +5602,7 @@ async def save_ticket_pdfs(state="FL", force=False):
             no_viewport=True  # Usa tela inteira, não viewport fixo
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -5623,7 +5627,7 @@ async def save_ticket_pdfs(state="FL", force=False):
                 no_viewport=True
             )
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
+            page.set_default_timeout(TIMEOUT_PAGE)
 
         ok = await goto_dashboard(page, state)
         if not ok:
@@ -5814,7 +5818,7 @@ def backup_database(backup_dir=None, keep_days=30):
     from datetime import timedelta
 
     today = datetime.now().strftime("%Y-%m-%d")
-    base = backup_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+    base = backup_dir or os.path.join(BASE_DIR, "backups")
     folder = os.path.join(base, today)
     os.makedirs(folder, exist_ok=True)
 
@@ -6195,12 +6199,12 @@ async def fix_renewals():
             continue
 
         log.info(f"[FixRenewals] [{state}] Verificando {len(items)} tickets renovados...")
-        perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+        perfil = _profile_path(state)
 
         async with async_playwright() as p:
             ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
+            page.set_default_timeout(TIMEOUT_PAGE)
 
             await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
             await wait_stable(page)
@@ -6220,7 +6224,7 @@ async def fix_renewals():
                     continue
                 ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
                 page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-                page.set_default_timeout(60000)
+                page.set_default_timeout(TIMEOUT_PAGE)
 
             ok = await goto_dashboard(page, state)
             if not ok:
@@ -6331,12 +6335,12 @@ async def fix_expires(target_ticket=None):
 
     for state, items in by_state.items():
         log.info(f"[FixExpires] [{state}] {len(items)} tickets a verificar")
-        perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+        perfil = _profile_path(state)
 
         async with async_playwright() as p:
             ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.set_default_timeout(60000)
+            page.set_default_timeout(TIMEOUT_PAGE)
 
             await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
             await wait_stable(page)
@@ -6987,7 +6991,7 @@ async def debug_expire(target_ticket, state=None):
     """
     if not state:
         # Auto-detecta o estado consultando o banco
-        rows = sb_get("tickets", f"&ticket=eq.{target_ticket}&select=state&limit=1")
+        rows = sb_get("tickets", f"&ticket=eq.{_qv(target_ticket)}&select=state&limit=1")
         if not rows:
             log.error(f"[DebugExpire] Ticket {target_ticket} não encontrado no banco")
             return
@@ -7001,12 +7005,12 @@ async def debug_expire(target_ticket, state=None):
     log.info(f"  DEBUG-EXPIRE: {target_ticket} ({state})")
     log.info("=" * 55)
 
-    perfil = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"chrome_profile_{state}")
+    perfil = _profile_path(state)
 
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(TIMEOUT_PAGE)
 
         await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
         await wait_stable(page)
@@ -7038,10 +7042,7 @@ async def debug_expire(target_ticket, state=None):
             body = await page.locator("body").inner_text()
 
             # Salva body cru num arquivo pra inspeção
-            dump_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                f"debug_expire_{target_ticket}.txt"
-            )
+            dump_path = os.path.join(BASE_DIR, f"debug_expire_{target_ticket}.txt")
             with open(dump_path, "w", encoding="utf-8") as f:
                 f.write(body)
             log.info(f"Body cru salvo em: {dump_path}")
@@ -7084,7 +7085,7 @@ async def debug_expire(target_ticket, state=None):
             print(f"  extract_expire_date() → '{result}'")
 
             # Compara com banco
-            rows = sb_get("tickets", f"&ticket=eq.{target_ticket}&select=expire&limit=1")
+            rows = sb_get("tickets", f"&ticket=eq.{_qv(target_ticket)}&select=expire&limit=1")
             if rows:
                 db_val = rows[0].get("expire", "")
                 print(f"  Valor no banco        → '{db_val}'")

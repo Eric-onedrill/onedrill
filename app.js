@@ -77,7 +77,7 @@ function lineWeight(t){return(t||'').toLowerCase().includes('main')?5:3;}
 
 /* ═══════════ 3. STATE ═══════════ */
 let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoords={};
-let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null;
+let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null,currentUserEmail='';
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
@@ -846,6 +846,7 @@ async function tryLogin(){
 
 /** Resolve role via app_roles com fallback por email */
 async function resolveRole(user){
+  currentUserEmail=(user.email||'').toLowerCase();
   try{
     const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',user.id).single();
     if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
@@ -896,7 +897,7 @@ async function doLogout(){
   // Evita que o interval continue rodando (e tentando fetchar dados) após logout.
   if(_autoRefreshId){clearInterval(_autoRefreshId);_autoRefreshId=null;}
   if(_syncTimerId){clearTimeout(_syncTimerId);_syncTimerId=null;}
-  isAdmin=false;role='viewer';
+  isAdmin=false;role='viewer';currentUserEmail='';
   document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('pg-dash').classList.add('active');
@@ -2064,8 +2065,7 @@ async function confirmRegisterDamage(){
     }else{
       // INSERT — calcula próximo seq (max+1 dos damages atuais do ticket)
       const nextSeq=(_currentDamages.length>0?Math.max(..._currentDamages.map(d=>d.seq||0)):0)+1;
-      const reportedBy=(typeof userEmail!=='undefined'&&userEmail)?userEmail:
-                       (typeof currentUserEmail!=='undefined'&&currentUserEmail)?currentUserEmail:'';
+      const reportedBy=currentUserEmail||'';
       const{error}=await sb.from('ticket_damages').insert({
         ticket_id:t.id,
         seq:nextSeq,
@@ -2348,9 +2348,9 @@ function renderDash(){
   const now=Date.now();const week=7*86400000;
 
   const total=fTickets.length;
-  const openT=fTickets.filter(t=>t.status==='Open');
-  const clearT=fTickets.filter(t=>t.status==='Clear');
-  const damageT=fTickets.filter(t=>t.status==='Damage');
+  const openT=fTickets.filter(t=>effectiveStatus(t)==='Open');
+  const clearT=fTickets.filter(t=>effectiveStatus(t)==='Clear');
+  const damageT=fTickets.filter(t=>effectiveStatus(t)==='Damage');
   const open=openT.length,clear=clearT.length,damage=damageT.length;
   const totalFt=fTickets.reduce((s,t)=>s+(t.footage||0),0);
   const openFt=openT.reduce((s,t)=>s+(t.footage||0),0);

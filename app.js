@@ -107,6 +107,7 @@ let supersededSet=new Set();
 let miniMap=null;
 let _expAlertEl=null;
 let _t2; // toast timer
+let _hasCompletedFeetCol=false; // Detectado no init: coluna completed_feet existe no banco?
 let _autoRefreshId=null; // fix bug #2: guardar ID do setInterval de auto-refresh pra limpar antes de recriar
 let _sharedRefreshId=null; // mesmo padrão pro auto-refresh do shared view (link público)
 let _syncTimerId=null;   // fix bug #3: guardar ID do setTimeout de updateSyncTimer pra evitar cascata
@@ -437,7 +438,7 @@ function ticketToDb(t){
   // GUARDA ÚNICA de escrita: normaliza expire/expire_old antes de gravar no banco.
   // Todos os caminhos de save passam por aqui (import Excel, edit, renew, Clear manual,
   // save de trajeto, batch upsert) — garante que o banco NUNCA recebe formato poluído.
-  return{
+  const o={
     ticket:t.ticket, project_id:t.projectId||null, company:t.company||'',
     state:t.state||'', location:t.location||'', status:t.status||'Open',
     expire:normalizeExpire(t.expire||''), footage:t.footage||0, client:t.client||'', prime:t.prime||'',
@@ -448,9 +449,11 @@ function ticketToDb(t){
     history:t.history||[], attachments:t.attachments||[], status_locked:t.status_locked||false,
     project_locked:t.project_locked||false,
     damage_count:Math.max(0,parseInt(t.damageCount)||0),// Fase 1 refactor Damage: força integer não-negativo
-    county:t.county||'',// Fase 1 filtro county
-    completed_feet:Math.max(0,parseInt(t.completedFeet)||0)// Baixa parcial: footage concluído no campo
+    county:t.county||''// Fase 1 filtro county
   };
+  // Só inclui completed_feet se coluna existe no banco (evita erro 42703 que quebraria TODOS os saves)
+  if(_hasCompletedFeetCol)o.completed_feet=Math.max(0,parseInt(t.completedFeet)||0);
+  return o;
 }
 function projectToDb(p){
   return{
@@ -495,6 +498,10 @@ async function initSupabase(){
     const{p,t}=await Promise.race([fetchData(),timeout]);
     projects=(p||[]).map(dbToProject);
     tickets=(t||[]).map(dbToTicket);
+    // Detecta se coluna completed_feet existe (evita erro 42703 em saves se ainda não criou)
+    const{error:cfErr}=await sb.from('tickets').select('completed_feet').limit(1);
+    _hasCompletedFeetCol=!cfErr;
+    if(!_hasCompletedFeetCol)console.warn('[Init] Coluna completed_feet não existe no banco. Baixa parcial desativada até rodar o ALTER TABLE.');
     rebuildSupersededSet();
     return true;
   }catch(e){console.error('Supabase error:',e);return false;}
@@ -3718,7 +3725,7 @@ async function applyBulkUpdate(){
       // Monta payload com APENAS os campos que mudaram (mais seguro que update completo)
       const upd={history:r.t.history};
       if(r.newFootage!==undefined)upd.footage=r.newFootage;
-      if(r.newCompletedFeet!==undefined)upd.completed_feet=Math.max(0,parseInt(r.newCompletedFeet)||0);
+      if(r.newCompletedFeet!==undefined&&_hasCompletedFeetCol)upd.completed_feet=Math.max(0,parseInt(r.newCompletedFeet)||0);
       if(r.newProjectId!==undefined){
         upd.project_id=r.newProjectId||null;
         upd.project_locked=!!r.newProjectId;

@@ -2233,7 +2233,9 @@ async function renderUtils(t){
     }
     // Fix 2026-05-14: detecta Not Participating como variante visual (badge laranja)
     // Continua sendo status Clear no banco/sistema, so muda o visual no detalhe
-    const isNotPart=u=>((u.response_text||'').toLowerCase().includes('not participating')||
+    // "Não Participa" é conceito exclusivo de Wisconsin (Diggers Hotline)
+    // Em FL/IN/IL, "3U: Not service provider" é Clear normal (verde)
+    const isNotPart=u=>(u.state==='WI')&&((u.response_text||'').toLowerCase().includes('not participating')||
                         (u.response_text||'').toLowerCase().includes('not service provider'));
     data.forEach(u=>{ u._isNotPart=u.status==='Clear'&&isNotPart(u); });
     const pending=data.filter(u=>u.status==='Pending');

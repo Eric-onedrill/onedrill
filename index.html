@@ -425,6 +425,7 @@
       <div class="fg"><label class="fl">Local</label><input class="finp" id="tm-l" placeholder="Orlando"></div>
       <div class="fg"><label class="fl">Estado</label><input class="finp" id="tm-st" placeholder="FL"></div>
       <div class="fg"><label class="fl">Footage</label><input class="finp" id="tm-f" type="number" placeholder="0"></div>
+      <div class="fg"><label class="fl">Concluído (ft)</label><input class="finp" id="tm-cf" type="number" placeholder="0" min="0"></div>
       <div class="fg"><label class="fl">Expira</label><input class="finp" id="tm-e" type="date"></div>
       <div class="fg"><label class="fl">Expira (Antigo)</label><input class="finp" id="tm-expireOld" type="date"></div>
       <div class="fg"><label class="fl">Tipo</label><input class="finp" id="tm-tipo" placeholder="Main line / Service"></div>
@@ -473,6 +474,7 @@
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">
         Cole uma planilha do Excel/Google Sheets (Ctrl+C/Cmd+C → Ctrl+V/Cmd+V aqui) com a coluna
         <strong>ticket</strong> e qualquer combinação destas — <strong>footage</strong>,
+        <strong>concluido</strong> (ft concluídos no campo),
         <strong>projeto</strong> (nome ou ID), <strong>cliente</strong>, <strong>prime</strong>.
         A primeira linha pode ser cabeçalho ou já os dados.<br>
         Campos vazios não são alterados. Pra remover do projeto, escreva <code>-</code> ou <code>sem projeto</code> na coluna projeto.

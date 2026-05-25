@@ -2380,9 +2380,10 @@ function renderTable(){
   const ed=document.getElementById('tbl-exp')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  const _stReal=st==='A Realizar'?'Clear':st;
+  const _stReal=st==='A Realizar'?'Clear':st==='Sem Trajeto'?'':st;
   let f=filterTickets({status:_stReal,projectId:pr,client:cl,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
   if(st==='A Realizar')f=f.filter(t=>{const ft=t.footage||0;const cf=t.completedFeet||0;return ft>0&&cf<ft;});
+  if(st==='Sem Trajeto')f=f.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}
@@ -2526,48 +2527,12 @@ function renderDash(){
   +'<div style="font-size:10px;color:var(--muted)">'+pendCampoFt.toLocaleString()+' ft restantes</div>'
   +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px"><div style="width:'+pctClearDone+'%;height:100%;background:#3b82f6;border-radius:3px"></div></div>'
   +'<div style="font-size:10px;color:#3b82f6;margin-top:2px">Clear — pendente campo</div></div>'
-  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--purple);cursor:pointer" onclick="nav(\'map\')">'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--purple);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Sem Trajeto\';renderTable();},100)">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem trajeto</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--purple)">'+noMap.length+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">de '+total+' ativos</div>'
   +'<div style="font-size:10px;color:var(--purple);margin-top:3px">'+Math.round(noMap.length/Math.max(total,1)*100)+'% descobertos</div></div>'
   +'</div>'
-
-  // ── KPI SEMANAL (feet clareados por semana)
-  +function(){
-    var _wks=[];
-    for(var w=5;w>=0;w--){
-      var wStart=now-(w+1)*7*864e5;var wEnd=now-w*864e5*7;
-      var wCnt=0,wFt=0;
-      for(var i=0;i<fTickets.length;i++){
-        var t=fTickets[i];if(t.status!=='Clear'||!t.history)continue;
-        for(var j=t.history.length-1;j>=0;j--){
-          var a=(t.history[j].action||'').toLowerCase();
-          var isC=a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
-          if(isC&&t.history[j].ts>=wStart&&t.history[j].ts<wEnd){wCnt++;wFt+=(t.footage||0);break;}
-        }
-      }
-      var d2=new Date(wEnd);
-      _wks.push({label:String(d2.getDate()).padStart(2,'0')+'/'+String(d2.getMonth()+1).padStart(2,'0'),cnt:wCnt,ft:wFt});
-    }
-    var _wkMax=Math.max.apply(null,_wks.map(function(w2){return w2.ft;}))||1;
-    var totalWkFt=_wks.reduce(function(s,w2){return s+w2.ft;},0);
-    var avgWk=Math.round(totalWkFt/_wks.length);
-    return'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:600;color:var(--text)">📊 Produção semanal</span>'
-    +'<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">média '+avgWk.toLocaleString()+' ft/sem</span></div>'
-    +'<div style="display:flex;align-items:flex-end;gap:8px;height:100px">'
-    +_wks.map(function(w2){
-      var bh=Math.max(w2.ft/_wkMax*70,3);
-      return'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">'
-      +'<div style="font-size:9px;font-weight:700;color:var(--green)">'+w2.cnt+'</div>'
-      +'<div style="font-size:8px;color:var(--muted)">'+w2.ft.toLocaleString()+'ft</div>'
-      +'<div style="width:100%;height:'+bh+'px;background:var(--green);border-radius:3px 3px 0 0;min-height:3px;transition:height .3s"></div>'
-      +'<div style="font-size:9px;color:var(--muted)">'+w2.label+'</div></div>';
-    }).join('')
-    +'</div></div>';
-  }()
 
   // ── TICKETS VENCENDO
   +'<div style="background:var(--white);border:1px solid '+(soon.length?'var(--red-border)':'var(--border)')+';border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
@@ -4078,6 +4043,41 @@ function toggleInfoPanel(){
 }
 
 /* ═══════════ 26. ANALYTICS ═══════════ */
+function renderWeeklyProduction(fTickets){
+  var now=Date.now();var _wks=[];
+  for(var w=5;w>=0;w--){
+    var wStart=now-(w+1)*7*864e5;var wEnd=now-w*864e5*7;
+    var wCnt=0,wFt=0;
+    for(var i=0;i<fTickets.length;i++){
+      var t=fTickets[i];if(t.status!=='Clear'||!t.history)continue;
+      for(var j=t.history.length-1;j>=0;j--){
+        var a=(t.history[j].action||'').toLowerCase();
+        var isC=a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
+        if(isC&&t.history[j].ts>=wStart&&t.history[j].ts<wEnd){wCnt++;wFt+=(t.footage||0);break;}
+      }
+    }
+    var d2=new Date(wEnd);
+    _wks.push({label:String(d2.getDate()).padStart(2,'0')+'/'+String(d2.getMonth()+1).padStart(2,'0'),cnt:wCnt,ft:wFt});
+  }
+  var _wkMax=Math.max.apply(null,_wks.map(function(w2){return w2.ft;}))||1;
+  var totalWkFt=_wks.reduce(function(s,w2){return s+w2.ft;},0);
+  var avgWk=Math.round(totalWkFt/_wks.length);
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+  +'<div class="dash-card-title" style="margin-bottom:0">📊 Produção semanal</div>'
+  +'<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">média '+avgWk.toLocaleString()+' ft/sem</span></div>'
+  +'<div style="display:flex;align-items:flex-end;gap:8px;height:120px">'
+  +_wks.map(function(w2){
+    var bh=Math.max(w2.ft/_wkMax*80,3);
+    return'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">'
+    +'<div style="font-size:10px;font-weight:700;color:var(--green)">'+w2.cnt+'</div>'
+    +'<div style="font-size:9px;color:var(--muted)">'+w2.ft.toLocaleString()+' ft</div>'
+    +'<div style="width:100%;height:'+bh+'px;background:var(--green);border-radius:3px 3px 0 0;min-height:3px;transition:height .3s"></div>'
+    +'<div style="font-size:9px;color:var(--muted)">'+w2.label+'</div></div>';
+  }).join('')
+  +'</div></div></div>';
+}
+
 function renderAnalytics(){
   const el=document.getElementById('analytics-content');if(!el)return;
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
@@ -4128,6 +4128,7 @@ function renderAnalytics(){
   el.innerHTML=
     '<div class="page-title">Analytics <span style="font-size:13px;font-weight:400;color:var(--muted);font-family:var(--mono)">'+new Date().toLocaleDateString('pt-BR')+'</span>'+syncPill+'<span style="margin-left:auto;display:flex;gap:6px">'+scopeSel+sf+'</span></div>'
     +renderClearedStats(fT)
+    +renderWeeklyProduction(fT)
     +renderWeeklyEvolution(fT)
     +renderProgressoFootage(fT,ps)
     +renderRiskAnalytics(fT)

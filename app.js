@@ -490,10 +490,18 @@ async function initSupabase(){
     const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),15000));
     const fetchData=async()=>{
       const{data:p,error:ep}=await sb.from('projects').select('*').order('name');
-      const{data:t,error:et}=await sb.from('tickets').select('*').order('ticket');
+      // Supabase default limit = 1000 rows. Paginar pra carregar TODOS os tickets.
+      let allTickets=[];let from=0;const PAGE=1000;
+      while(true){
+        const{data:page,error:et}=await sb.from('tickets').select('*').order('ticket').range(from,from+PAGE-1);
+        if(et)throw new Error('Tickets: '+et.message);
+        if(!page||!page.length)break;
+        allTickets=allTickets.concat(page);
+        if(page.length<PAGE)break;
+        from+=PAGE;
+      }
       if(ep)throw new Error('Projetos: '+ep.message);
-      if(et)throw new Error('Tickets: '+et.message);
-      return{p,t};
+      return{p,t:allTickets};
     };
     const{p,t}=await Promise.race([fetchData(),timeout]);
     projects=(p||[]).map(dbToProject);
@@ -981,9 +989,10 @@ function enterApp(){
     if(document.querySelector('.overlay.open')){console.log('[AutoRefresh] Pulado — modal aberto');return;}
     try{
       const{data:p}=await sb.from('projects').select('*').order('name');
-      const{data:t}=await sb.from('tickets').select('*').order('ticket');
+      let _art=[];let _af=0;
+      while(true){const{data:pg}=await sb.from('tickets').select('*').order('ticket').range(_af,_af+999);if(!pg||!pg.length)break;_art=_art.concat(pg);if(pg.length<1000)break;_af+=1000;}
       if(p)projects=p.map(dbToProject);
-      if(t)tickets=t.map(dbToTicket);
+      if(_art.length)tickets=_art.map(dbToTicket);
       rebuildSupersededSet();
       await loadUtilCache();
       await loadLastSync();
@@ -2908,9 +2917,10 @@ function enterSharedView(pid){
     if(document.querySelector('.overlay.open'))return;
     try{
       const{data:pp}=await sb.from('projects').select('*').order('name');
-      const{data:tt}=await sb.from('tickets').select('*').order('ticket');
+      let _srt=[];let _sf2=0;
+      while(true){const{data:pg}=await sb.from('tickets').select('*').order('ticket').range(_sf2,_sf2+999);if(!pg||!pg.length)break;_srt=_srt.concat(pg);if(pg.length<1000)break;_sf2+=1000;}
       if(pp)projects=pp.map(dbToProject);
-      if(tt)tickets=tt.map(dbToTicket);
+      if(_srt.length)tickets=_srt.map(dbToTicket);
       rebuildSupersededSet();
       await loadUtilCache();
       if(typeof renderSharedList==='function')renderSharedList();
@@ -5145,9 +5155,10 @@ async function manualRefresh(){
   setSyncStatus(true,'Atualizando...');
   try{
     const{data:p}=await sb.from('projects').select('*').order('name');
-    const{data:t}=await sb.from('tickets').select('*').order('ticket');
+    let _mrt=[];let _mf2=0;
+    while(true){const{data:pg}=await sb.from('tickets').select('*').order('ticket').range(_mf2,_mf2+999);if(!pg||!pg.length)break;_mrt=_mrt.concat(pg);if(pg.length<1000)break;_mf2+=1000;}
     if(p)projects=p.map(dbToProject);
-    if(t)tickets=t.map(dbToTicket);
+    if(_mrt.length)tickets=_mrt.map(dbToTicket);
     rebuildSupersededSet();
     await loadUtilCache();
     await loadLastSync();

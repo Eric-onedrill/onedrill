@@ -2460,6 +2460,7 @@ function renderDash(){
   const completedFt=fTickets.reduce((s,t)=>s+(t.completedFeet||0),0);
   const pctCampo=totalFt>0?Math.round(completedFt/totalFt*100):0;
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
+  const noProj=fTickets.filter(t=>!t.projectId&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
   const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
 
@@ -2468,9 +2469,9 @@ function renderDash(){
       const a=(h.action||'').toLowerCase();
       if(h.ts<start||h.ts>=end)return false;
       if(status==='Open')return a.includes('importado')||a.includes('ticket criado');
-      // Clear: auto-clear, auto 811 (não revertido), ou clear manual
+      // Clear: auto-clear, auto 811 (não revertido, não cancelado), ou clear manual
       return a.includes('auto-clear')
-        ||(a.includes('auto 811')&&!a.includes('revertido'))
+        ||(a.includes('auto 811')&&!a.includes('revertido')&&!a.includes('cancelado'))
         ||(a.includes('status manual')&&a.includes('→ clear'));
     })).length;
   }
@@ -2523,11 +2524,11 @@ function renderDash(){
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+damageFt.toLocaleString()+' ft</div>'
   +'<div style="margin-top:3px;font-size:10px;color:'+(damage>0?'var(--amber)':'var(--muted)')+'">'+( damage>0?'atenção':'sem mudança')+'</div></div>'
-  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6">'
-  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Progresso campo</div>'
-  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+pctCampo+'%</div>'
-  +'<div style="font-size:10px;color:var(--muted)">'+completedFt.toLocaleString()+' / '+totalFt.toLocaleString()+' ft</div>'
-  +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px"><div style="width:'+pctCampo+'%;height:100%;background:#3b82f6;border-radius:3px"></div></div></div>'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6;cursor:pointer" onclick="showNoProjModal()">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem projeto</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+noProj.length+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">de '+total+' ativos</div>'
+  +'<div style="font-size:10px;color:'+(noProj.length>0?'#3b82f6':'var(--muted)')+';margin-top:3px">'+(noProj.length>0?Math.round(noProj.length/Math.max(total,1)*100)+'% sem projeto':'todos alocados')+'</div></div>'
   +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--purple);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Sem Trajeto\';renderTable();},100)">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem trajeto</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--purple)">'+noMap.length+'</div>'
@@ -3461,6 +3462,40 @@ function exportProjectReport(pid){
   toast('Relatório exportado: '+p.name,'success');
 }
 
+function showNoProjModal(){
+  const dsf=typeof dashStateVal!=='undefined'?dashStateVal:'';
+  const fT=filterTickets({state:dsf});
+  const list=fT.filter(t=>!t.projectId&&t.status!=='Cancel'&&t.status!=='Closed')
+    .sort((a,b)=>(a.expire||'').localeCompare(b.expire||''));
+  let ov=document.getElementById('ov-no-proj');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ov-no-proj';ov.className='overlay';
+    ov.innerHTML='<div class="modal" style="max-width:650px"><div class="modal-header"><h3 id="np-title"></h3><button class="modal-close" onclick="closeModal(\'ov-no-proj\')">×</button></div><div id="np-body" style="padding:16px"></div></div>';
+    document.body.appendChild(ov);
+  }
+  document.getElementById('np-title').textContent='Tickets sem projeto ('+list.length+')';
+  let rows='';
+  for(const t of list){
+    const loc=t.location||t.address||'';
+    const st=t.state||'';
+    const exp=t.expire||'—';
+    const stat=t.status||'';
+    const clr=stat==='Open'?'var(--red)':stat==='Clear'?'var(--green)':'var(--amber)';
+    rows+='<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="closeModal(\'ov-no-proj\');openTicketDetail(\''+t.id+'\')">'
+      +'<td style="padding:5px 8px;font-family:var(--mono);font-size:11px">'+esc(t.ticket)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+esc(st)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+esc(loc)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px;color:'+clr+'">'+esc(stat)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+esc(exp)+'</td></tr>';
+  }
+  const tbl=list.length?'<div style="max-height:400px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse">'
+    +'<thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:2px solid var(--border)"><th style="padding:5px 8px">Ticket</th><th style="padding:5px 8px">UF</th><th style="padding:5px 8px">Local</th><th style="padding:5px 8px">Status</th><th style="padding:5px 8px">Expira</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div>'
+    :'<div style="text-align:center;color:var(--muted);padding:20px">Todos os tickets estão alocados em projetos ✓</div>';
+  document.getElementById('np-body').innerHTML=tbl;
+  openModal('ov-no-proj');
+}
+
 function exportExpiring(){
   const days=_soonDays||10;
   const f=filterTickets({}).filter(t=>{
@@ -4054,7 +4089,7 @@ function renderWeeklyProduction(fTickets){
       var t=fTickets[i];if(t.status!=='Clear'||!t.history)continue;
       for(var j=t.history.length-1;j>=0;j--){
         var a=(t.history[j].action||'').toLowerCase();
-        var isC=a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
+        var isC=a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0)||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
         if(isC&&t.history[j].ts>=wStart&&t.history[j].ts<wEnd){wCnt++;wFt+=(t.footage||0);break;}
       }
     }
@@ -4108,7 +4143,7 @@ function renderAnalytics(){
     const c4w_bins=[0,0,0,0];
     for(const t2 of ts){
       if(!t2.history)continue;
-      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')&&!a2.includes('revertido'))||a2.includes('auto-clear')||(a2.includes('status manual')&&a2.includes('→ clear'));}).pop();
+      const clearEvt=t2.history.filter(h2=>{const a2=(h2.action||'').toLowerCase();return(a2.includes('auto 811')&&!a2.includes('revertido')&&!a2.includes('cancelado'))||a2.includes('auto-clear')||(a2.includes('status manual')&&a2.includes('→ clear'));}).pop();
       if(!clearEvt||!clearEvt.ts)continue;
       const wAgo=Math.floor((now-clearEvt.ts)/week);
       if(wAgo>=0&&wAgo<4)c4w_bins[wAgo]+=(t2.footage||0);
@@ -4328,9 +4363,9 @@ function renderClearedStats(fTickets){
     if(!t.history||!t.history.length)return 0;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
-      // Reconhece: auto-clear, auto 811 (não revertido), ou clear manual
+      // Reconhece: auto-clear, auto 811 (nao revertido, nao cancelado), ou clear manual
       var isAutoClear=a.indexOf('auto-clear')>=0;
-      var isAuto811=a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0;
+      var isAuto811=a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0;
       var isManualClear=a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0;
       if(isAutoClear||isAuto811||isManualClear){return t.history[j].ts;}
     }
@@ -4537,7 +4572,7 @@ function _getTicketClearDateForExpand(t){
   for(var j=t.history.length-1;j>=0;j--){
     var a=(t.history[j].action||'').toLowerCase();
     var isAutoClear=a.indexOf('auto-clear')>=0;
-    var isAuto811=a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0;
+    var isAuto811=a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0;
     var isManualClear=a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0;
     if(isAutoClear||isAuto811||isManualClear){return t.history[j].ts;}
   }
@@ -4770,7 +4805,7 @@ function renderWeeklyEvolution(fTickets){
     const now=Date.now(),week=7*864e5;
     const allF=dashStateVal?tickets.filter(t=>t.state===dashStateVal):tickets;
     function countInRange(start,end,matchFn){return allF.filter(t=>(t.history||[]).some(h=>h.ts>=start&&h.ts<end&&matchFn(h))).length;}
-    function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido'))||a.includes('auto-clear')||(a.includes('status manual')&&a.includes('→ clear'));}
+    function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido')&&!a.includes('cancelado'))||a.includes('auto-clear')||(a.includes('status manual')&&a.includes('→ clear'));}
     function isOpen(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
     function isClosed(h){const a=(h.action||'').toLowerCase();return a.includes('→ closed')||a.includes('completed');}
     const weeks=[];

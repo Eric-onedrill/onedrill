@@ -3481,7 +3481,7 @@ function showNoProjModal(){
     const exp=t.expire||'—';
     const stat=t.status||'';
     const clr=stat==='Open'?'var(--red)':stat==='Clear'?'var(--green)':'var(--amber)';
-    rows+='<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="closeModal(\'ov-no-proj\');openTicketDetail(\''+t.id+'\')">'
+    rows+='<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="closeModal(\'ov-no-proj\');openTicketDetail('+t.id+')">'
       +'<td style="padding:5px 8px;font-family:var(--mono);font-size:11px">'+esc(t.ticket)+'</td>'
       +'<td style="padding:5px 8px;font-size:11px">'+esc(st)+'</td>'
       +'<td style="padding:5px 8px;font-size:11px">'+esc(loc)+'</td>'

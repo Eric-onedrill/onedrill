@@ -4995,13 +4995,13 @@ function syncProjectSelects(){
   const mkOpts=(label)=>'<option value="">'+label+'</option>'
     +active.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('')
     +(completed.length?'<optgroup label="── Concluídos ──">'+completed.map(p=>`<option value="${p.id}">📁 ${esc(projDropLabel(p))}</option>`).join('')+'</optgroup>':'');
-  const pf=document.getElementById('proj-filter');if(pf)pf.innerHTML=mkOpts('Todos os projetos');
-  const tp=document.getElementById('tbl-proj');if(tp)tp.innerHTML=mkOpts('Todos projetos');
-  const tm=document.getElementById('tm-proj');if(tm)tm.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');
+  const pf=document.getElementById('proj-filter');if(pf){const pv=pf.value;pf.innerHTML=mkOpts('Todos os projetos');if(pv)pf.value=pv;}
+  const tp=document.getElementById('tbl-proj');if(tp){const tv=tp.value;tp.innerHTML=mkOpts('Todos projetos');if(tv)tp.value=tv;}
+  const tm=document.getElementById('tm-proj');if(tm){const mv=tm.value;tm.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');if(mv)tm.value=mv;}
 }
 function syncClients(){
   const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();
-  ['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${esc(c)}</option>`).join('');});
+  ['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el){const pv=el.value;el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${esc(c)}</option>`).join('');if(pv)el.value=pv;}});
 }
 function syncMapUtilFilter(){
   if(!utilCacheLoaded)return;
@@ -5020,7 +5020,7 @@ function syncMapUtilFilter(){
 function syncLocations(){
   const locs=[...new Set(tickets.map(t=>t.location).filter(Boolean))].sort();
   const el=document.getElementById('floc');
-  if(el)el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${esc(l)}</option>`).join('');
+  if(el){const pv=el.value;el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${esc(l)}</option>`).join('');if(pv)el.value=pv;}
 }
 /* ═══════════ TIMELINE / DIG WINDOW ═══════════ */
 function renderTimeline(){

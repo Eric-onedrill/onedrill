@@ -2380,7 +2380,9 @@ function renderTable(){
   const ed=document.getElementById('tbl-exp')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  let f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
+  const _stReal=st==='A Realizar'?'Clear':st;
+  let f=filterTickets({status:_stReal,projectId:pr,client:cl,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
+  if(st==='A Realizar')f=f.filter(t=>{const ft=t.footage||0;const cf=t.completedFeet||0;return ft>0&&cf<ft;});
 
   f.sort((a,b)=>{
     if(sortCol==='risk'){const ra=riskScore(a),rb=riskScore(b);return sortAsc?ra-rb:rb-ra;}
@@ -2518,7 +2520,7 @@ function renderDash(){
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+damageFt.toLocaleString()+' ft</div>'
   +'<div style="margin-top:3px;font-size:10px;color:'+(damage>0?'var(--amber)':'var(--muted)')+'">'+( damage>0?'atenção':'sem mudança')+'</div></div>'
-  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6;cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Clear\';renderTable();},100)">'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6;cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'A Realizar\';renderTable();},100)">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">A Realizar</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+pendCampoN+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+pendCampoFt.toLocaleString()+' ft restantes</div>'
@@ -2530,6 +2532,42 @@ function renderDash(){
   +'<div style="font-size:10px;color:var(--muted)">de '+total+' ativos</div>'
   +'<div style="font-size:10px;color:var(--purple);margin-top:3px">'+Math.round(noMap.length/Math.max(total,1)*100)+'% descobertos</div></div>'
   +'</div>'
+
+  // ── KPI SEMANAL (feet clareados por semana)
+  +function(){
+    var _wks=[];
+    for(var w=5;w>=0;w--){
+      var wStart=now-(w+1)*7*864e5;var wEnd=now-w*864e5*7;
+      var wCnt=0,wFt=0;
+      for(var i=0;i<fTickets.length;i++){
+        var t=fTickets[i];if(t.status!=='Clear'||!t.history)continue;
+        for(var j=t.history.length-1;j>=0;j--){
+          var a=(t.history[j].action||'').toLowerCase();
+          var isC=a.indexOf('auto-clear')>=0||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0)||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
+          if(isC&&t.history[j].ts>=wStart&&t.history[j].ts<wEnd){wCnt++;wFt+=(t.footage||0);break;}
+        }
+      }
+      var d2=new Date(wEnd);
+      _wks.push({label:String(d2.getDate()).padStart(2,'0')+'/'+String(d2.getMonth()+1).padStart(2,'0'),cnt:wCnt,ft:wFt});
+    }
+    var _wkMax=Math.max.apply(null,_wks.map(function(w2){return w2.ft;}))||1;
+    var totalWkFt=_wks.reduce(function(s,w2){return s+w2.ft;},0);
+    var avgWk=Math.round(totalWkFt/_wks.length);
+    return'<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+    +'<span style="font-size:12px;font-weight:600;color:var(--text)">📊 Produção semanal</span>'
+    +'<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">média '+avgWk.toLocaleString()+' ft/sem</span></div>'
+    +'<div style="display:flex;align-items:flex-end;gap:8px;height:100px">'
+    +_wks.map(function(w2){
+      var bh=Math.max(w2.ft/_wkMax*70,3);
+      return'<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">'
+      +'<div style="font-size:9px;font-weight:700;color:var(--green)">'+w2.cnt+'</div>'
+      +'<div style="font-size:8px;color:var(--muted)">'+w2.ft.toLocaleString()+'ft</div>'
+      +'<div style="width:100%;height:'+bh+'px;background:var(--green);border-radius:3px 3px 0 0;min-height:3px;transition:height .3s"></div>'
+      +'<div style="font-size:9px;color:var(--muted)">'+w2.label+'</div></div>';
+    }).join('')
+    +'</div></div>';
+  }()
 
   // ── TICKETS VENCENDO
   +'<div style="background:var(--white);border:1px solid '+(soon.length?'var(--red-border)':'var(--border)')+';border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
@@ -2632,7 +2670,7 @@ function renderProjects(){
     const aggLocStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
     // Prioriza a localidade descrita no modal (p.desc); só usa cidades agregadas dos tickets como fallback.
     const locStr=p.desc||aggLocStr;
-    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
+    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="exportProjectReport('${p.id}')" style="background:#3b82f6;color:white;border-color:#3b82f6">📊 Relatório</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
   g.innerHTML=active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>';
@@ -3401,6 +3439,61 @@ async function doImport(){
 }
 
 /* ═══════════ 23. EXPORT ═══════════ */
+function exportProjectReport(pid){
+  const p=projects.find(x=>x.id===pid);if(!p){toast('Projeto não encontrado','danger');return;}
+  const ts=tickets.filter(t=>t.projectId===pid&&!isSuperseded(t));
+  const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
+  const doneFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);
+  const openC=ts.filter(t=>effectiveStatus(t)==='Open').length;
+  const clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length;
+  const damageC=ts.filter(t=>effectiveStatus(t)==='Damage').length;
+  const closedC=ts.filter(t=>t.status==='Closed').length;
+  const pendCampoP=ts.filter(t=>{const ft=t.footage||0;const cf=t.completedFeet||0;return effectiveStatus(t)==='Clear'&&ft>0&&cf<ft;});
+  const pendFtP=pendCampoP.reduce((s,t)=>s+((t.footage||0)-(t.completedFeet||0)),0);
+  const pctCampo=totalFt>0?Math.round(doneFt/totalFt*100):0;
+  const wb=XLSX.utils.book_new();
+  // Sheet 1: Resumo
+  const resumo=[
+    ['RELATÓRIO DE PROJETO — OneDrill 811'],[''],
+    ['Projeto:',p.name],['Cliente:',p.client||'—'],['Estado:',p.state||'—'],
+    ['Data:',new Date().toLocaleDateString('pt-BR')],[''],
+    ['RESUMO'],
+    ['Total tickets:',ts.length],['Footage total:',totalFt],
+    ['Campo concluído:',doneFt+' ft ('+pctCampo+'%)'],
+    ['A realizar:',pendCampoP.length+' tickets · '+pendFtP.toLocaleString()+' ft'],[''],
+    ['POR STATUS'],['Open:',openC],['Clear:',clearC],['Damage:',damageC],['Closed:',closedC]
+  ];
+  const wsR=XLSX.utils.aoa_to_sheet(resumo);
+  wsR['!cols']=[{wch:22},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,wsR,'Resumo');
+  // Sheet 2: Tickets
+  const tData=[['Ticket #','Status','Footage','Concluído','Restante','% Campo','Local','Endereço','Expira','Tipo','Job #','Utilities Pendentes']];
+  for(const t of ts){
+    const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
+    const ft=t.footage||0;const cf=t.completedFeet||0;const rest=ft-cf;
+    const pct=ft>0?Math.round(cf/ft*100):0;
+    tData.push([t.ticket,effectiveStatus(t),ft,cf,rest,pct+'%',t.location,t.address,t.expire,t.tipo,t.job,pends]);
+  }
+  tData.push(['','TOTAL:',totalFt,doneFt,totalFt-doneFt,pctCampo+'%','','','','','','']);
+  const wsT=XLSX.utils.aoa_to_sheet(tData);
+  wsT['!cols']=[{wch:14},{wch:8},{wch:9},{wch:12},{wch:10},{wch:9},{wch:22},{wch:22},{wch:12},{wch:24},{wch:10},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,wsT,'Tickets');
+  // Sheet 3: A Realizar (só pendentes)
+  if(pendCampoP.length){
+    const pData=[['Ticket #','Footage','Concluído','Restante','% Campo','Local','Expira']];
+    for(const t of pendCampoP){
+      const ft=t.footage||0;const cf=t.completedFeet||0;
+      pData.push([t.ticket,ft,cf,ft-cf,(ft>0?Math.round(cf/ft*100):0)+'%',t.location,t.expire]);
+    }
+    pData.push(['TOTAL:',pendCampoP.reduce((s,t)=>s+(t.footage||0),0),pendCampoP.reduce((s,t)=>s+(t.completedFeet||0),0),pendFtP,'','','']);
+    const wsP=XLSX.utils.aoa_to_sheet(pData);
+    wsP['!cols']=[{wch:14},{wch:9},{wch:12},{wch:10},{wch:9},{wch:22},{wch:12}];
+    XLSX.utils.book_append_sheet(wb,wsP,'A Realizar');
+  }
+  XLSX.writeFile(wb,'OneDrill_Relatorio_'+p.name.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Relatório exportado: '+p.name,'success');
+}
+
 function exportExpiring(){
   const days=_soonDays||10;
   const f=filterTickets({}).filter(t=>{
@@ -3894,7 +3987,52 @@ function buildNotifications(){
     const urgent=notifs.filter(n=>n.type==='warn'||n.type==='danger').length;
     if(badge){badge.textContent=urgent;badge.style.display=urgent>0?'':'none';}
     window._notifs=notifs.slice(0,30);
+    // ── Feature 6: Alerta urgente — tickets vencendo com campo pendente ──
+    _buildUrgencyAlert(expiring);
   }catch(e){console.error('Notifications error:',e);}
+}
+
+/** Floating urgency alert + browser notification pra tickets vencendo com campo pendente */
+function _buildUrgencyAlert(expiring){
+  // Remove alert anterior se existir
+  const old=document.getElementById('urgency-float');if(old)old.remove();
+  // Filtra: vence em ≤3 dias E campo não concluído
+  const critical=expiring.filter(t=>{
+    const d=_eod(t.expire);const diff=(d-Date.now())/864e5;
+    if(diff>3)return false;
+    const ft=t.footage||0;const cf=t.completedFeet||0;
+    return ft>0&&cf<ft;
+  });
+  if(!critical.length)return;
+  // Floating banner
+  const div=document.createElement('div');div.id='urgency-float';
+  div.style.cssText='position:fixed;top:8px;right:60px;z-index:9999;background:#fef2f2;border:2px solid #fca5a5;border-radius:12px;padding:8px 14px;box-shadow:0 4px 20px rgba(0,0,0,.15);max-width:360px;cursor:pointer;animation:urgPulse 2s infinite;font-size:12px;display:flex;align-items:center;gap:8px';
+  div.innerHTML='<span style="font-size:18px">🚨</span><div><div style="font-weight:700;color:#dc2626">'+critical.length+' ticket'+(critical.length>1?'s':'')+' urgente'+(critical.length>1?'s':'')+'</div>'
+    +'<div style="font-size:10px;color:#991b1b">Vence em ≤3 dias · campo pendente</div></div>'
+    +'<span onclick="event.stopPropagation();this.parentElement.remove()" style="margin-left:auto;color:#dc2626;font-size:16px;padding:0 4px;cursor:pointer">✕</span>';
+  div.onclick=function(){nav('tickets');setTimeout(function(){document.getElementById('tbl-stat').value='A Realizar';document.getElementById('tbl-exp').value='3';renderTable();},100);div.remove();};
+  document.body.appendChild(div);
+  // Injeta animation CSS se não existe
+  if(!document.getElementById('urgency-css')){
+    const st=document.createElement('style');st.id='urgency-css';
+    st.textContent='@keyframes urgPulse{0%,100%{box-shadow:0 4px 20px rgba(220,38,38,.15)}50%{box-shadow:0 4px 20px rgba(220,38,38,.4)}}';
+    document.head.appendChild(st);
+  }
+  // Browser Notification API
+  _sendBrowserNotif(critical);
+}
+
+function _sendBrowserNotif(critical){
+  if(!('Notification' in window))return;
+  if(Notification.permission==='denied')return;
+  const msg=critical.length+' ticket'+(critical.length>1?'s':'')+' vencendo em 3 dias com campo pendente!\n'+critical.slice(0,3).map(function(t){return t.ticket+' ('+t.expire+')';}).join(', ');
+  if(Notification.permission==='granted'){
+    try{new Notification('🚨 OneDrill 811 — Atenção',{body:msg,tag:'onedrill-urgency'});}catch(e){}
+  }else{
+    Notification.requestPermission().then(function(p){
+      if(p==='granted'){try{new Notification('🚨 OneDrill 811 — Atenção',{body:msg,tag:'onedrill-urgency'});}catch(e){}}
+    });
+  }
 }
 
 function toggleNotifPanel(){

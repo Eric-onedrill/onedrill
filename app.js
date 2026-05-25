@@ -2393,7 +2393,11 @@ function renderTable(){
 
   const _totalFtTbl=f.reduce((s,t)=>s+(t.footage||0),0);
   const _doneFtTbl=f.reduce((s,t)=>s+(t.completedFeet||0),0);
-  document.getElementById('tbl-count').textContent=`${f.length} tickets · ${_doneFtTbl?_doneFtTbl.toLocaleString()+' / ':''}${_totalFtTbl.toLocaleString()} ft`+(_doneFtTbl&&_totalFtTbl?' ('+Math.round(_doneFtTbl/_totalFtTbl*100)+'% campo)':'');
+  const _restFtTbl=_totalFtTbl-_doneFtTbl;
+  const _ftLabel=st==='A Realizar'
+    ?`${f.length} tickets · ${_restFtTbl.toLocaleString()} ft restantes`
+    :`${f.length} tickets · ${_doneFtTbl?_doneFtTbl.toLocaleString()+' / ':''}${_totalFtTbl.toLocaleString()} ft`+(_doneFtTbl&&_totalFtTbl?' ('+Math.round(_doneFtTbl/_totalFtTbl*100)+'% campo)':'');
+  document.getElementById('tbl-count').textContent=_ftLabel;
   document.getElementById('tbl-body').innerHTML=f.map(t=>{
     const pends=getTicketPendingUtils(String(t.ticket).trim());
     const pendNames=pends.map(p=>p.utility_name);

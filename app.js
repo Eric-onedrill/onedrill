@@ -1970,6 +1970,8 @@ function effectiveStatus(t){
     // Regra 1: antigo não-Clear → mostra status real do novo (sem proteção de carência)
     return t.status;
   }
+  // Campo 100% concluído → efetivamente Closed (não precisa mais de campo)
+  if(t.status==='Clear'&&(t.footage||0)>0&&(t.completedFeet||0)>=(t.footage||0))return'Closed';
   return t.status;
 }
 
@@ -2380,9 +2382,8 @@ function renderTable(){
   const ed=document.getElementById('tbl-exp')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
-  const _stReal=st==='A Realizar'?'Clear':st==='Sem Trajeto'?'':st;
+  const _stReal=st==='Sem Trajeto'?'':st;
   let f=filterTickets({status:_stReal,projectId:pr,client:cl,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
-  if(st==='A Realizar')f=f.filter(t=>{const ft=t.footage||0;const cf=t.completedFeet||0;return ft>0&&cf<ft;});
   if(st==='Sem Trajeto')f=f.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
 
   f.sort((a,b)=>{
@@ -2393,11 +2394,7 @@ function renderTable(){
 
   const _totalFtTbl=f.reduce((s,t)=>s+(t.footage||0),0);
   const _doneFtTbl=f.reduce((s,t)=>s+(t.completedFeet||0),0);
-  const _restFtTbl=_totalFtTbl-_doneFtTbl;
-  const _ftLabel=st==='A Realizar'
-    ?`${f.length} tickets · ${_restFtTbl.toLocaleString()} ft restantes`
-    :`${f.length} tickets · ${_doneFtTbl?_doneFtTbl.toLocaleString()+' / ':''}${_totalFtTbl.toLocaleString()} ft`+(_doneFtTbl&&_totalFtTbl?' ('+Math.round(_doneFtTbl/_totalFtTbl*100)+'% campo)':'');
-  document.getElementById('tbl-count').textContent=_ftLabel;
+  document.getElementById('tbl-count').textContent=`${f.length} tickets · ${_doneFtTbl?_doneFtTbl.toLocaleString()+' / ':''}${_totalFtTbl.toLocaleString()} ft`+(_doneFtTbl&&_totalFtTbl?' ('+Math.round(_doneFtTbl/_totalFtTbl*100)+'% campo)':'');
   document.getElementById('tbl-body').innerHTML=f.map(t=>{
     const pends=getTicketPendingUtils(String(t.ticket).trim());
     const pendNames=pends.map(p=>p.utility_name);
@@ -2456,11 +2453,6 @@ function renderDash(){
   const damageFt=damageT.reduce((s,t)=>s+(t.footage||0),0);
   const completedFt=fTickets.reduce((s,t)=>s+(t.completedFeet||0),0);
   const pctCampo=totalFt>0?Math.round(completedFt/totalFt*100):0;
-  const pendCampo=clearT.filter(t=>{const ft=t.footage||0;const cf=t.completedFeet||0;return ft>0&&cf<ft;});
-  const pendCampoN=pendCampo.length;
-  const pendCampoFt=pendCampo.reduce((s,t)=>s+((t.footage||0)-(t.completedFeet||0)),0);
-  const clearCompletedFt=clearT.reduce((s,t)=>s+(t.completedFeet||0),0);
-  const pctClearDone=clearFt>0?Math.round(clearCompletedFt/clearFt*100):0;
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
   const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
@@ -2525,12 +2517,11 @@ function renderDash(){
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+damageFt.toLocaleString()+' ft</div>'
   +'<div style="margin-top:3px;font-size:10px;color:'+(damage>0?'var(--amber)':'var(--muted)')+'">'+( damage>0?'atenção':'sem mudança')+'</div></div>'
-  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6;cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'A Realizar\';renderTable();},100)">'
-  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">A Realizar</div>'
-  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+pendCampoN+'</div>'
-  +'<div style="font-size:10px;color:var(--muted)">'+pendCampoFt.toLocaleString()+' ft restantes</div>'
-  +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px"><div style="width:'+pctClearDone+'%;height:100%;background:#3b82f6;border-radius:3px"></div></div>'
-  +'<div style="font-size:10px;color:#3b82f6;margin-top:2px">Clear — pendente campo</div></div>'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Progresso campo</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+pctCampo+'%</div>'
+  +'<div style="font-size:10px;color:var(--muted)">'+completedFt.toLocaleString()+' / '+totalFt.toLocaleString()+' ft</div>'
+  +'<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px"><div style="width:'+pctCampo+'%;height:100%;background:#3b82f6;border-radius:3px"></div></div></div>'
   +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--purple);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Sem Trajeto\';renderTable();},100)">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem trajeto</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--purple)">'+noMap.length+'</div>'

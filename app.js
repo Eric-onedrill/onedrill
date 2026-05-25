@@ -1970,8 +1970,6 @@ function effectiveStatus(t){
     // Regra 1: antigo não-Clear → mostra status real do novo (sem proteção de carência)
     return t.status;
   }
-  // Campo 100% concluído → efetivamente Closed (não precisa mais de campo)
-  if(t.status==='Clear'&&(t.footage||0)>0&&(t.completedFeet||0)>=(t.footage||0))return'Closed';
   return t.status;
 }
 

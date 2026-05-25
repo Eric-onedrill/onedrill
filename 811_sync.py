@@ -153,14 +153,14 @@ log = logging.getLogger(__name__)
 BASE_DIR           = os.path.dirname(os.path.abspath(__file__))
 VALID_STATES       = {"FL", "IN", "IL", "WI"}
 W_SAFETY           = 300      # fallback ms quando não há seletor confiável
-NUM_TABS           = 3        # 3 abas paralelas (reduzir nao ajuda - bug eh do chromium_headless_shell-1217)
+NUM_TABS           = 5        # 5 abas paralelas (reduzir nao ajuda, aumentar de 3→5 corta tempo ~40%)
 CLEAR_CACHE_HOURS  = 24       # re-verifica Clear tickets 1x por dia
 MAX_AUTO_NOTES     = 10       # máximo de notas automáticas por ticket
 BATCH_SIZE         = 200      # tamanho do lote para bulk upsert
 MAX_IMPORT_PAGES   = 5        # com 100/pagina, 5 paginas = 500 tickets
 LOCK_FILE          = os.path.join(BASE_DIR, "811_sync.lock")
 TIMEOUT_PAGE       = 60000    # Playwright default timeout (ms)
-TIMEOUT_STABLE     = 3000     # wait_stable / wait_tab_content / wait_filter_results
+TIMEOUT_STABLE     = 2000     # wait_stable / wait_tab_content / wait_filter_results (3s era conservador demais)
 TIMEOUT_NAV        = 5000     # wait_for / wait_nav
 TIMEOUT_CLICK      = 8000     # click_and_wait
 
@@ -1657,10 +1657,14 @@ async def filter_ticket(page, tnum):
         await lbl.first.click()
     else:
         await page.locator('#mat-input-0').click(force=True)
-    await page.wait_for_timeout(100)
+    await page.wait_for_timeout(80)
     await page.keyboard.press("Control+a")
-    await page.keyboard.type(tnum, delay=15)
-    await wait_filter_results(page)
+    await page.keyboard.type(tnum, delay=8)
+    # Espera o ticket aparecer na lista em vez de networkidle genérico (mais rápido)
+    try:
+        await page.get_by_text(tnum, exact=True).first.wait_for(timeout=4000)
+    except Exception:
+        await page.wait_for_timeout(800)
 
 
 async def back_to_dashboard(page, state):
@@ -2586,19 +2590,144 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
 
 
 # ── │ SECTION: IMPORT │ IMPORTAR TICKETS NOVOS ────────────────────────────────
+
+async def _scrape_bodies_parallel(state, ticket_numbers):
+    """Scrape body (Text tab) de múltiplos tickets em paralelo.
+
+    Abre NUM_TABS abas, cada uma processa um chunk. Retorna dict {tnum: body_text}.
+    Usado pelo import_new_tickets pra coletar bodies sem bloquear 1 por 1.
+    """
+    results = {}
+    if not ticket_numbers:
+        return results
+
+    perfil = _profile_path(state)
+    n_tabs = min(NUM_TABS, len(ticket_numbers))
+    chunks = [[] for _ in range(n_tabs)]
+    for i, tnum in enumerate(ticket_numbers):
+        chunks[i % n_tabs].append(tnum)
+    chunks = [c for c in chunks if c]
+
+    async with async_playwright() as p:
+        ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        page.set_default_timeout(TIMEOUT_PAGE)
+
+        await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
+        await wait_stable(page)
+
+        if "login" in page.url.lower():
+            await ctx.close()
+            await asyncio.sleep(1)
+            ok = await auto_login_silent(state)
+            if not ok:
+                log.warning(f"[{state}] auto_login_silent falhou, tentando manual...")
+                ok = await auto_login(state)
+            if not ok:
+                return results
+            await asyncio.sleep(1)
+            ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
+            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            page.set_default_timeout(TIMEOUT_PAGE)
+            await page.goto(PORTALS[state]["home"], wait_until="domcontentloaded")
+            await wait_stable(page)
+            if "login" in page.url.lower():
+                log.error(f"[{state}] Import bodies: login falhou após renovação")
+                await ctx.close()
+                return results
+
+        log.info(f"[{state}] Import bodies: {len(ticket_numbers)} tickets em {len(chunks)} abas paralelas")
+
+        async def _body_chunk(chunk, tab_id):
+            tab_results = {}
+            if not chunk:
+                return tab_results
+            pg = await ctx.new_page()
+            pg.set_default_timeout(60000)
+
+            ok = await goto_dashboard(pg, state)
+            if not ok:
+                log.error(f"[{state}][T{tab_id}] Dashboard inacessível — abortando aba")
+                try:
+                    await pg.close()
+                except Exception:
+                    pass
+                return tab_results
+
+            for idx, tnum in enumerate(chunk):
+                log.info(f"[{state}][T{tab_id}] Import ({idx+1}/{len(chunk)}) {tnum}")
+                for _attempt in range(2):
+                    try:
+                        await filter_ticket(pg, tnum)
+                        if not await pg.get_by_text(tnum, exact=True).count():
+                            log.warning(f"[{state}] {tnum}: não encontrado no portal")
+                            break
+                        await pg.get_by_text(tnum, exact=True).first.click()
+                        await wait_stable(pg)
+
+                        tt = pg.locator('[role="tab"]:has-text("Text")').first
+                        if await tt.count():
+                            await click_and_wait(pg, tt, "tab")
+
+                        body = await pg.locator("body").inner_text()
+                        tab_results[tnum] = body
+                        await fast_back(pg, state)
+                        break
+                    except Exception as e:
+                        if _attempt == 0 and "Timeout" in str(e):
+                            log.warning(f"[{state}][T{tab_id}] {tnum}: Timeout — retry...")
+                            try:
+                                await back_to_dashboard(pg, state)
+                            except Exception:
+                                pass
+                            continue
+                        log.error(f"[{state}][T{tab_id}] {tnum}: ERRO → {e}")
+                        try:
+                            await back_to_dashboard(pg, state)
+                        except Exception:
+                            pass
+
+            try:
+                await pg.close()
+            except Exception:
+                pass
+            log.info(f"[{state}][T{tab_id}] Import chunk: {len(tab_results)}/{len(chunk)} bodies coletados")
+            return tab_results
+
+        try:
+            chunk_results = await asyncio.gather(*[_body_chunk(c, i) for i, c in enumerate(chunks)])
+            for cr in chunk_results:
+                results.update(cr)
+        finally:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+    return results
+
+
 async def import_new_tickets(state, triggered_by="manual"):
+    """Importa tickets novos do portal 811.
+
+    Fluxo otimizado em 5 fases:
+      1. Coleta números de tickets novos (1 aba, serial — lê labels no dashboard)
+      2. Scrape bodies em paralelo (NUM_TABS abas simultâneas)
+      3. Parse fields de cada body (Python puro, sem browser)
+      4. Geocoding em batch (Nominatim, 1.1s entre chamadas)
+      5. Batch upsert no Supabase
+    """
     log.info(f"[{state}] === Importando tickets novos ===")
     existing = sb_get("tickets", f"&state=eq.{state}")
     existing_nums = {t["ticket"] for t in existing}
     projects = sb_get("projects")
-    new_tickets = []
-    scraped_this_session = set()
     perfil = _profile_path(state)
 
     canceled_set = get_canceled_set(state)
     if canceled_set:
         log.info(f"[{state}] Cache: {len(canceled_set)} tickets cancelados conhecidos — serão pulados")
 
+    # ── FASE 1: Coletar números de tickets novos (1 aba, serial) ──
+    all_new_nums = []
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(perfil, headless=True, args=["--no-sandbox"])
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
@@ -2635,8 +2764,8 @@ async def import_new_tickets(state, triggered_by="manual"):
             ticket_labels = page.locator("label.column-fixed")
             count = await ticket_labels.count()
             page_nums = []
-            seen = set()
             all_on_page = set()
+            collected_set = set(all_new_nums)
 
             for i in range(count):
                 txt = (await ticket_labels.nth(i).inner_text()).strip()
@@ -2644,9 +2773,9 @@ async def import_new_tickets(state, triggered_by="manual"):
                     all_on_page.add(txt)
                     if txt in canceled_set:
                         continue
-                    if txt not in existing_nums and txt not in seen and txt not in scraped_this_session:
+                    if txt not in existing_nums and txt not in collected_set:
                         page_nums.append(txt)
-                        seen.add(txt)
+                        collected_set.add(txt)
 
             # Detecta loop de paginação
             if all_on_page and all_on_page == last_page_tickets:
@@ -2660,183 +2789,7 @@ async def import_new_tickets(state, triggered_by="manual"):
             else:
                 empty_pages = 0
 
-            for tnum in page_nums:
-                try:
-                    await filter_ticket(page, tnum)
-
-                    if not await page.get_by_text(tnum, exact=True).count():
-                        log.warning(f"[{state}] {tnum}: não encontrado — pulando")
-                        await page.keyboard.press("Control+a")
-                        await page.keyboard.press("Delete")
-                        await wait_filter_results(page)
-                        await select_office(page, state)
-                        continue
-
-                    await page.get_by_text(tnum, exact=True).first.click()
-                    await wait_stable(page)
-
-                    tt = page.locator('[role="tab"]:has-text("Text")').first
-                    if await tt.count():
-                        await click_and_wait(page, tt, "tab")
-
-                    body = await page.locator("body").inner_text()
-
-                    if is_ticket_canceled(body):
-                        replaced_match = re.search(r"REPLACED\s+BY\s+TICKET\s+(?:NUMBER:?\s*)(\d+)", body, re.IGNORECASE)
-                        replaced_by = replaced_match.group(1) if replaced_match else "N/A"
-                        log.warning(f"[{state}] {tnum}: CANCELADO (substituído por {replaced_by}) — pulando")
-                        add_to_canceled_cache(state, tnum)
-                        await back_to_dashboard(page, state)
-                        continue
-
-                    def extract(pattern, text, default=""):
-                        m = re.search(pattern, text, re.IGNORECASE)
-                        return m.group(1).strip() if m else default
-
-                    tnum_ext = extract(r"Ticket\s*:\s*(\d+)", body) or tnum
-                    state_code = extract(r"State:\s*(\w{2})", body, state)
-                    city = extract(r"Cityname:\s*([^\n]+)", body)
-                    if not city:
-                        city = extract(r"GeoPlace:\s*([^\n]+)", body)
-                    township = extract(r"Twp:\s*([^\n]+)", body)
-                    street_name = extract(r"Street\s*:\s*([^\n]+)", body)
-                    street_number = extract(r"Address\s*:\s*(\d+[^\n]*)", body)
-                    if street_number and street_name and not street_name[0].isdigit():
-                        street = f"{street_number.strip()} {street_name.strip()}"
-                    else:
-                        street = street_name
-                    work_type = extract(r"(?:Work Type|Type of Work|Work type)\s*:\s*([^\n]+)", body)
-                    job_id = extract(r"Job\s*(?:ID|#|Number)?\s*:\s*([^\n]+)", body)
-
-                    # Cliente e Prime do "Done for"
-                    done_for_raw = extract(r"(?:Done\s*for|Work\s*(?:being\s*)?done\s*for)\s*:\s*([^\n]+)", body)
-                    client_811 = ""
-                    prime_811 = ""
-                    if done_for_raw:
-                        parts = [p.strip() for p in done_for_raw.replace("\\", "/").split("/") if p.strip()]
-                        if len(parts) >= 2:
-                            prime_811 = parts[0]
-                            client_811 = parts[1]
-                        elif len(parts) == 1:
-                            client_811 = parts[0]
-                        log.info(f"[{state}] {tnum_ext}: Done for → client={client_811}, prime={prime_811}")
-
-                    expire_str = normalize_expire(extract_expire_date(body))
-                    if expire_str:
-                        log.info(f"[{state}] {tnum_ext}: Expire → {expire_str}")
-                    location = extract_location_text(body, state=state)
-
-                    # Match com projeto — APENAS por Job#.
-                    # Auto-aloca por cidade/township foi removida em 2026-05 porque gerava
-                    # muitos falsos positivos (qualquer ticket de uma cidade citada em algum
-                    # projeto era movido pra lá). Tickets novos sem Job# correspondente ficam
-                    # SEM projeto e o operador aloca via "Atualizar em massa" no front.
-                    project_id = None
-                    if job_id:
-                        for proj in projects:
-                            if job_id.strip() in (proj.get("name", "") + proj.get("description", "")):
-                                project_id = proj["id"]
-                                break
-
-                    # Geocoding
-                    geo_lat, geo_lon = None, None
-                    boundary_match = re.search(
-                        r"Boundary:\s*n\s*([\d.]+)\s+s\s*([\d.]+)\s+w\s*([-\d.]+)\s+e\s*([-\d.]+)",
-                        body, re.IGNORECASE
-                    )
-                    if boundary_match:
-                        n, s_val, w, e = (
-                            float(boundary_match.group(1)), float(boundary_match.group(2)),
-                            float(boundary_match.group(3)), float(boundary_match.group(4))
-                        )
-                        geo_lat = round((n + s_val) / 2, 6)
-                        geo_lon = round((w + e) / 2, 6)
-                    elif street and city:
-                        geo_lat, geo_lon = await geocode_address(street, city, state_code)
-
-                    work_type_final = work_type or "Main line"
-                    if geo_lat and geo_lon:
-                        geo_lat, geo_lon, work_type_final = adjust_coords_by_location(
-                            geo_lat, geo_lon, location, work_type_final
-                        )
-
-                    # Verificar se substitui ticket anterior
-                    old_ticket_num = ""
-                    old_expire_str = ""  # Será preenchido se achar ticket antigo no banco
-                    old_status_str = ""
-                    inherited_path = None
-                    old_tkt_match = re.search(r"Old\s*Tkt\s*:\s*(\d+)", body, re.IGNORECASE)
-                    if old_tkt_match:
-                        old_ticket_num = old_tkt_match.group(1)
-                    if not old_ticket_num:
-                        rep_match = re.search(r"Replaces?\s+(?:Ticket\s*)?(?:Number:?\s*)?(\d+)", body, re.IGNORECASE)
-                        if rep_match:
-                            old_ticket_num = rep_match.group(1)
-
-                    if old_ticket_num:
-                        log.info(f"[{state}] {tnum_ext}: Substitui ticket anterior {old_ticket_num}")
-                        try:
-                            old_tickets = sb_get("tickets", f"&ticket=eq.{_qv(old_ticket_num)}&state=eq.{_qv(state_code)}")
-                            if old_tickets:
-                                ot = old_tickets[0]
-                                # Herda trajeto
-                                if ot.get("field_path"):
-                                    inherited_path = ot["field_path"]
-                                    log.info(f"[{state}] {tnum_ext}: Trajeto herdado do ticket {old_ticket_num} ({len(inherited_path)} pts)")
-                                # Preenche expire_old e status_old — CRÍTICO pra graça funcionar.
-                                # Antes, eram sempre "" → graça quebrada, exp_date vazia no audit.
-                                old_expire_str = normalize_expire(ot.get("expire") or "")
-                                old_status_str = (ot.get("status") or "").strip()
-                                if old_expire_str or old_status_str:
-                                    log.info(f"[{state}] {tnum_ext}: Graça capturada — old_status={old_status_str!r}, old_expire={old_expire_str!r}")
-                        except Exception as e:
-                            log.debug(f"Erro ao buscar ticket anterior {old_ticket_num}: {e}")
-
-                    history_entries = [
-                        {"ts": int(datetime.now().timestamp() * 1000), "action": f"Importado 811 - {city}, {state_code}", "color": "#10a574"}
-                    ]
-                    if inherited_path:
-                        history_entries.append(
-                            {"ts": int(datetime.now().timestamp() * 1000), "action": f"Trajeto herdado do ticket {old_ticket_num}", "color": "#6d28d9"}
-                        )
-                    if old_ticket_num and (old_expire_str or old_status_str):
-                        history_entries.append(
-                            {"ts": int(datetime.now().timestamp() * 1000),
-                             "action": f"[RENOVAÇÃO] {old_ticket_num} → {tnum_ext} (graça até {old_expire_str or 'N/A'}, status antigo: {old_status_str or 'N/A'})",
-                             "color": "#7c3aed"}
-                        )
-
-                    # Fase 1 filtro county: resolve county do ticket novo (não bloqueia se falhar)
-                    ticket_county = ""
-                    try:
-                        loc_for_county = f"{city}, {township}".strip(", ")
-                        ticket_county = await resolve_county(loc_for_county, state_code, geo_lat, geo_lon)
-                    except Exception as e:
-                        log.debug(f"[{state}] {tnum_ext}: erro resolvendo county: {e}")
-
-                    ticket_data = {
-                        "ticket": tnum_ext, "company": "One Drill", "state": state_code,
-                        "location": f"{city}, {township}".strip(", "), "address": street,
-                        "status": "Open", "expire": expire_str, "footage": 0,
-                        "client": client_811, "prime": prime_811, "tipo": work_type_final,
-                        "job": job_id or "", "notes": f"[811 Location] {location}" if location else "",
-                        "project_id": project_id, "pending": "", "old_ticket2": old_ticket_num,
-                        "status_old": old_status_str, "expire_old": old_expire_str, "field_path": inherited_path,
-                        "geocoded_lat": geo_lat, "geocoded_lon": geo_lon,
-                        "county": ticket_county,  # Fase 1 filtro county
-                        "history": history_entries, "attachments": [],
-                    }
-                    new_tickets.append(ticket_data)
-                    scraped_this_session.add(tnum_ext)
-                    log.info(f"[{state}] Extraído: {tnum_ext}  {city}, {township}{' [' + ticket_county + ' Co]' if ticket_county else ''}")
-                    await back_to_dashboard(page, state)
-
-                except Exception as e:
-                    log.error(f"[{state}] Erro no ticket {tnum}: {e}")
-                    try:
-                        await back_to_dashboard(page, state)
-                    except Exception:
-                        pass
+            all_new_nums.extend(page_nums)
 
             next_btn = page.get_by_text("Next").first
             if await next_btn.count() and await next_btn.is_enabled():
@@ -2851,21 +2804,202 @@ async def import_new_tickets(state, triggered_by="manual"):
         except Exception:
             pass
 
-    # Fix bug #4: insert em batch via upsert (era N+1 HTTP requests sequenciais).
-    # Filtra duplicatas primeiro (pra manter os warnings) e depois envia em 1 request por batch.
-    # Se houver corrida com outro scraper, on_conflict=ticket resolve graciosamente (UPDATE silencioso
-    # em vez de crash). Volta pro loop individual como fallback se o batch falhar por qualquer motivo.
+    if not all_new_nums:
+        log.info(f"[{state}] Nenhum ticket novo encontrado")
+        return 0
+
+    log.info(f"[{state}] FASE 1 OK: {len(all_new_nums)} tickets novos — abrindo scrape paralelo")
+
+    # ── FASE 2: Scrape bodies em paralelo (NUM_TABS abas) ──
+    bodies = await _scrape_bodies_parallel(state, all_new_nums)
+    log.info(f"[{state}] FASE 2 OK: {len(bodies)}/{len(all_new_nums)} bodies coletados")
+
+    # ── FASE 3: Parse fields de cada body (Python puro, sem browser) ──
+    parsed_tickets = []
+    for tnum in all_new_nums:
+        body = bodies.get(tnum)
+        if not body:
+            log.warning(f"[{state}] {tnum}: body não obtido — pulando")
+            continue
+
+        if is_ticket_canceled(body):
+            replaced_match = re.search(r"REPLACED\s+BY\s+TICKET\s+(?:NUMBER:?\s*)(\d+)", body, re.IGNORECASE)
+            replaced_by = replaced_match.group(1) if replaced_match else "N/A"
+            log.warning(f"[{state}] {tnum}: CANCELADO (substituído por {replaced_by}) — pulando")
+            add_to_canceled_cache(state, tnum)
+            continue
+
+        def extract(pattern, text, default=""):
+            m = re.search(pattern, text, re.IGNORECASE)
+            return m.group(1).strip() if m else default
+
+        tnum_ext = extract(r"Ticket\s*:\s*(\d+)", body) or tnum
+        state_code = extract(r"State:\s*(\w{2})", body, state)
+        city = extract(r"Cityname:\s*([^\n]+)", body)
+        if not city:
+            city = extract(r"GeoPlace:\s*([^\n]+)", body)
+        township = extract(r"Twp:\s*([^\n]+)", body)
+        street_name = extract(r"Street\s*:\s*([^\n]+)", body)
+        street_number = extract(r"Address\s*:\s*(\d+[^\n]*)", body)
+        if street_number and street_name and not street_name[0].isdigit():
+            street = f"{street_number.strip()} {street_name.strip()}"
+        else:
+            street = street_name
+        work_type = extract(r"(?:Work Type|Type of Work|Work type)\s*:\s*([^\n]+)", body)
+        job_id = extract(r"Job\s*(?:ID|#|Number)?\s*:\s*([^\n]+)", body)
+
+        done_for_raw = extract(r"(?:Done\s*for|Work\s*(?:being\s*)?done\s*for)\s*:\s*([^\n]+)", body)
+        client_811 = ""
+        prime_811 = ""
+        if done_for_raw:
+            parts = [p.strip() for p in done_for_raw.replace("\\", "/").split("/") if p.strip()]
+            if len(parts) >= 2:
+                prime_811 = parts[0]
+                client_811 = parts[1]
+            elif len(parts) == 1:
+                client_811 = parts[0]
+            log.info(f"[{state}] {tnum_ext}: Done for → client={client_811}, prime={prime_811}")
+
+        expire_str = normalize_expire(extract_expire_date(body))
+        if expire_str:
+            log.info(f"[{state}] {tnum_ext}: Expire → {expire_str}")
+        location = extract_location_text(body, state=state)
+
+        # Match com projeto — APENAS por Job#.
+        project_id = None
+        if job_id:
+            for proj in projects:
+                if job_id.strip() in (proj.get("name", "") + proj.get("description", "")):
+                    project_id = proj["id"]
+                    break
+
+        # Boundary coords (instant, sem geocoding)
+        geo_lat, geo_lon = None, None
+        needs_geocode = False
+        boundary_match = re.search(
+            r"Boundary:\s*n\s*([\d.]+)\s+s\s*([\d.]+)\s+w\s*([-\d.]+)\s+e\s*([-\d.]+)",
+            body, re.IGNORECASE
+        )
+        if boundary_match:
+            n, s_val, w, e = (
+                float(boundary_match.group(1)), float(boundary_match.group(2)),
+                float(boundary_match.group(3)), float(boundary_match.group(4))
+            )
+            geo_lat = round((n + s_val) / 2, 6)
+            geo_lon = round((w + e) / 2, 6)
+        elif street and city:
+            needs_geocode = True
+
+        # Verificar se substitui ticket anterior
+        old_ticket_num = ""
+        old_expire_str = ""
+        old_status_str = ""
+        inherited_path = None
+        old_tkt_match = re.search(r"Old\s*Tkt\s*:\s*(\d+)", body, re.IGNORECASE)
+        if old_tkt_match:
+            old_ticket_num = old_tkt_match.group(1)
+        if not old_ticket_num:
+            rep_match = re.search(r"Replaces?\s+(?:Ticket\s*)?(?:Number:?\s*)?(\d+)", body, re.IGNORECASE)
+            if rep_match:
+                old_ticket_num = rep_match.group(1)
+
+        if old_ticket_num:
+            log.info(f"[{state}] {tnum_ext}: Substitui ticket anterior {old_ticket_num}")
+            try:
+                old_tickets = sb_get("tickets", f"&ticket=eq.{_qv(old_ticket_num)}&state=eq.{_qv(state_code)}")
+                if old_tickets:
+                    ot = old_tickets[0]
+                    if ot.get("field_path"):
+                        inherited_path = ot["field_path"]
+                        log.info(f"[{state}] {tnum_ext}: Trajeto herdado do ticket {old_ticket_num} ({len(inherited_path)} pts)")
+                    old_expire_str = normalize_expire(ot.get("expire") or "")
+                    old_status_str = (ot.get("status") or "").strip()
+                    if old_expire_str or old_status_str:
+                        log.info(f"[{state}] {tnum_ext}: Graça capturada — old_status={old_status_str!r}, old_expire={old_expire_str!r}")
+            except Exception as e:
+                log.debug(f"Erro ao buscar ticket anterior {old_ticket_num}: {e}")
+
+        parsed_tickets.append({
+            "tnum_ext": tnum_ext, "state_code": state_code,
+            "city": city, "township": township, "street": street,
+            "work_type": work_type, "job_id": job_id,
+            "client_811": client_811, "prime_811": prime_811,
+            "expire_str": expire_str, "location": location,
+            "project_id": project_id,
+            "geo_lat": geo_lat, "geo_lon": geo_lon, "needs_geocode": needs_geocode,
+            "old_ticket_num": old_ticket_num, "old_expire_str": old_expire_str,
+            "old_status_str": old_status_str, "inherited_path": inherited_path,
+        })
+
+    log.info(f"[{state}] FASE 3 OK: {len(parsed_tickets)} tickets parseados")
+
+    # ── FASE 4: Geocoding em batch (sem browser, só Nominatim) ──
+    geocode_count = sum(1 for t in parsed_tickets if t["needs_geocode"])
+    if geocode_count:
+        log.info(f"[{state}] Geocodando {geocode_count} endereços...")
+        done = 0
+        for t in parsed_tickets:
+            if t["needs_geocode"]:
+                t["geo_lat"], t["geo_lon"] = await geocode_address(t["street"], t["city"], t["state_code"])
+                done += 1
+                if done % 10 == 0:
+                    log.info(f"[{state}] Geocoding {done}/{geocode_count}...")
+
+    # ── FASE 5: Build ticket data e batch upsert ──
+    new_tickets = []
+    for t in parsed_tickets:
+        work_type_final = t["work_type"] or "Main line"
+        if t["geo_lat"] and t["geo_lon"]:
+            t["geo_lat"], t["geo_lon"], work_type_final = adjust_coords_by_location(
+                t["geo_lat"], t["geo_lon"], t["location"], work_type_final
+            )
+
+        ticket_county = ""
+        try:
+            loc_for_county = f"{t['city']}, {t['township']}".strip(", ")
+            ticket_county = await resolve_county(loc_for_county, t["state_code"], t["geo_lat"], t["geo_lon"])
+        except Exception as e:
+            log.debug(f"[{state}] {t['tnum_ext']}: erro resolvendo county: {e}")
+
+        history_entries = [
+            {"ts": int(datetime.now().timestamp() * 1000), "action": f"Importado 811 - {t['city']}, {t['state_code']}", "color": "#10a574"}
+        ]
+        if t["inherited_path"]:
+            history_entries.append(
+                {"ts": int(datetime.now().timestamp() * 1000), "action": f"Trajeto herdado do ticket {t['old_ticket_num']}", "color": "#6d28d9"}
+            )
+        if t["old_ticket_num"] and (t["old_expire_str"] or t["old_status_str"]):
+            history_entries.append(
+                {"ts": int(datetime.now().timestamp() * 1000),
+                 "action": f"[RENOVAÇÃO] {t['old_ticket_num']} → {t['tnum_ext']} (graça até {t['old_expire_str'] or 'N/A'}, status antigo: {t['old_status_str'] or 'N/A'})",
+                 "color": "#7c3aed"}
+            )
+
+        ticket_data = {
+            "ticket": t["tnum_ext"], "company": "One Drill", "state": t["state_code"],
+            "location": f"{t['city']}, {t['township']}".strip(", "), "address": t["street"],
+            "work_type": work_type_final,
+            "status": "Open", "expire": t["expire_str"], "footage": 0,
+            "client": t["client_811"], "prime": t["prime_811"], "tipo": work_type_final,
+            "job": t["job_id"] or "", "notes": f"[811 Location] {t['location']}" if t["location"] else "",
+            "project_id": t["project_id"], "pending": "", "old_ticket2": t["old_ticket_num"],
+            "status_old": t["old_status_str"], "expire_old": t["old_expire_str"], "field_path": t["inherited_path"],
+            "geocoded_lat": t["geo_lat"], "geocoded_lon": t["geo_lon"],
+            "county": ticket_county,
+            "history": history_entries, "attachments": [],
+        }
+        new_tickets.append(ticket_data)
+        log.info(f"[{state}] Preparado: {t['tnum_ext']}  {t['city']}, {t['township']}{' [' + ticket_county + ' Co]' if ticket_county else ''}")
+
+    # Batch upsert
     inserted = 0
-    to_insert = []
+    to_insert = [td for td in new_tickets if td['ticket'] not in existing_nums]
     for td in new_tickets:
         if td['ticket'] in existing_nums:
             log.warning(f"[{state}] {td['ticket']}: DUPLICATA — já existe no sistema, pulando")
-            continue
-        to_insert.append(td)
 
     if to_insert:
         try:
-            # Batch upsert — 1 request por chunk de BATCH_SIZE
             for i in range(0, len(to_insert), BATCH_SIZE):
                 chunk = to_insert[i:i + BATCH_SIZE]
                 sb_upsert("tickets", chunk, on_conflict="ticket")
@@ -2877,10 +3011,10 @@ async def import_new_tickets(state, triggered_by="manual"):
             log.info(f"[{state}] ✅ Batch upsert: {inserted} tickets inseridos em {((len(to_insert)-1)//BATCH_SIZE)+1} request(s)")
         except Exception as e:
             log.warning(f"[{state}] Batch falhou ({e}), tentando 1-por-1 como fallback...")
-            inserted = 0  # reseta contador — o batch pode ter inserido alguns antes de falhar
+            inserted = 0
             for td in to_insert:
                 try:
-                    if td['ticket'] not in existing_nums:  # re-check pra evitar dup se batch parcial
+                    if td['ticket'] not in existing_nums:
                         sb_insert("tickets", td)
                         existing_nums.add(td['ticket'])
                     inserted += 1
@@ -4770,7 +4904,7 @@ def _load_overrides():
     if os.path.exists(_OVERRIDES_JSON):
         try:
             with open(_OVERRIDES_JSON, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                data = _json.load(f)
             if isinstance(data, list) and data:
                 log.info(f"[Overrides] {len(data)} regra(s) carregada(s) de local_overrides.json")
                 return data

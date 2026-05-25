@@ -57,6 +57,10 @@ COMANDOS PRINCIPAIS
 ILLINOIS — JULIE PÚBLICO
   │ SECTION: JULIE            ~L2787  │  scrape_julie_ticket + scrape_il + sync_il + save_ticket_pdfs_il
 
+WISCONSIN — DIGGERS HOTLINE
+  │ SECTION: WI               ~L3819  │  scrape_diggers_ticket + scrape_wi + sync_wi (público)
+  │ SECTION: WI_IMPORT        ~L4245  │  import_wi + login_diggers + search_excavator (logado)
+
 CONTATOS (FL)
   │ SECTION: CONTACTS_FL      ~L3161  │  parse_contact_table + scrape_contacts
   │ SECTION: UTILITY_HELPERS  ~L3509  │  get_contacts_for_utility, get_all_contacts
@@ -100,7 +104,13 @@ IN_USER       = os.getenv("IN_USER", "")
 IN_PASS       = os.getenv("IN_PASS", "")
 FL_USER       = os.getenv("FL_USER", "")
 FL_PASS       = os.getenv("FL_PASS", "")
+WI_USER       = os.getenv("WI_USER", "")
+WI_PASS       = os.getenv("WI_PASS", "")
+IL_USER       = os.getenv("IL_USER", "")
+IL_PASS       = os.getenv("IL_PASS", "")
 COMPANY_PHONE = os.getenv("COMPANY_PHONE", "3219473131")
+
+DIGGERS_CLIENT_URL = "https://geocall.diggershotline.com/geocall/client/login"
 
 # Validação de configuração crítica
 if not SB_KEY:
@@ -121,10 +131,22 @@ PORTALS = {
         "user":      lambda: FL_USER,
         "pass":      lambda: FL_PASS,
     },
+    "WI": {
+        "url":       DIGGERS_CLIENT_URL,
+        "home":      "https://geocall.diggershotline.com/geocall/client",
+        "dashboard": "https://geocall.diggershotline.com/geocall/client",
+        "user":      lambda: WI_USER,
+        "pass":      lambda: WI_PASS,
+    },
 }
 
 JULIE_URL = "https://newtin.julie1call.com/responsedisplay/"
+JULIE_TICKETENTRY_URL = "https://newtin.julie1call.com/newtinweb/julie_ticketentry.html"
 DIGGERS_URL = "https://geocall.diggershotline.com/geocall/portal"
+
+# Counties/places onde a ONEDRILL atua em IL — usado pelo import_il
+IL_SEARCH_COUNTY = "COOK"
+IL_ONEDRILL_VARIANTS = {"ONEDRILL", "ONE DRILL"}  # filtro company (case insensitive)
 
 SB_H = {
     "apikey":        SB_KEY,
@@ -610,6 +632,13 @@ def classify(status_text, response_text=""):
     # WI / Diggers Hotline: "Not Participating" = utility não atende a área (similar ao 3U)
     if "3u" in full or "not service provider" in full or "not participating" in full:
         return "Clear", False
+    # WI: "Closed by DHL" = Diggers Hotline fechou administrativamente porque ticket
+    # ultrapassou o prazo legal de 10 working days (Wis. Stat. §182.0175) sem positive
+    # response da utility. NÃO é Clear técnico — utility nunca confirmou marcação nem
+    # ausência de facilities. Como o ticket está legalmente invalidado, classifica como
+    # Cancel (não Clear). Excavator deve renovar o ticket antes de qualquer escavação.
+    if "closed by dhl" in full or "closed by diggers" in full:
+        return "Cancel", False
     if "3h" in full or "privately owned" in full or "private facility owner" in full:
         return "Clear", False
     if "3e" in full and ("already performed" in full or "canceled" in full):
@@ -618,6 +647,15 @@ def classify(status_text, response_text=""):
     # rep must be present during excavation. Clear, but needs W&P coordination.
     if "watch and protect" in full:
         return "Clear", False
+    # IL/JULIE: Code 21 — Re-mark Not Needed. Quando o ticket é estendido sem
+    # solicitar nova marcação, as utilities respondem isso — significa que as
+    # marcações originais continuam válidas. É Clear, não Pending.
+    if "re-mark not needed" in full or "remark not needed" in full:
+        return "Clear", False
+    # IL/JULIE: Ticket aberto pra reportar facility exposed/damaged. Utility precisa
+    # inspecionar antes de liberar escavação. Tratamos como Pending até resposta real.
+    if "reporting of an exposed" in full or "reporting of a damaged" in full:
+        return "Pending", False
 
     # ── SPECIFIC PENDING CODES ──
     if "6a" in full or "active facilities" in full:
@@ -1063,6 +1101,8 @@ async def geocode_address(street, city, state_code):
     STATE_BOUNDS = {
         "IN": {"lat": (37.77, 41.76), "lon": (-88.10, -84.79)},
         "FL": {"lat": (24.39, 31.00), "lon": (-87.63, -79.97)},
+        "WI": {"lat": (42.49, 47.08), "lon": (-92.89, -86.25)},
+        "IL": {"lat": (36.97, 42.51), "lon": (-91.51, -87.02)},
     }
     query = f"{street}, {city}, {state_code}, USA"
     try:
@@ -2015,6 +2055,7 @@ class SyncSummary:
     def __init__(self):
         self.cleared = 0
         self.reverted = 0
+        self.canceled = 0
         self.private_locator = 0
         self.watch_protect = 0
         self.pending = 0
@@ -2032,6 +2073,8 @@ class SyncSummary:
             parts.append(f"{self.cleared} auto-clear")
         if self.reverted:
             parts.append(f"{self.reverted} revertidos")
+        if self.canceled:
+            parts.append(f"{self.canceled} auto-cancel (DHL)")
         if self.private_locator:
             parts.append(f"{self.private_locator} private-locator")
         if self.watch_protect:
@@ -2372,6 +2415,9 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
             statuses = [r["status"] for r in deduped_responses]
             none_pending = not any(s == "Pending" for s in statuses)
             all_responded = all(s in ("Clear", "Pending") for s in statuses)
+            # WI: todas as utilities foram "Closed by DHL" (admin close, ticket invalidado
+            # após 10 working days sem positive response) → ticket inteiro vira Cancel.
+            all_cancel = bool(statuses) and all(s == "Cancel" for s in statuses)
             ticket_locked = t.get("status_locked", False)
 
             for resp in deduped_responses:
@@ -2487,6 +2533,22 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                         if needs_patch:
                             ticket_patches.append(patch)
                         continue
+
+            # ── AUTO-CANCEL: ticket inteiro vira Cancel quando todas utilities são Cancel ──
+            # Cenário típico WI: ultrapassou 10 working days e DHL fechou admin todas as
+            # utility responses. Ticket está legalmente invalidado (Wis. Stat. §182.0175),
+            # precisa ser renovado pra prosseguir com escavação.
+            if all_cancel and t.get("status") != "Cancel":
+                cancel_ts = int(datetime.now().timestamp() * 1000)
+                cancel_label = datetime.now().strftime('%m/%d/%Y')
+                hist = t.get("history") or []
+                cancel_note = f"[AUTO 811] Cancelado em {cancel_label} — ticket invalidado (Closed by DHL após 10 working days)"
+                hist.append({"ts": cancel_ts, "action": cancel_note, "color": "#6d28d9"})
+                new_notes = append_auto_note(patch.get("notes") or t.get("notes"), cancel_note)
+                patch.update({"status": "Cancel", "notes": new_notes, "history": hist})
+                needs_patch = True
+                log.info(f"[{state}] {tnum}: AUTO-CANCEL — todas utilities Closed by DHL (ticket invalidado)")
+                summary.canceled += 1
 
             if none_pending and all_responded and t.get("status") == "Open":
                 # AUTO-CLEAR (Fix 2026-05-14): clear_ts = now (quando ticket mudou pra Clear)
@@ -3418,6 +3480,82 @@ async def cleanup_all():
     )
 
 
+def cleanup_wi_dhl_clears():
+    """Cleanup retroativo: tickets WI Clear cujas TODAS as responses são "Closed by DHL".
+
+    Razão: a regra antiga do classify() mapeava "Closed by DHL" como Clear, o que era
+    incorreto. Wis. Stat. §182.0175 invalida o ticket após 10 working days sem positive
+    response. A nova regra (2026-05) classifica como Cancel. Esta função aplica
+    retroativamente: encontra tickets WI Clear cujas responses são todas "Closed by DHL"
+    e os reverte pra Cancel (com histórico explicativo).
+
+    Idempotente — pode rodar várias vezes, só afeta tickets que ainda não foram revertidos.
+    """
+    log.info("[CLEANUP-WI-DHL] Iniciando cleanup retroativo...")
+
+    clear_tickets = sb_get("tickets", "&state=eq.WI&status=eq.Clear&select=id,ticket,status,history,notes")
+    if not clear_tickets:
+        log.info("[CLEANUP-WI-DHL] Nenhum ticket WI Clear encontrado")
+        return
+
+    log.info(f"[CLEANUP-WI-DHL] Analisando {len(clear_tickets)} tickets Clear...")
+
+    affected = []  # [(ticket_dict, [response_dicts]), ...]
+
+    for t in clear_tickets:
+        tnum = t["ticket"]
+        resps = sb_get(
+            "ticket_811_responses",
+            f"&ticket_num=eq.{_qv(tnum)}&select=id,status,response_text,utility_name"
+        )
+        if not resps:
+            continue
+
+        def _is_dhl_closed(r):
+            txt = (r.get("response_text") or "").lower()
+            return "closed by dhl" in txt or "closed by diggers" in txt
+
+        if all(_is_dhl_closed(r) for r in resps):
+            affected.append((t, resps))
+
+    if not affected:
+        log.info("[CLEANUP-WI-DHL] Nenhum ticket se encaixa (todas responses Closed by DHL)")
+        return
+
+    log.info(f"[CLEANUP-WI-DHL] {len(affected)} ticket(s) Clear→Cancel:")
+    for t, _ in affected:
+        log.info(f"   - {t['ticket']}")
+
+    ticket_patches = []
+    response_patches = []
+    cancel_ts = int(datetime.now().timestamp() * 1000)
+    cancel_label = datetime.now().strftime('%m/%d/%Y')
+    cancel_note = f"[AUTO 811] Cancelado em {cancel_label} — ticket invalidado (Closed by DHL após 10 working days)"
+
+    for t, resps in affected:
+        hist = t.get("history") or []
+        hist.append({"ts": cancel_ts, "action": cancel_note, "color": "#6d28d9"})
+        new_notes = append_auto_note(t.get("notes"), cancel_note)
+        ticket_patches.append({
+            "id": t["id"],
+            "status": "Cancel",
+            "notes": new_notes,
+            "history": hist,
+        })
+        for r in resps:
+            response_patches.append({"id": r["id"], "status": "Cancel"})
+
+    if ticket_patches:
+        log.info(f"[CLEANUP-WI-DHL] Aplicando {len(ticket_patches)} ticket patches...")
+        sb_batch_patch("tickets", ticket_patches, id_field="id")
+
+    if response_patches:
+        log.info(f"[CLEANUP-WI-DHL] Aplicando {len(response_patches)} response patches...")
+        sb_batch_patch("ticket_811_responses", response_patches, id_field="id")
+
+    log.info(f"[CLEANUP-WI-DHL] ✅ Concluído: {len(affected)} tickets revertidos pra Cancel")
+
+
 # ── │ SECTION: JULIE │ JULIE (Illinois 811) — SCRAPE PÚBLICO ──────────────────
 
 async def scrape_julie_ticket(page, tnum, retry=True):
@@ -3673,6 +3811,723 @@ async def sync_il(triggered_by="manual"):
     except Exception as e:
         log.error(f"[IL] FALHOU: {e}")
         log_finish(lid, checked, summary.responses_saved, "error", str(e))
+
+
+# ── │ SECTION: IL_IMPORT │ IMPORT IL (JULIE Ticket Entry — portal cliente) ────
+#
+# Em IL os tickets são tipicamente inseridos manualmente. Esse módulo automatiza
+# a importação via portal cliente PALINKASSE, espelhando o fluxo de import_wi.
+#
+# Fluxo:
+#   1. Login em julie_ticketentry.html
+#   2. Menu top → Search → Ticket Search
+#   3. Dropdown "Search for County" → COOK → Search
+#   4. Parse grid → filter Company ONEDRILL → dedupe revisão mais recente
+#   5. Compara com Supabase via campo `expire`:
+#        - Não existe → INSERT (abre detalhe pra extrair work_type/remarks)
+#        - Existe com expire diferente → UPDATE expire + history (extensão)
+#        - Existe com expire igual → skip
+
+
+def _il_split_ticket_revision(full):
+    """'>A261140377-03X' → ('A261140377', '03X'). Remove marcador '>' se presente."""
+    s = (full or "").strip().lstrip(">").strip()
+    if "-" not in s:
+        return s, ""
+    base, rev = s.split("-", 1)
+    return base.strip(), rev.strip()
+
+
+def _il_parse_completed_ts(completed_str):
+    """Parse 'MM/DD/YYYY HH:MM AM' do Completed pra comparação."""
+    s = (completed_str or "").strip()
+    for fmt in ["%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y"]:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return datetime.min
+
+
+def _il_extract_expire(s):
+    """Extrai 'MM/DD/YYYY' da string Expires do grid (ex: '07/06/2026 11:59 PM')."""
+    if not s:
+        return ""
+    m = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", s)
+    if not m:
+        return ""
+    try:
+        return datetime.strptime(m.group(1), "%m/%d/%Y").strftime("%m/%d/%Y")
+    except ValueError:
+        return ""
+
+
+async def _il_login(page):
+    """Login no JULIE Ticket Entry (newtin.julie1call.com).
+
+    Returns: True se login OK, False caso contrário.
+    """
+    if not IL_USER or not IL_PASS:
+        log.error("[IL] Credenciais IL_USER/IL_PASS não definidas no .env")
+        return False
+
+    log.info(f"[IL] Login: navegando para {JULIE_TICKETENTRY_URL}")
+    await page.goto(JULIE_TICKETENTRY_URL, wait_until="domcontentloaded")
+    await page.wait_for_timeout(2000)
+    await wait_stable(page)
+
+    body = await page.locator("body").inner_text()
+    if "logged in as" in body.lower():
+        log.info(f"[IL] Já logado")
+        return True
+
+    user_input = None
+    for sel in ['input[name="Account"]', 'input[name="account"]', 'input[type="text"]:visible']:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count():
+                user_input = loc
+                break
+        except Exception:
+            continue
+
+    pass_input = page.locator('input[type="password"]').first
+    if not user_input or not await pass_input.count():
+        log.error("[IL] Login: campo Account ou Password não encontrado")
+        await page.screenshot(path=os.path.join(BASE_DIR, "debug_il_login_fail.png"))
+        return False
+
+    await user_input.click()
+    await user_input.fill(IL_USER)
+    await pass_input.click()
+    await pass_input.fill(IL_PASS)
+
+    submitted = False
+    for sel in ['button:has-text("Submit")', 'input[type="submit"]', 'button[type="submit"]']:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count():
+                await loc.click()
+                submitted = True
+                break
+        except Exception:
+            continue
+    if not submitted:
+        await pass_input.press("Enter")
+
+    await page.wait_for_timeout(3000)
+    await wait_stable(page)
+
+    body = await page.locator("body").inner_text()
+    if "logged in as" in body.lower():
+        log.info(f"[IL] ✅ Login OK como {IL_USER}")
+        return True
+
+    log.error(f"[IL] Login falhou — verifique IL_USER/IL_PASS no .env")
+    await page.screenshot(path=os.path.join(BASE_DIR, "debug_il_login_fail.png"))
+    return False
+
+
+async def _il_open_search_screen(page):
+    """Click no botão Search do menu top (não confundir com Search do painel do mapa).
+
+    O menu top tem: Inquire | New | Recent | Test | Search | Log out.
+    O painel inferior do mapa tem: Home Search Places LatLong Grids Layers.
+    Distinguir pelo contexto (left-of Log out / right-of Test).
+    """
+    # Enumera TODOS os elementos com texto/value "Search" visíveis no DOM,
+    # com bounding box. Filtra o do TOP (menor Y) — esse é o do menu Inquire|New|Recent|Test|Search|Log out.
+    candidates = await page.evaluate("""() => {
+        const out = [];
+        const tags = ['button', 'input', 'a', 'span', 'div'];
+        tags.forEach(tag => {
+            document.querySelectorAll(tag).forEach(el => {
+                const txt = (el.innerText || el.value || '').trim();
+                if (txt !== 'Search') return;
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return;
+                out.push({
+                    tag: el.tagName,
+                    id: el.id || '',
+                    cls: el.className || '',
+                    x: Math.round(r.x), y: Math.round(r.y),
+                    w: Math.round(r.width), h: Math.round(r.height),
+                });
+            });
+        });
+        return out;
+    }""")
+    log.info(f"[IL] Search candidates: {candidates}")
+    if not candidates:
+        log.error("[IL] Nenhum elemento 'Search' visível encontrado")
+        await page.screenshot(path=os.path.join(BASE_DIR, "debug_il_search_menu_fail.png"))
+        return False
+
+    # Escolhe o de MENOR Y (top menu fica no topo da página)
+    top_search = min(candidates, key=lambda c: c["y"])
+    log.info(f"[IL] Search menu: alvo top → {top_search}")
+
+    # Click via coordenadas no centro do elemento — bypassa qualquer ID/handler weird
+    cx = top_search["x"] + top_search["w"] // 2
+    cy = top_search["y"] + top_search["h"] // 2
+    try:
+        await page.mouse.click(cx, cy)
+        log.info(f"[IL] Search menu: click em ({cx},{cy})")
+    except Exception as e:
+        log.error(f"[IL] Click em coordenadas falhou: {e}")
+        await page.screenshot(path=os.path.join(BASE_DIR, "debug_il_search_menu_fail.png"))
+        return False
+    await page.wait_for_timeout(4000)
+    await wait_stable(page)
+
+    # Coleta texto de TODOS os frames (Ticket Search pode estar em iframe)
+    body_parts = []
+    try:
+        body_parts.append(await page.locator("body").inner_text())
+    except Exception:
+        pass
+    for fr in page.frames:
+        if fr == page.main_frame:
+            continue
+        try:
+            body_parts.append(await fr.locator("body").inner_text())
+        except Exception:
+            continue
+    body_all = "\n".join(body_parts).lower()
+
+    has_search_form = ("search for street" in body_all or "search for place" in body_all
+                       or "search for county" in body_all or "tickets for county" in body_all)
+    if not has_search_form:
+        log.error(f"[IL] Tela Ticket Search não apareceu — frames={len(page.frames)}")
+        await page.screenshot(path=os.path.join(BASE_DIR, "debug_il_search_screen_fail.png"))
+        try:
+            with open(os.path.join(BASE_DIR, "debug_il_after_search_click.html"), "w", encoding="utf-8") as f:
+                f.write(await page.content())
+        except Exception:
+            pass
+        return False
+    return True
+
+
+async def _il_search_county(page, county=IL_SEARCH_COUNTY):
+    """Seleciona County e clica Search. Espera grid carregar."""
+    log.info(f"[IL] Search por County={county}")
+
+    county_select = None
+    count_selects = await page.locator('select').count()
+    log.info(f"[IL] {count_selects} selects no DOM")
+    for i in range(count_selects):
+        sel = page.locator('select').nth(i)
+        try:
+            # Pula selects invisíveis ou disabled (ex: selCounty do Digsite Information)
+            if not await sel.is_visible():
+                continue
+            if not await sel.is_enabled():
+                continue
+            options = await sel.locator('option').all_text_contents()
+            opts_upper = [o.strip().upper() for o in options]
+            # Distingue dropdown County do Place: Place tem ABINGDON CIT, County não.
+            if county.upper() in opts_upper and "ABINGDON CIT" not in opts_upper:
+                try:
+                    sel_id = await sel.get_attribute("id") or ""
+                except Exception:
+                    sel_id = ""
+                log.info(f"[IL] County select encontrado: idx={i}, id='{sel_id}', opts={len(options)}")
+                county_select = sel
+                break
+        except Exception:
+            continue
+
+    if not county_select:
+        log.error("[IL] Dropdown County (Ticket Search) não encontrado")
+        await page.screenshot(path=os.path.join(BASE_DIR, "debug_il_county_dropdown_fail.png"))
+        return False
+
+    await county_select.select_option(label=county)
+    await page.wait_for_timeout(500)
+
+    # Pega bounding box do select pra achar o botão Search adjacente (mesma linha Y).
+    try:
+        sel_box = await county_select.bounding_box()
+    except Exception:
+        sel_box = None
+
+    # Enumera todos os botões/inputs "Search" visíveis + enabled na página
+    search_btns = await page.evaluate("""() => {
+        const out = [];
+        const isVisible = (el) => {
+            const s = window.getComputedStyle(el);
+            if (s.display === 'none' || s.visibility === 'hidden') return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        };
+        document.querySelectorAll('button, input[type="button"], input[type="submit"]').forEach(el => {
+            if (el.disabled) return;
+            const txt = ((el.innerText || el.value) || '').trim();
+            if (txt !== 'Search') return;
+            if (!isVisible(el)) return;
+            const r = el.getBoundingClientRect();
+            out.push({tag: el.tagName, id: el.id || '', x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)});
+        });
+        return out;
+    }""")
+    log.info(f"[IL] Search buttons disponíveis: {search_btns}")
+
+    # Escolhe o Search mais próximo do select County (mesma Y, X > sel_box right)
+    # Tenta múltiplas estratégias de click: force_click via id, JS click, dispatch, coords.
+    clicked = False
+    target = None
+    if sel_box and search_btns:
+        sy = sel_box["y"]
+        sx_right = sel_box["x"] + sel_box["width"]
+        adjacent = [b for b in search_btns if abs(b["y"] - sy) < 30 and b["x"] >= sx_right - 5]
+        if adjacent:
+            target = min(adjacent, key=lambda b: b["x"])
+            log.info(f"[IL] Search County alvo → {target}")
+
+    if target:
+        target_id = target.get("id", "")
+        if target_id:
+            loc = page.locator(f"#{target_id}").first
+            for strategy in ("force_click", "js_click", "dispatch"):
+                try:
+                    if strategy == "force_click":
+                        await loc.click(force=True, timeout=5000)
+                    elif strategy == "js_click":
+                        await loc.evaluate("el => el.click()")
+                    else:
+                        await loc.evaluate("""el => {
+                            ['mousedown','mouseup','click'].forEach(t => {
+                                el.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true, view:window}));
+                            });
+                        }""")
+                    log.info(f"[IL] Search County: clicou via #{target_id} ({strategy})")
+                    clicked = True
+                    break
+                except Exception as e:
+                    log.debug(f"[IL] {strategy} em #{target_id} falhou: {e}")
+                    continue
+        if not clicked:
+            cx = target["x"] + target["w"] // 2
+            cy = target["y"] + target["h"] // 2
+            try:
+                await page.mouse.click(cx, cy)
+                log.info(f"[IL] Search County: click em coords ({cx},{cy})")
+                clicked = True
+            except Exception as e:
+                log.warning(f"[IL] Click coords falhou: {e}")
+
+    if not clicked:
+        log.warning("[IL] Botão Search County não encontrado — aguardando trigger automático")
+
+    # JULIE pode demorar pra carregar grid com county inteiro
+    await page.wait_for_timeout(8000)
+    await wait_stable(page)
+    return True
+
+
+async def _il_parse_grid(page):
+    """Lê a tabela 'Tickets' e retorna lista de dicts."""
+    data = await page.evaluate("""() => {
+        const tables = document.querySelectorAll('table');
+        for (const t of tables) {
+            const firstRow = t.querySelectorAll('tr')[0];
+            if (!firstRow) continue;
+            const headers = Array.from(firstRow.querySelectorAll('th, td'))
+                .map(c => (c.innerText || '').trim().toLowerCase());
+            const hdrStr = headers.join('|');
+            if (hdrStr.includes('ticket') && hdrStr.includes('completed') && hdrStr.includes('expires')) {
+                const rows = Array.from(t.querySelectorAll('tr')).slice(1)
+                    .map(r => Array.from(r.querySelectorAll('td, th'))
+                        .map(c => (c.innerText || '').trim()));
+                return {headers, rows};
+            }
+        }
+        return null;
+    }""")
+
+    if not data:
+        log.warning("[IL] Grid: tabela não encontrada")
+        return []
+
+    headers = data["headers"]
+
+    def _idx(name):
+        for i, h in enumerate(headers):
+            if name in h:
+                return i
+        return -1
+
+    cols = {
+        "ticket": _idx("ticket"),
+        "completed": _idx("completed"),
+        "expires": _idx("expires"),
+        "county": _idx("county"),
+        "place": _idx("place"),
+        "address": _idx("address"),
+        "street": _idx("street"),
+        "cross": _idx("cross"),
+        "caller": _idx("caller"),
+        "company": _idx("company"),
+    }
+
+    def _cell(r, key):
+        i = cols.get(key, -1)
+        return r[i] if 0 <= i < len(r) else ""
+
+    rows = []
+    for r in data["rows"]:
+        if not r or cols["ticket"] < 0:
+            continue
+        full = _cell(r, "ticket")
+        base, rev = _il_split_ticket_revision(full)
+        if not base:
+            continue
+        rows.append({
+            "ticket_full": full.lstrip(">").strip(),
+            "ticket_base": base,
+            "revision": rev,
+            "completed": _cell(r, "completed"),
+            "expires": _cell(r, "expires"),
+            "county": _cell(r, "county"),
+            "place": _cell(r, "place"),
+            "address_num": _cell(r, "address"),
+            "street": _cell(r, "street"),
+            "cross_street": _cell(r, "cross"),
+            "caller": _cell(r, "caller"),
+            "company": _cell(r, "company"),
+        })
+
+    log.info(f"[IL] Grid: {len(rows)} linhas")
+    return rows
+
+
+def _filter_il_onedrill(rows):
+    """Mantém só Company ONEDRILL/ONE DRILL (case insensitive, ignora espaços)."""
+    out = []
+    for r in rows:
+        norm = (r.get("company") or "").upper().replace(" ", "")
+        if norm == "ONEDRILL":
+            out.append(r)
+    return out
+
+
+def _dedupe_latest_revision(rows):
+    """Pra cada ticket_base, mantém row com Completed mais recente."""
+    by_base = {}
+    for r in rows:
+        base = r["ticket_base"]
+        ts = _il_parse_completed_ts(r["completed"])
+        if base not in by_base or ts > by_base[base]["_ts"]:
+            by_base[base] = {**r, "_ts": ts}
+    return [{k: v for k, v in r.items() if k != "_ts"} for r in by_base.values()]
+
+
+async def _il_open_detail(page, row):
+    """Click na linha do ticket pra abrir o detalhe na tela main.
+
+    ⚠ Seletor ainda não validado contra HTML real — pode precisar ajuste após
+    o primeiro run (debug_screenshot + il_detail_*.html ficam no BASE_DIR).
+    """
+    tnum_full = row["ticket_full"]
+    tnum_base = row["ticket_base"]
+    log.info(f"[IL] Abrindo detalhe: {tnum_full}")
+
+    clicked = False
+    for sel in [
+        f'tr:has(td:text-is("{tnum_full}"))',
+        f'tr:has(td:has-text("{tnum_base}"))',
+        f'td:text-is("{tnum_full}")',
+        f'a:has-text("{tnum_full}")',
+    ]:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count():
+                await loc.dblclick()
+                clicked = True
+                break
+        except Exception:
+            continue
+
+    if not clicked:
+        log.warning(f"[IL] Detail: linha {tnum_full} não encontrada")
+        return False
+
+    await page.wait_for_timeout(2500)
+    await wait_stable(page)
+    return True
+
+
+async def _il_parse_detail(page):
+    """Extrai dados do form de detalhe (Excavator/Digsite/Work/Members).
+
+    ⚠ Defensivo — pode precisar ajuste depois do print do detalhe real.
+    """
+    try:
+        data = await page.evaluate("""() => {
+            const byLabel = (label) => {
+                const lab = label.toLowerCase();
+                const elements = document.querySelectorAll('td, th, label, span, div');
+                for (const el of elements) {
+                    const txt = (el.innerText || '').trim().toLowerCase();
+                    if (txt === lab || txt === lab + ':') {
+                        let target = el.nextElementSibling;
+                        while (target) {
+                            const inp = target.querySelector?.('input, textarea, select');
+                            if (inp) return (inp.value || inp.innerText || '').trim();
+                            if (target.tagName === 'TD' && (target.innerText || '').trim()) {
+                                return target.innerText.trim();
+                            }
+                            target = target.nextElementSibling;
+                        }
+                        const parent = el.parentElement;
+                        if (parent) {
+                            const inp = parent.querySelector('input, textarea, select');
+                            if (inp && inp !== el) return (inp.value || inp.innerText || '').trim();
+                        }
+                    }
+                }
+                return '';
+            };
+
+            const members = [];
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                const txt = (el.innerText || '').trim();
+                if (txt.toLowerCase() === 'members' && el.children.length < 5) {
+                    let container = el.parentElement || el;
+                    for (let i = 0; i < 4 && container; i++) {
+                        const rows = container.querySelectorAll('tr, li');
+                        if (rows.length >= 2) {
+                            rows.forEach(r => {
+                                const t = (r.innerText || '').trim();
+                                if (t && t.toLowerCase() !== 'members') members.push(t);
+                            });
+                            break;
+                        }
+                        container = container.parentElement;
+                    }
+                    break;
+                }
+            }
+
+            return {
+                work_type: byLabel('Work Type'),
+                extent: byLabel('Extent'),
+                premark: byLabel('Premark'),
+                done_for: byLabel('Done For'),
+                begin_date: byLabel('Begin Date'),
+                dig_by_date: byLabel('Dig By Date'),
+                expires_date: byLabel('Expires Date'),
+                remarks: byLabel('Remarks'),
+                company: byLabel('Company'),
+                caller: byLabel('Caller'),
+                county: byLabel('County'),
+                place: byLabel('Place'),
+                addr_street: byLabel('Addr/Street'),
+                cross_st: byLabel('Cross St'),
+                members_raw: members,
+            };
+        }""")
+        return data or {}
+    except Exception as e:
+        log.warning(f"[IL] Parse detail falhou: {e}")
+        return {}
+
+
+def _build_il_notes(row, detail):
+    """Monta string de notes pra ticket novo IL."""
+    parts = []
+    addr = (row.get("address_num") or "").strip()
+    street = (row.get("street") or "").strip()
+    cross = (row.get("cross_street") or "").strip()
+    place = (row.get("place") or "").strip()
+    if addr or street:
+        parts.append(f"{addr} {street}".strip())
+    if cross:
+        parts.append(f"Cross: {cross}")
+    if place:
+        parts.append(place)
+    if detail.get("remarks"):
+        parts.append(f"[Remarks] {detail['remarks']}")
+    return "\n".join(parts)
+
+
+def _find_renewal_candidate(row, existing_tickets):
+    """Detecta se ticket_base novo é renovação de um antigo (heurística address+place+timing)."""
+    new_addr = f"{row.get('address_num', '')} {row.get('street', '')}".strip().upper()
+    new_place = (row.get("place") or "").strip().upper()
+    if not new_addr or not new_place:
+        return None
+
+    today = datetime.now().date()
+    for t in existing_tickets:
+        if (t.get("state") or "").upper() != "IL":
+            continue
+        if t.get("ticket") == row["ticket_base"]:
+            continue
+        addr = (t.get("address") or "").strip().upper()
+        loc = (t.get("location") or "").strip().upper()
+        if addr != new_addr or new_place not in loc:
+            continue
+        try:
+            exp_str = normalize_expire(t.get("expire") or "")
+            if not exp_str:
+                continue
+            exp_dt = datetime.strptime(exp_str, "%m/%d/%Y").date()
+            if 0 <= (today - exp_dt).days <= 7:
+                return t
+        except Exception:
+            continue
+    return None
+
+
+async def import_il(triggered_by="manual"):
+    """Importa novos tickets IL via JULIE Ticket Entry (portal cliente).
+
+    Returns: total de tickets inseridos + atualizados.
+    """
+    if not IL_USER or not IL_PASS:
+        log.error("[IL] import_il: IL_USER/IL_PASS não definidos no .env")
+        return 0
+
+    log.info(f"{'='*55}")
+    log.info(f"  OneDrill 811  IMPORT IL (JULIE Ticket Entry)  [{triggered_by}]")
+    log.info(f"{'='*55}")
+
+    existing = sb_get("tickets", "&state=eq.IL")
+    existing_by_base = {t["ticket"]: t for t in existing}
+    log.info(f"[IL] {len(existing_by_base)} tickets IL no Supabase")
+
+    inserted = 0
+    updated = 0
+    skipped = 0
+    renewals = 0
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = await browser.new_page()
+        page.set_default_timeout(60000)
+
+        try:
+            if not await _il_login(page):
+                return 0
+            if not await _il_open_search_screen(page):
+                return 0
+            if not await _il_search_county(page, IL_SEARCH_COUNTY):
+                return 0
+
+            rows = await _il_parse_grid(page)
+            rows = _filter_il_onedrill(rows)
+            rows = _dedupe_latest_revision(rows)
+            log.info(f"[IL] {len(rows)} tickets ONEDRILL após filter+dedupe")
+
+            debug_count = 0
+            for row in rows:
+                base = row["ticket_base"]
+                expire_grid = _il_extract_expire(row["expires"])
+                existing_t = existing_by_base.get(base)
+
+                if existing_t:
+                    expire_saved = normalize_expire(existing_t.get("expire") or "")
+                    if expire_saved == expire_grid:
+                        skipped += 1
+                        continue
+                    hist = existing_t.get("history") or []
+                    hist.append({
+                        "ts": int(datetime.now().timestamp() * 1000),
+                        "action": f"[AUTO IL] Revisão {row['revision']}: expire {expire_saved or '?'} → {expire_grid}",
+                        "color": "#7c3aed",
+                    })
+                    try:
+                        sb_patch("tickets", existing_t["id"], {
+                            "expire": expire_grid,
+                            "history": hist,
+                        })
+                        updated += 1
+                        log.info(f"[IL] {base}: expire {expire_saved}→{expire_grid} (rev {row['revision']})")
+                    except Exception as e:
+                        log.error(f"[IL] {base}: erro patch — {e}")
+                    continue
+
+                # Ticket novo: insere só com dados da grid (sync_il pega utilities depois)
+                # Não abre detalhe — evita ter que voltar pra grid (frágil) e o
+                # sync_il via portal público já preenche utilities/respostas.
+                detail = {}
+
+                renewal_old = _find_renewal_candidate(row, existing)
+                old_ticket_num = ""
+                old_status_str = ""
+                old_expire_str = ""
+                if renewal_old:
+                    old_ticket_num = renewal_old["ticket"]
+                    old_status_str = (renewal_old.get("status") or "").strip()
+                    old_expire_str = normalize_expire(renewal_old.get("expire") or "")
+                    renewals += 1
+                    log.info(f"[IL] {base}: renovação de {old_ticket_num} ({old_status_str}, exp {old_expire_str})")
+
+                location_str = f"ILLINOIS - {(row.get('place') or '').strip()}"
+                address_full = f"{(row.get('address_num') or '').strip()} {(row.get('street') or '').strip()}".strip()
+                work_type = (detail.get("work_type") or "").strip() or "Service"
+
+                history_entries = [{
+                    "ts": int(datetime.now().timestamp() * 1000),
+                    "action": f"[AUTO IL] Importado do JULIE — revisão {row['revision']}",
+                    "color": "#10a574",
+                }]
+                if old_ticket_num:
+                    history_entries.append({
+                        "ts": int(datetime.now().timestamp() * 1000),
+                        "action": f"[RENOVAÇÃO] {old_ticket_num} → {base} (graça até {old_expire_str or 'N/A'})",
+                        "color": "#7c3aed",
+                    })
+
+                ticket_data = {
+                    "ticket": base,
+                    "company": "One Drill",
+                    "state": "IL",
+                    "location": location_str,
+                    "address": address_full,
+                    "status": "Open",
+                    "expire": expire_grid,
+                    "footage": 0,
+                    "client": "",
+                    "prime": "",
+                    "tipo": work_type,
+                    "job": "",
+                    "notes": _build_il_notes(row, detail),
+                    "pending": "",
+                    "old_ticket2": old_ticket_num,
+                    "status_old": old_status_str,
+                    "expire_old": old_expire_str,
+                    "county": (row.get("county") or "").strip(),
+                    "history": history_entries,
+                    "attachments": [],
+                }
+                try:
+                    sb_insert("tickets", ticket_data)
+                    existing_by_base[base] = ticket_data
+                    existing.append(ticket_data)
+                    inserted += 1
+                    log.info(f"[IL] ✅ {base}: novo ticket inserido ({row.get('place', '')})")
+                except Exception as e:
+                    log.error(f"[IL] {base}: erro insert — {e}")
+
+                # Não precisa voltar pra grid — não saímos dela (sem _il_open_detail).
+
+        finally:
+            await browser.close()
+
+    log.info(f"[IL] === Import IL concluído: {inserted} novos, {updated} atualizados, "
+             f"{renewals} renovações, {skipped} sem mudança ===")
+    return inserted + updated
+
+
+async def sync_and_import_il(triggered_by="manual"):
+    """Import + Sync IL completo (equivalente a sync_and_import_wi)."""
+    imported = await import_il(triggered_by)
+    await sync_il(triggered_by)
+    return imported
 
 
 async def save_ticket_pdfs_il(force=False):
@@ -4230,7 +5085,1956 @@ async def sync_wi(triggered_by="manual"):
         log_finish(lid, checked, summary.responses_saved, "error", str(e))
 
 
-# ── │ SECTION: CONTACTS_FL │ SCRAPE CONTATOS DE UTILITIES (FL - Sunshine 811) 
+# ── │ SECTION: WI_IMPORT │ WISCONSIN — IMPORTAR TICKETS VIA PORTAL LOGADO ────
+#
+# O portal PÚBLICO (DIGGERS_URL) serve pra consultar respostas de tickets
+# já conhecidos. Pro IMPORT de tickets novos, é preciso logar no portal
+# cliente (DIGGERS_CLIENT_URL) e fazer "Excavator Search" por range de datas.
+#
+# Fluxo:
+#   1. Login → https://geocall.diggershotline.com/geocall/client/login
+#   2. Clicar "+" (novo search) → "Excavator search"
+#   3. Trocar datas (from_date → to_date) e pesquisar
+#   4. Lista de tickets retornada → conferir com Supabase
+#   5. Clicar em cada ticket novo → scrape detalhes (endereço, expire, etc.)
+#   6. Upsert no Supabase
+#   7. Salvar data da última pesquisa pra próxima execução
+
+WI_LAST_SEARCH_FILE = os.path.join(BASE_DIR, "wi_last_search.json")
+
+
+def _get_wi_last_search_date():
+    """Retorna última data de pesquisa WI (MM/DD/YYYY) ou '' se nunca rodou."""
+    try:
+        with open(WI_LAST_SEARCH_FILE, "r") as f:
+            data = _json.load(f)
+            return data.get("last_date", "")
+    except (FileNotFoundError, _json.JSONDecodeError):
+        return ""
+
+
+def _set_wi_last_search_date(date_str):
+    """Salva a data de última pesquisa WI."""
+    with open(WI_LAST_SEARCH_FILE, "w", encoding="utf-8") as f:
+        _json.dump({"last_date": date_str, "updated_at": datetime.now().isoformat()}, f)
+    log.info(f"[WI] Última pesquisa salva: {date_str}")
+
+
+async def _wi_debug_screenshot(page, label, tnum=""):
+    """Salva screenshot de debug do portal WI (só se DEBUG_MODE ou primeiros tickets)."""
+    try:
+        tag = f"_{tnum}" if tnum else ""
+        ss = os.path.join(BASE_DIR, f"debug_wi_import_{label}{tag}.png")
+        await page.screenshot(path=ss, full_page=True)
+        log.debug(f"[WI] Debug screenshot: {ss}")
+        return ss
+    except Exception as e:
+        log.debug(f"[WI] Erro salvando screenshot: {e}")
+        return ""
+
+
+async def _login_diggers(page):
+    """Login no portal cliente do Diggers Hotline (ExtJS 4.1).
+
+    Tenta múltiplos seletores porque ExtJS gera IDs dinâmicos.
+    Salva screenshot de debug se falhar.
+
+    Returns: True se login OK, False caso contrário.
+    """
+    if not WI_USER or not WI_PASS:
+        log.error("[WI] Credenciais WI_USER/WI_PASS não definidas no .env")
+        return False
+
+    log.info(f"[WI] Navegando para login: {DIGGERS_CLIENT_URL}")
+    await page.goto(DIGGERS_CLIENT_URL, wait_until="domcontentloaded")
+    await page.wait_for_timeout(4000)
+    await wait_stable(page)
+
+    # Se já logado (redirecionou pra home), pula login
+    if "login" not in page.url.lower():
+        log.info(f"[WI] Já logado — URL: {page.url[:80]}")
+        return True
+
+    # ── Encontrar campos de login ──
+    # ExtJS: IDs dinâmicos, mas name/type são estáveis
+    user_input = None
+    for sel in [
+        'input[name="j_username"]',
+        'input[name="username"]',
+        'input[name="user"]',
+        'input[name="loginId"]',
+        'input[placeholder*="user" i]',
+        'input[placeholder*="User" i]',
+        'input[placeholder*="email" i]',
+    ]:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count():
+                user_input = loc
+                log.debug(f"[WI] Login: username field → {sel}")
+                break
+        except Exception:
+            continue
+
+    # Se não achou pelo name, tenta o 1º input text visível
+    if not user_input:
+        text_inputs = page.locator('input[type="text"]:visible')
+        if await text_inputs.count():
+            user_input = text_inputs.first
+            log.debug("[WI] Login: username field → primeiro input[type=text] visível")
+
+    # Também checa iframes (ExtJS pode carregar login em iframe)
+    if not user_input:
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            for sel in ['input[name="j_username"]', 'input[name="username"]', 'input[type="text"]']:
+                try:
+                    loc = frame.locator(sel).first
+                    if await loc.count():
+                        user_input = loc
+                        log.debug(f"[WI] Login: username em iframe {frame.url[:60]}")
+                        break
+                except Exception:
+                    continue
+            if user_input:
+                break
+
+    pass_input = None
+    for sel in [
+        'input[name="j_password"]',
+        'input[name="password"]',
+        'input[type="password"]',
+    ]:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count():
+                pass_input = loc
+                log.debug(f"[WI] Login: password field → {sel}")
+                break
+        except Exception:
+            continue
+
+    if not pass_input:
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            loc = frame.locator('input[type="password"]').first
+            try:
+                if await loc.count():
+                    pass_input = loc
+                    break
+            except Exception:
+                continue
+
+    if not user_input or not pass_input:
+        ss = await _wi_debug_screenshot(page, "login_no_fields")
+        log.error(f"[WI] Login: campos username/password não encontrados — debug: {ss}")
+        # Dump HTML pra análise
+        try:
+            html_path = os.path.join(BASE_DIR, "debug_wi_login_page.html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(await page.content())
+            log.error(f"[WI] HTML salvo: {html_path}")
+        except Exception:
+            pass
+        return False
+
+    # ── Preencher e submeter ──
+    try:
+        await user_input.click()
+        await user_input.fill("")
+        await page.wait_for_timeout(150)
+        await user_input.fill(WI_USER)
+        await page.wait_for_timeout(200)
+
+        await pass_input.click()
+        await pass_input.fill("")
+        await page.wait_for_timeout(150)
+        await pass_input.fill(WI_PASS)
+        await page.wait_for_timeout(200)
+    except Exception as e:
+        log.error(f"[WI] Login: erro preenchendo campos: {e}")
+        return False
+
+    # ── Clicar botão de login ──
+    clicked = False
+    for sel in [
+        'button:has-text("Log In")',
+        'button:has-text("Login")',
+        'button:has-text("Sign In")',
+        'input[type="submit"]',
+        'button[type="submit"]',
+        '#loginButton',
+        'a:has-text("Log In")',
+        '.x-btn:has-text("Log")',
+    ]:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count():
+                await loc.click()
+                clicked = True
+                log.debug(f"[WI] Login: clicou → {sel}")
+                break
+        except Exception:
+            continue
+
+    if not clicked:
+        # Fallback: Enter no password
+        try:
+            await pass_input.press("Enter")
+            log.debug("[WI] Login: fallback Enter no password")
+        except Exception:
+            pass
+
+    await page.wait_for_timeout(5000)
+    await wait_stable(page)
+
+    # ── Verifica sucesso ──
+    # Se URL ainda tem "login", pode ter falhado
+    url_lower = page.url.lower()
+    if "login" in url_lower and "client" in url_lower:
+        # Checa se há mensagem de erro visível
+        try:
+            body_text = await page.locator("body").inner_text()
+            if any(kw in body_text.lower() for kw in ["invalid", "incorrect", "failed", "error", "wrong"]):
+                ss = await _wi_debug_screenshot(page, "login_failed")
+                log.error(f"[WI] Login falhou (credenciais inválidas?) — debug: {ss}")
+                return False
+        except Exception:
+            pass
+        # Pode ser que o login redirecionou mas URL não mudou — espera mais
+        await page.wait_for_timeout(3000)
+        if "login" in page.url.lower():
+            ss = await _wi_debug_screenshot(page, "login_stuck")
+            log.error(f"[WI] Login: ainda na página de login após 8s — debug: {ss}")
+            return False
+
+    log.info(f"[WI] Login OK — URL: {page.url[:100]}")
+    return True
+
+
+async def _search_diggers_excavator(page, from_date, to_date, debug=True):
+    """Pesquisa tickets no Diggers Hotline por range de data (Excavator Search).
+
+    from_date/to_date: formato "MM/DD/YYYY"
+    Retorna: list of dicts [{ticket, ticket_type, ...}, ...] com tickets encontrados.
+
+    Fluxo confirmado no portal (ExtJS 4.1 — sidebar navigation):
+      1. Clicar "Excavator Search" no sidebar esquerdo (abaixo de "Search")
+      2. Preencher date range nos campos do form
+      3. Clicar botão Search
+      4. Ler grid de resultados (cada row = 1 ticket)
+      5. Paginar se necessário
+    """
+    found_tickets = []
+
+    if debug:
+        await _wi_debug_screenshot(page, "before_search")
+
+    # ── 1. Clicar "Excavator Search" no sidebar esquerdo ──
+    # Layout do sidebar confirmado:
+    #   Search (header)
+    #     ├── Ticket
+    #     ├── Excavator Search    ← este
+    #     └── Excavator By Number
+    exc_clicked = False
+
+    # O sidebar tem "Search" com um botão [+] pra expandir os sub-itens.
+    # Primeiro: expandir "Search" clicando no [+] ou no texto "Search"
+    # Depois: clicar em "Excavator Search" que aparece embaixo.
+
+    # Passo 1: Expandir "Search" no sidebar
+    expanded = False
+    # Tenta clicar no [+] icon ao lado de "Search"
+    for sel in [
+        # ExtJS tree: o expand icon é um <img> ou <span> com classe de expand
+        'img[class*="plus"]:near(:text("Search"))',
+        'span[class*="plus"]:near(:text("Search"))',
+        # Ou o proprio texto "Search" pode expandir ao clicar
+    ]:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() and await loc.is_visible():
+                await loc.click()
+                expanded = True
+                log.debug(f"[WI] Search: expandiu via {sel}")
+                break
+        except Exception:
+            continue
+
+    if not expanded:
+        # Tenta JS: encontra elemento "Search" no sidebar e clica pra expandir
+        try:
+            await page.evaluate("""() => {
+                // Procura todos os elementos com texto "Search"
+                const walker = document.createTreeWalker(
+                    document.body, NodeFilter.SHOW_TEXT, null, false
+                );
+                while (walker.nextNode()) {
+                    const text = walker.currentNode.textContent.trim();
+                    if (text === 'Search') {
+                        const el = walker.currentNode.parentElement;
+                        if (!el) continue;
+                        // Procura o [+] icon no mesmo container ou irmao
+                        const parent = el.closest('div, tr, li, span') || el.parentElement;
+                        if (!parent) continue;
+                        // Clica no [+] icon se existir
+                        const plus = parent.querySelector('img[class*="plus"], img[class*="expand"], .x-tree-ec-icon, .x-tool-expand');
+                        if (plus) {
+                            plus.click();
+                            return 'plus';
+                        }
+                        // Senao, clica no proprio texto
+                        el.click();
+                        return 'text';
+                    }
+                }
+                return false;
+            }""")
+            expanded = True
+            log.debug("[WI] Search: expandiu via JS")
+        except Exception as e:
+            log.warning(f"[WI] Search: erro expandindo sidebar: {e}")
+
+    if not expanded:
+        # Fallback direto: tenta clicar em "Search" pelo texto
+        for sel in [
+            'text="Search"',
+            'span:has-text("Search")',
+            'a:has-text("Search")',
+            'div:text-is("Search")',
+        ]:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() and await loc.is_visible():
+                    await loc.click()
+                    expanded = True
+                    log.debug(f"[WI] Search: clicou texto Search -> {sel}")
+                    break
+            except Exception:
+                continue
+
+    await page.wait_for_timeout(2000)
+
+    if debug:
+        await _wi_debug_screenshot(page, "after_expand_search")
+
+    # Passo 2: Clicar em "Excavator Search" (agora visivel apos expandir)
+    for sel in [
+        'a:has-text("Excavator Search")',
+        'span:has-text("Excavator Search")',
+        'div:has-text("Excavator Search")',
+        '.x-tree-node-text:has-text("Excavator Search")',
+        'text="Excavator Search"',
+    ]:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() and await loc.is_visible():
+                await loc.click()
+                exc_clicked = True
+                log.debug(f"[WI] Search: clicou 'Excavator Search' -> {sel}")
+                break
+        except Exception:
+            continue
+
+    # JS fallback pra "Excavator Search"
+    if not exc_clicked:
+        try:
+            result = await page.evaluate("""() => {
+                const walker = document.createTreeWalker(
+                    document.body, NodeFilter.SHOW_TEXT, null, false
+                );
+                while (walker.nextNode()) {
+                    const text = walker.currentNode.textContent.trim();
+                    if (text === 'Excavator Search') {
+                        const el = walker.currentNode.parentElement;
+                        if (el) { el.click(); return true; }
+                    }
+                }
+                return false;
+            }""")
+            if result:
+                exc_clicked = True
+                log.debug("[WI] Search: 'Excavator Search' via JS walker")
+        except Exception:
+            pass
+
+    if not exc_clicked:
+        ss = await _wi_debug_screenshot(page, "no_excavator_search")
+        log.error(f"[WI] Search: link 'Excavator Search' nao encontrado — debug: {ss}")
+        return found_tickets
+
+    await page.wait_for_timeout(3000)
+    await wait_stable(page)
+
+    if debug:
+        await _wi_debug_screenshot(page, "search_form_loaded")
+
+    # ── 2. Preencher date range ──
+    # O form de Excavator Search tem campos de data (from/to)
+    # ExtJS date fields: input com name contendo "date" ou "Date"
+    date_filled = False
+
+    # Estratégia A: procurar por name/class de date fields
+    date_inputs = []
+    for sel in [
+        'input[name*="date" i]',
+        'input[name*="Date"]',
+        'input[name*="from" i]',
+        'input[name*="start" i]',
+        'input[name*="begin" i]',
+        'input.x-form-date-field',
+    ]:
+        try:
+            locs = page.locator(sel)
+            count = await locs.count()
+            for i in range(count):
+                el = locs.nth(i)
+                if await el.is_visible():
+                    date_inputs.append(el)
+        except Exception:
+            continue
+
+    # Estratégia B: inputs que já contêm data ou que parecem date fields
+    if len(date_inputs) < 2:
+        try:
+            all_inputs = page.locator('input[type="text"]:visible, input:not([type]):visible')
+            count = await all_inputs.count()
+            for i in range(count):
+                el = all_inputs.nth(i)
+                try:
+                    name = await el.get_attribute("name") or ""
+                    value = await el.input_value() or ""
+                    cls = await el.get_attribute("class") or ""
+                    if ("date" in name.lower() or "date" in cls.lower()
+                            or re.match(r"\d{1,2}/\d{1,2}/\d{2,4}", value)):
+                        if el not in date_inputs:
+                            date_inputs.append(el)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    # Dedup (pode ter pego o mesmo campo 2x)
+    if len(date_inputs) > 2:
+        # Pega só os 2 primeiros únicos
+        unique = []
+        seen_ids = set()
+        for el in date_inputs:
+            try:
+                el_id = await el.get_attribute("id") or ""
+                if el_id and el_id in seen_ids:
+                    continue
+                seen_ids.add(el_id)
+                unique.append(el)
+            except Exception:
+                unique.append(el)
+        date_inputs = unique[:2]
+
+    if len(date_inputs) >= 2:
+        try:
+            # From date
+            await date_inputs[0].click(click_count=3)
+            await page.wait_for_timeout(100)
+            await date_inputs[0].fill(from_date)
+            await date_inputs[0].press("Tab")
+            await page.wait_for_timeout(500)
+
+            # To date
+            await date_inputs[1].click(click_count=3)
+            await page.wait_for_timeout(100)
+            await date_inputs[1].fill(to_date)
+            await date_inputs[1].press("Tab")
+            await page.wait_for_timeout(500)
+
+            date_filled = True
+            log.info(f"[WI] Search: datas preenchidas: {from_date} -> {to_date}")
+        except Exception as e:
+            log.warning(f"[WI] Search: erro preenchendo datas: {e}")
+
+    if not date_filled:
+        # JS fallback: encontra campos de data pelo valor ou name e seta
+        try:
+            await page.evaluate(f"""() => {{
+                const inputs = document.querySelectorAll('input');
+                const dateFields = [];
+                for (const inp of inputs) {{
+                    const n = (inp.name || '').toLowerCase();
+                    const v = inp.value || '';
+                    const cls = (inp.className || '').toLowerCase();
+                    if (n.includes('date') || cls.includes('date')
+                        || /\\d{{1,2}}\\/\\d{{1,2}}\\/\\d{{2,4}}/.test(v)) {{
+                        dateFields.push(inp);
+                    }}
+                }}
+                if (dateFields.length >= 2) {{
+                    const set = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    set.call(dateFields[0], '{from_date}');
+                    dateFields[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    dateFields[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    set.call(dateFields[1], '{to_date}');
+                    dateFields[1].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    dateFields[1].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    return true;
+                }}
+                return false;
+            }}""")
+            date_filled = True
+            log.info(f"[WI] Search: datas via JS: {from_date} -> {to_date}")
+        except Exception as e:
+            ss = await _wi_debug_screenshot(page, "date_fill_failed")
+            log.error(f"[WI] Search: datas nao preenchidas — debug: {ss}, erro: {e}")
+            return found_tickets
+
+    await page.wait_for_timeout(500)
+
+    # ── 3. Clicar OK/Search (dialog usa "Ok", nao "Search") ──
+    search_clicked = False
+    for sel in [
+        'button:has-text("Ok")',
+        'a:has-text("Ok")',
+        '.x-btn:has-text("Ok")',
+        'button:has-text("OK")',
+        'button:has-text("Search")',
+        'a:has-text("Search")',
+        '.x-btn:has-text("Search")',
+        'input[value="Ok" i]',
+        'input[value="Search" i]',
+        'button[type="submit"]',
+    ]:
+        try:
+            locs = page.locator(sel)
+            count = await locs.count()
+            for i in range(count):
+                el = locs.nth(i)
+                if await el.is_visible():
+                    await el.click()
+                    search_clicked = True
+                    log.debug(f"[WI] Search: clicou Search -> {sel}")
+                    break
+            if search_clicked:
+                break
+        except Exception:
+            continue
+
+    if not search_clicked:
+        ss = await _wi_debug_screenshot(page, "no_search_button")
+        log.error(f"[WI] Search: botao 'Search' nao encontrado — debug: {ss}")
+        return found_tickets
+
+    # ── 4. Esperar resultados ──
+    log.info("[WI] Search: aguardando resultados...")
+    await page.wait_for_timeout(8000)
+    await wait_stable(page)
+
+    if debug:
+        await _wi_debug_screenshot(page, "search_results")
+
+    # ── 5. Ler grid de resultados ──
+    found_tickets = await _parse_wi_search_results(page)
+
+    if not found_tickets:
+        log.info("[WI] Search: nenhum resultado encontrado")
+        try:
+            body = await page.locator("body").inner_text()
+            if "no results" in body.lower() or "no records" in body.lower() or "0 ticket" in body.lower():
+                log.info("[WI] Search: portal confirma 0 resultados")
+        except Exception:
+            pass
+    else:
+        log.info(f"[WI] Search: {len(found_tickets)} tickets encontrados")
+
+    # ── 6. Paginacao (só se achou resultados) ──
+    MAX_SEARCH_PAGES = 200          # safety net
+    page_num = 1
+    seen_tickets = {t["ticket"] for t in found_tickets}
+
+    while found_tickets and page_num < MAX_SEARCH_PAGES:
+        # Detecta botão Next — ExtJS usa classes CSS (não attr disabled)
+        next_clicked = False
+        for sel in [
+            'button:has-text("Next")',
+            '.x-tbar-page-next',
+            'a:has-text("Next")',
+            'button[data-qtip="Next Page"]',
+        ]:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() and await loc.is_visible():
+                    # ExtJS disabled check: classes "x-btn-disabled" / "x-item-disabled"
+                    cls = await loc.get_attribute("class") or ""
+                    if "disabled" in cls.lower():
+                        continue  # botão existe mas está desabilitado
+                    # Checa parent tbm (ExtJS coloca disabled no wrapper <a> do botão)
+                    try:
+                        parent_cls = await loc.locator("..").get_attribute("class") or ""
+                        if "disabled" in parent_cls.lower():
+                            continue
+                    except Exception:
+                        pass
+                    await loc.click()
+                    next_clicked = True
+                    break
+            except Exception:
+                continue
+
+        if not next_clicked:
+            break
+
+        page_num += 1
+        log.info(f"[WI] Search: pagina {page_num}...")
+        await page.wait_for_timeout(4000)
+        await wait_stable(page)
+
+        page_results = await _parse_wi_search_results(page)
+        if not page_results:
+            break
+
+        # Dedup: se TODOS os tickets desta página já foram vistos → parou de paginar de verdade
+        new_on_page = [t for t in page_results if t["ticket"] not in seen_tickets]
+        if not new_on_page:
+            log.info(f"[WI] Search: pagina {page_num} retornou só duplicatas — fim da paginação")
+            break
+
+        for t in new_on_page:
+            seen_tickets.add(t["ticket"])
+            found_tickets.append(t)
+
+    log.info(f"[WI] Search total: {len(found_tickets)} tickets em {page_num} pagina(s)")
+    return found_tickets
+
+
+async def _parse_wi_search_results(page):
+    """Extrai dados ricos da grid de resultados do Excavator Search.
+
+    Colunas confirmadas (screenshot):
+      Number | Date Time Ticket | Start Date Time | Company Name |
+      Company Phone | Caller Name | County | Place (Municipality) | Address | Street
+
+    Retorna: list of dicts com campos parseados por ticket.
+    """
+    results = []
+
+    # ── Estratégia 1: ExtJS 3.4 Store API + DOM (.x-grid3-row) ──
+    # Portal usa ExtJS 3.4.0: sem ComponentQuery, sem StoreManager.
+    # Grid DOM: .x-grid3-row (cada row é uma <table> separada dentro de um <div>).
+    js_extjs = r"""() => {
+        const out = {rows: [], colMap: {}, allFields: [], method: '', debug: ''};
+        try {
+            if (typeof Ext === 'undefined') { out.debug = 'no-Ext'; return out; }
+            try { out.debug += 'v=' + (Ext.version || '?') + ' '; } catch(e) {}
+
+            // ── Store API: Ext.StoreMgr (ExtJS 3.x) ──
+            var bestStore = null, bestCount = 0;
+            if (Ext.StoreMgr && Ext.StoreMgr.each) {
+                try {
+                    var stores = [];
+                    Ext.StoreMgr.each(function(s) { stores.push(s); });
+                    out.debug += 'stores=' + stores.length + ' ';
+                    for (var si = 0; si < stores.length; si++) {
+                        try {
+                            var c = stores[si].getCount();
+                            if (c > bestCount) { bestCount = c; bestStore = stores[si]; }
+                        } catch(e) {}
+                    }
+                } catch(e) { out.debug += 'sm-err=' + e.message + ' '; }
+            }
+
+            // Fallback: Ext.ComponentMgr.all (Ext 3.x)
+            if (!bestStore && Ext.ComponentMgr && Ext.ComponentMgr.all) {
+                try {
+                    var items = Ext.ComponentMgr.all.items || [];
+                    out.debug += 'comps=' + items.length + ' ';
+                    for (var ci = 0; ci < items.length; ci++) {
+                        try {
+                            var comp = items[ci];
+                            if (comp.getStore) {
+                                var store = comp.getStore();
+                                if (store && store.getCount) {
+                                    var cnt = store.getCount();
+                                    if (cnt > bestCount) { bestCount = cnt; bestStore = store; }
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                } catch(e) { out.debug += 'cm-err=' + e.message + ' '; }
+            }
+
+            // Se achou store com dados, extrai registros
+            if (bestStore && bestCount > 0) {
+                out.debug += 'bestStore=' + bestCount + ' ';
+                // Column mapping via grid.colModel (ExtJS 3.x)
+                try {
+                    if (Ext.ComponentMgr && Ext.ComponentMgr.all) {
+                        var cmpItems = Ext.ComponentMgr.all.items || [];
+                        for (var gi = 0; gi < cmpItems.length; gi++) {
+                            try {
+                                var g = cmpItems[gi];
+                                if (g.getStore && g.getStore() === bestStore && g.colModel) {
+                                    var cm = g.colModel;
+                                    var cc = cm.getColumnCount ? cm.getColumnCount() : (cm.config ? cm.config.length : 0);
+                                    for (var i = 0; i < cc; i++) {
+                                        try {
+                                            var hdr = cm.getColumnHeader ? cm.getColumnHeader(i) : (cm.config[i].header || '');
+                                            var di = cm.getDataIndex ? cm.getDataIndex(i) : (cm.config[i].dataIndex || '');
+                                            if (hdr && di) out.colMap[hdr] = di;
+                                        } catch(e) {}
+                                    }
+                                    break;
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                } catch(e) {}
+                out.debug += 'cols=' + Object.keys(out.colMap).length + ' ';
+
+                // Extrair registros do store
+                try {
+                    var records = bestStore.getRange();
+                    if (records.length > 0) out.allFields = Object.keys(records[0].data);
+                    for (var ri = 0; ri < records.length; ri++) {
+                        var data = {};
+                        var rdata = records[ri].data;
+                        for (var key in rdata) {
+                            if (rdata.hasOwnProperty(key)) {
+                                var v = rdata[key];
+                                data[key] = (v != null && v !== undefined) ? String(v) : '';
+                            }
+                        }
+                        out.rows.push(data);
+                    }
+                    out.method = 'extjs3-store';
+                    out.debug += 'extracted=' + out.rows.length + ' ';
+                } catch(e) { out.debug += 'extract-err=' + e.message + ' '; }
+                return out;
+            }
+            out.debug += 'no-store-data ';
+        } catch(e) { out.debug += 'api-err=' + e.message + ' '; }
+
+        // ── Estratégia 2: DOM parsing ExtJS 3.x (.x-grid3-row) ──
+        try {
+            var gridRows = document.querySelectorAll('.x-grid3-row');
+            out.debug += 'grid3rows=' + gridRows.length + ' ';
+
+            // Headers: .x-grid3-hd-inner
+            var hdSels = ['.x-grid3-hd-inner', '.x-grid3-hd span'];
+            for (var hi = 0; hi < hdSels.length; hi++) {
+                var hds = document.querySelectorAll(hdSels[hi]);
+                if (hds.length >= 5) {
+                    for (var hj = 0; hj < hds.length; hj++) {
+                        var txt = (hds[hj].innerText || '').trim();
+                        if (txt) out.colMap[txt] = String(hj);
+                    }
+                    out.debug += 'hdr=' + hdSels[hi] + '(' + hds.length + ') ';
+                    break;
+                }
+            }
+
+            // Cada .x-grid3-row tem .x-grid3-cell-inner com os valores
+            for (var ri = 0; ri < gridRows.length; ri++) {
+                var cellDivs = gridRows[ri].querySelectorAll('.x-grid3-cell-inner');
+                var cells = [];
+                if (cellDivs.length >= 3) {
+                    for (var ci = 0; ci < cellDivs.length; ci++) {
+                        cells.push((cellDivs[ci].innerText || '').trim());
+                    }
+                } else {
+                    // Fallback: td dentro da table do row
+                    var tds = gridRows[ri].querySelectorAll('td');
+                    for (var ti = 0; ti < tds.length; ti++) {
+                        cells.push((tds[ti].innerText || '').trim());
+                    }
+                }
+                if (cells.length < 3) continue;
+
+                var hasTicket = false;
+                for (var vi = 0; vi < cells.length; vi++) {
+                    if (/^\d{8,12}$/.test(cells[vi])) { hasTicket = true; break; }
+                }
+                if (!hasTicket) continue;
+
+                var rowData = {};
+                for (var di = 0; di < cells.length; di++) {
+                    rowData[String(di)] = cells[di];
+                }
+                out.rows.push(rowData);
+            }
+
+            if (out.rows.length > 0) {
+                out.method = 'extjs3-dom';
+                out.debug += 'dom-extracted=' + out.rows.length + ' ';
+            }
+        } catch(e) { out.debug += 'dom-err=' + e.message + ' '; }
+
+        return out;
+    }"""
+
+    extjs_data = {}
+    try:
+        extjs_data = await page.evaluate(js_extjs)
+    except Exception as e:
+        log.debug(f"[WI] ExtJS Store API: erro: {e}")
+
+    method = extjs_data.get("method", "")
+    debug_info = extjs_data.get("debug", "")
+    col_map = extjs_data.get("colMap", {})
+    all_fields = extjs_data.get("allFields", [])
+    store_rows = extjs_data.get("rows", [])
+
+    log.debug(f"[WI] Grid parse: method={method} debug={debug_info}")
+    if col_map:
+        log.debug(f"[WI] Grid col map: {col_map}")
+    if all_fields:
+        log.debug(f"[WI] Store fields: {all_fields}")
+    if store_rows and store_rows[0]:
+        log.debug(f"[WI] Store sample row: { {k: v for k, v in list(store_rows[0].items())[:6]} }")
+    if not store_rows:
+        log.debug(f"[WI] Store rows: 0 — ExtJS API retornou vazio")
+
+    # Parse registros do ExtJS Store
+    if store_rows and method:
+        def _find_field(keywords):
+            """Acha field name por keywords — tenta header da coluna e depois nome do campo."""
+            for text, field in col_map.items():
+                if any(k in text.lower() for k in keywords):
+                    return field
+            for f in all_fields:
+                fl = f.lower()
+                if any(k in fl for k in keywords):
+                    return f
+            return None
+
+        f_number   = _find_field(["number", "ticketnumber", "ticket_number", "tktnum"])
+        f_start    = _find_field(["start date", "start_date", "startdate"])
+        f_county   = _find_field(["county"])
+        f_place    = _find_field(["place", "municipality"])
+        f_address  = _find_field(["address"])
+        f_street   = _find_field(["street"])
+        f_company  = _find_field(["company name", "company_name", "companyname"])
+        f_caller   = _find_field(["caller"])
+        f_type     = _find_field(["ticket_type", "tickettype", "tkttype", "type_name"])
+        f_marking  = _find_field(["marking", "markinginstructions"])
+        f_remarks  = _find_field(["remarks", "remark"])
+        f_intersec = _find_field(["intersection", "workintersection"])
+
+        log.debug(f"[WI] Field map: number={f_number} start={f_start} county={f_county} "
+                  f"place={f_place} addr={f_address} street={f_street} type={f_type}")
+
+        for row_data in store_rows:
+            ticket = ""
+            if f_number:
+                val = row_data.get(f_number, "").strip()
+                if re.match(r"^\d{6,14}$", val):
+                    ticket = val
+            if not ticket:
+                for key, val in row_data.items():
+                    v = val.strip()
+                    if re.match(r"^\d{8,12}$", v):
+                        ticket = v
+                        break
+            if not ticket:
+                continue
+
+            item = {
+                "ticket": ticket,
+                "start_date": row_data.get(f_start, "") if f_start else "",
+                "county":     row_data.get(f_county, "") if f_county else "",
+                "city":       row_data.get(f_place, "") if f_place else "",
+                "address_num": row_data.get(f_address, "") if f_address else "",
+                "street":     row_data.get(f_street, "") if f_street else "",
+                "caller":     row_data.get(f_caller, "") if f_caller else "",
+                "cells":      list(row_data.values()),
+            }
+            if f_type:
+                item["ticket_type"] = row_data.get(f_type, "")
+            if f_marking:
+                item["marking_instructions"] = row_data.get(f_marking, "")
+            if f_remarks:
+                item["remarks"] = row_data.get(f_remarks, "")
+            if f_intersec:
+                item["intersection"] = row_data.get(f_intersec, "")
+            results.append(item)
+
+        # Dedup e retorna se ExtJS Store deu certo
+        seen = set()
+        deduped = []
+        for r in results:
+            if r["ticket"] not in seen:
+                seen.add(r["ticket"])
+                deduped.append(r)
+        log.debug(f"[WI] Grid parse via {method}: {len(deduped)} tickets extraídos")
+        return deduped
+
+    # ── Estratégia 2 (fallback): DOM parsing ──
+    log.debug("[WI] ExtJS Store API sem resultados — fallback DOM parsing")
+    js_extract = r"""() => {
+        const out = {headers: [], rows: [], debug: ''};
+
+        // ── Headers: tenta seletores do mais específico ao mais genérico ──
+        const headerSels = [
+            '.x-grid3-hd-inner',
+            '.x-column-header-text-inner',
+            '.x-column-header-text',
+            '.x-column-header .x-column-header-inner',
+            '.x-grid-hd-text',
+            'th',
+        ];
+        for (const sel of headerSels) {
+            const cells = document.querySelectorAll(sel);
+            if (cells.length >= 5) {
+                out.headers = Array.from(cells).map(h => (h.innerText || '').trim()).filter(Boolean);
+                out.debug += `hdr=${sel}(${cells.length}) `;
+                break;
+            }
+        }
+
+        // ── Rows: ExtJS 3.x primeiro, depois 4.x ──
+        // ExtJS 3.x: cada .x-grid3-row é um div com table interna
+        const grid3Rows = document.querySelectorAll('.x-grid3-row');
+        if (grid3Rows.length >= 1) {
+            // ExtJS 3.x path: extrai cells de cada .x-grid3-row
+            for (const gRow of grid3Rows) {
+                let cells = gRow.querySelectorAll('.x-grid3-cell-inner');
+                if (cells.length < 3) cells = gRow.querySelectorAll('td');
+                const vals = Array.from(cells).map(c => (c.innerText || '').trim());
+                if (vals.length < 3) continue;
+                let ticket = '';
+                for (const v of vals) {
+                    if (/^\d{8,12}$/.test(v)) { ticket = v; break; }
+                }
+                if (ticket) out.rows.push(vals);
+            }
+            out.debug += 'grid3=' + grid3Rows.length + '/' + out.rows.length + ' ';
+            if (out.rows.length > 0) return out;
+        }
+
+        const rowSels = [
+            '.x-grid-table .x-grid-row',
+            '.x-grid-table tr',
+            '.x-grid-view table tr',
+            '.x-grid-body table tr',
+            'table.x-grid-table tr',
+        ];
+        let rows = [];
+        let winSel = '';
+        for (const sel of rowSels) {
+            try {
+                const found = document.querySelectorAll(sel);
+                if (found.length > rows.length) { rows = found; winSel = sel; }
+            } catch(e) {}
+        }
+
+        // Fallback AMPLO: percorre TODAS as tables, acha a que tem mais rows com ticket numbers
+        if (rows.length < 3) {
+            const tables = document.querySelectorAll('table');
+            let bestTable = null, bestCount = 0;
+            for (const table of tables) {
+                const trs = table.querySelectorAll('tr');
+                let ticketCount = 0;
+                for (const tr of trs) {
+                    const tds = tr.querySelectorAll('td, .x-grid-cell-inner');
+                    for (const td of tds) {
+                        if (/^\d{8,12}$/.test((td.innerText || '').trim())) { ticketCount++; break; }
+                    }
+                }
+                if (ticketCount > bestCount) { bestCount = ticketCount; bestTable = table; }
+            }
+            if (bestTable && bestCount > rows.length) {
+                rows = bestTable.querySelectorAll('tr');
+                winSel = 'fallback-best-table';
+            }
+        }
+
+        out.debug += `rows=${winSel}(${rows.length})`;
+
+        // ── Extrai cells de cada row ──
+        for (const row of rows) {
+            let cells = row.querySelectorAll('.x-grid3-cell-inner');
+            if (cells.length < 3) cells = row.querySelectorAll('.x-grid-cell-inner');
+            if (cells.length < 3) cells = row.querySelectorAll('td > div');
+            if (cells.length < 3) cells = row.querySelectorAll('td');
+            const vals = Array.from(cells).map(c => (c.innerText || '').trim());
+            if (vals.length < 3) continue;
+
+            let ticket = '';
+            for (const v of vals) {
+                if (/^\d{8,12}$/.test(v)) { ticket = v; break; }
+            }
+            if (ticket) out.rows.push(vals);
+        }
+        return out;
+    }"""
+
+    try:
+        data = await page.evaluate(js_extract)
+    except Exception as e:
+        log.warning(f"[WI] Parse search results: erro JS: {e}")
+        data = {"headers": [], "rows": []}
+
+    headers = data.get("headers", [])
+    rows = data.get("rows", [])
+    debug_info = data.get("debug", "")
+
+    log.debug(f"[WI] Grid parse: {debug_info}, extracted_rows={len(rows)}")
+    if headers:
+        log.debug(f"[WI] Grid headers ({len(headers)}): {headers[:12]}")
+    if rows and rows[0]:
+        log.debug(f"[WI] Grid sample row ({len(rows[0])} cells): {rows[0][:5]}")
+
+    # Mapeia índice de headers conhecidos
+    def find_col(keywords):
+        for i, h in enumerate(headers):
+            hl = h.lower()
+            if any(k in hl for k in keywords):
+                return i
+        return -1
+
+    col_number = find_col(["number"])
+    col_start = find_col(["start date", "start_date"])
+    col_county = find_col(["county"])
+    col_place = find_col(["place", "municipality"])
+    col_address = find_col(["address"])
+    col_street = find_col(["street"])
+    col_company = find_col(["company name"])
+    col_caller = find_col(["caller"])
+    col_date_ticket = find_col(["date time ticket", "date_time_ticket"])
+
+    # Se não achou headers, usa posições fixas do layout confirmado:
+    #   0=Number, 1=DateTimeTicket, 2=StartDateTime, 3=CompanyName,
+    #   4=CompanyPhone, 5=CallerName, 6=County, 7=Place, 8=Address, 9=Street
+    if col_number < 0:
+        col_number = 0
+    if col_start < 0:
+        col_start = 2
+    if col_county < 0:
+        col_county = 6
+    if col_place < 0:
+        col_place = 7
+    if col_address < 0:
+        col_address = 8
+    if col_street < 0:
+        col_street = 9
+
+    def get_cell(row, idx):
+        if 0 <= idx < len(row):
+            return row[idx].strip()
+        return ""
+
+    for row in rows:
+        ticket = ""
+        for v in row:
+            if re.match(r"^\d{8,12}$", v):
+                ticket = v
+                break
+        if not ticket:
+            continue
+
+        results.append({
+            "ticket": ticket,
+            "start_date": get_cell(row, col_start),
+            "county": get_cell(row, col_county),
+            "city": get_cell(row, col_place),
+            "address_num": get_cell(row, col_address),
+            "street": get_cell(row, col_street),
+            "caller": get_cell(row, col_caller if col_caller >= 0 else 5),
+            "cells": row,
+        })
+
+    # Dedup
+    seen = set()
+    deduped = []
+    for r in results:
+        if r["ticket"] not in seen:
+            seen.add(r["ticket"])
+            deduped.append(r)
+
+    return deduped
+
+
+async def _scrape_diggers_ticket_detail(page, tnum, debug=False):
+    """Scrape detalhes de um ticket WI a partir do portal logado.
+
+    Layout confirmado do formulario (ExtJS 4.1):
+      - Tab "Ticket - Excavator Se..." com ticket# no header
+      - Seção "Excavator" (esquerda): caller, company, Working For
+      - Seção "Work Location" (centro): Ticket/Work, Start Date, Address,
+        St/County/Place, Distance/Direction, Marking Instructions, Remarks
+      - Seção "Member" (direita): lista de utilities com codigo e telefone
+      - Mapa (centro-inferior)
+
+    Retorna dict com campos parseados + ticket_type pra filtrar Relo-No-Show.
+    """
+    detail = {
+        "ticket_type": "",  # "Standard", "Relo-No-Show", etc. — pra filtrar
+        "address": "", "city": "", "county": "", "township": "",
+        "expire": "", "location_text": "", "work_type": "",
+        "client": "", "prime": "", "job_id": "",
+        "old_ticket": "", "responses": [],
+        "geo_lat": None, "geo_lon": None,
+        "footage": 0, "marking_instructions": "", "remarks": "",
+        "duration_days": 0, "start_date": "",
+    }
+
+    # ── 1. Clicar no ticket na grid de resultados ──
+    ticket_clicked = False
+
+    # Tenta seletores diretos do ticket number (pode ser link, td, span)
+    for sel in [
+        f'td:has-text("{tnum}")',
+        f'.x-grid-cell:has-text("{tnum}")',
+        f'a:has-text("{tnum}")',
+        f'span:has-text("{tnum}")',
+        f'div:has-text("{tnum}")',
+    ]:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count():
+                await loc.click()
+                ticket_clicked = True
+                log.debug(f"[WI] Detail {tnum}: clicou -> {sel}")
+                break
+        except Exception:
+            continue
+
+    # Fallback: double-click (ExtJS grids abrem em double-click)
+    if not ticket_clicked:
+        for sel in [f'td:has-text("{tnum}")', f'.x-grid-cell:has-text("{tnum}")']:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count():
+                    await loc.dblclick()
+                    ticket_clicked = True
+                    log.debug(f"[WI] Detail {tnum}: dblclick -> {sel}")
+                    break
+            except Exception:
+                continue
+
+    # JS fallback
+    if not ticket_clicked:
+        try:
+            result = await page.evaluate(f"""() => {{
+                const walker = document.createTreeWalker(
+                    document.body, NodeFilter.SHOW_TEXT, null, false
+                );
+                while (walker.nextNode()) {{
+                    if (walker.currentNode.textContent.trim() === '{tnum}') {{
+                        const el = walker.currentNode.parentElement;
+                        if (el) {{ el.click(); return true; }}
+                    }}
+                }}
+                return false;
+            }}""")
+            if result:
+                ticket_clicked = True
+        except Exception:
+            pass
+
+    if not ticket_clicked:
+        log.warning(f"[WI] Detail {tnum}: nao encontrou na grid")
+        return detail
+
+    await page.wait_for_timeout(5000)
+    await wait_stable(page)
+
+    if debug:
+        await _wi_debug_screenshot(page, "ticket_detail", tnum)
+
+    # ── 2. Extrair dados via JavaScript (lê form inputs + texto) ──
+    # O formulario do Diggers usa inputs (muitos readonly) com labels em <td>
+    js_extract_fields = """() => {
+        const out = {};
+
+        // ── Extrair TODOS os input values com seus names ──
+        const inputs = document.querySelectorAll('input, select, textarea');
+        for (const inp of inputs) {
+            const name = inp.name || '';
+            const id = inp.id || '';
+            const val = inp.value || '';
+            if (val) {
+                if (name) out['input_' + name] = val;
+                if (id) out['input_id_' + id] = val;
+            }
+        }
+
+        // ── Extrair pares label:valor do body text ──
+        // O portal renderiza como "Label:" seguido de valor na mesma linha ou na proxima
+        const body = document.body.innerText || '';
+        const lines = body.split('\\n').map(l => l.trim()).filter(Boolean);
+
+        // Procura patterns especificos do formulario confirmado
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+
+            // Ticket/Work (tipo do ticket)
+            if (/^Ticket\\/Work/i.test(line)) {
+                // O valor pode estar na mesma linha ou na proxima
+                const rest = line.replace(/^Ticket\\/Work\\s*:?\\s*/i, '').trim();
+                if (rest) {
+                    out.ticket_work = rest;
+                } else if (i + 1 < lines.length) {
+                    out.ticket_work = lines[i + 1];
+                }
+            }
+
+            // Start Date/Time
+            if (/^Start Date/i.test(line)) {
+                const rest = line.replace(/^Start Date\\/Time\\s*:?\\s*/i, '').trim();
+                if (rest) out.start_date = rest;
+                else if (i + 1 < lines.length) out.start_date = lines[i + 1];
+            }
+
+            // St/County/Place
+            if (/^St\\/County\\/Place/i.test(line)) {
+                const rest = line.replace(/^St\\/County\\/Place\\s*:?\\s*/i, '').trim();
+                if (rest) out.st_county_place = rest;
+                else if (i + 1 < lines.length) out.st_county_place = lines[i + 1];
+            }
+
+            // Working For
+            if (/^Working\\s*(For)?/i.test(line)) {
+                const rest = line.replace(/^Working\\s*For\\s*:?\\s*/i, '').trim();
+                if (rest) out.working_for = rest;
+                else if (i + 1 < lines.length) out.working_for = lines[i + 1];
+            }
+
+            // Duration
+            if (/^Duration/i.test(line)) {
+                const rest = line.replace(/^Duration\\s*:?\\s*/i, '').trim();
+                if (rest) out.duration = rest;
+                else if (i + 1 < lines.length) out.duration = lines[i + 1];
+            }
+
+            // Distance/Direction (footage)
+            if (/^Distance/i.test(line)) {
+                const rest = line.replace(/^Distance\\/Direction\\s*:?\\s*/i, '').trim();
+                if (rest) out.distance = rest;
+                else if (i + 1 < lines.length) out.distance = lines[i + 1];
+            }
+
+            // Intersection 1
+            if (/^Intersection 1/i.test(line)) {
+                const rest = line.replace(/^Intersection 1\\s*:?\\s*/i, '').trim();
+                if (rest) out.intersection = rest;
+                else if (i + 1 < lines.length) out.intersection = lines[i + 1];
+            }
+
+            // Marking Instructions
+            if (/^Marking/i.test(line)) {
+                const rest = line.replace(/^Marking\\s*Instructions?\\s*:?\\s*/i, '').trim();
+                if (rest) out.marking = rest;
+                else if (i + 1 < lines.length) out.marking = lines[i + 1];
+            }
+
+            // Remarks
+            if (/^Remarks/i.test(line)) {
+                const rest = line.replace(/^Remarks\\s*:?\\s*/i, '').trim();
+                if (rest) out.remarks = rest;
+                else if (i + 1 < lines.length) {
+                    // Remarks pode ter multiplas linhas
+                    let rem = [];
+                    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+                        if (/^(Refresh|Layers|Links|X:|Pan)/.test(lines[j])) break;
+                        if (/^\\w+\\s*:/.test(lines[j]) && !/^(CONTACT|RELO|BORE)/i.test(lines[j])) break;
+                        rem.push(lines[j]);
+                    }
+                    out.remarks = rem.join(' ');
+                }
+            }
+
+            // Address (pode ter multiplas partes)
+            if (/^Address\\s*:/i.test(line) && !out.address_line) {
+                const rest = line.replace(/^Address\\s*:?\\s*/i, '').trim();
+                if (rest) out.address_line = rest;
+                else if (i + 1 < lines.length) out.address_line = lines[i + 1];
+            }
+        }
+
+        // ── Extrair Member list (utilities no painel direito) ──
+        // Formato: "UTILITY NAME CODE\\nCODE\\n(xxx) xxx-xxxx"
+        // Procura padroes de utilities com codigo e telefone
+        const memberSection = body.indexOf('Member');
+        if (memberSection >= 0) {
+            out.member_text = body.substring(memberSection, memberSection + 2000);
+        }
+
+        // Full body pra fallback
+        out._body = body.substring(0, 5000);
+
+        return out;
+    }"""
+
+    fields = {}
+    try:
+        fields = await page.evaluate(js_extract_fields)
+    except Exception as e:
+        log.warning(f"[WI] Detail {tnum}: erro JS extraindo campos: {e}")
+        # Tenta em iframes
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            try:
+                fields = await frame.evaluate(js_extract_fields)
+                if fields.get("ticket_work") or fields.get("st_county_place"):
+                    break
+            except Exception:
+                continue
+
+    body = fields.get("_body", "")
+
+    # ── 3. Parse campos extraidos ──
+
+    # Ticket type (CRITICO: filtrar Relo-No-Show)
+    ticket_work = fields.get("ticket_work", "")
+    if ticket_work:
+        # O campo mostra "Relo-No-Show  ELECTRIC/TELEPHONE/CABLE INSTALLATION"
+        # ou "Standard  ELECTRIC/TELEPHONE/CABLE INSTALLATION"
+        tw_parts = re.split(r'\s{2,}|\t', ticket_work, maxsplit=1)
+        detail["ticket_type"] = tw_parts[0].strip()
+        if len(tw_parts) > 1:
+            detail["work_type"] = tw_parts[1].strip()
+        else:
+            detail["work_type"] = ticket_work
+        log.info(f"[WI] {tnum}: ticket_type = {detail['ticket_type']!r}")
+
+    # St/County/Place: "WI  RACINE  MOUNT PLEASANT VILLAGE"
+    scp = fields.get("st_county_place", "")
+    if scp:
+        scp_parts = re.split(r'\s{2,}|\t', scp)
+        scp_parts = [p.strip() for p in scp_parts if p.strip()]
+        if len(scp_parts) >= 2:
+            detail["county"] = scp_parts[1]  # RACINE
+        if len(scp_parts) >= 3:
+            detail["city"] = scp_parts[2]    # MOUNT PLEASANT VILLAGE
+
+    # Address: O portal tem campos separados (num / street / type / suffix)
+    # Na screenshot: [vazio] | EMERALD | DR
+    # Tambem pode ter fields de input com name contendo "address", "street"
+    addr_parts = []
+    for key in sorted(fields.keys()):
+        if key.startswith("input_") and any(w in key.lower() for w in ["street", "address", "stname"]):
+            val = fields[key].strip()
+            if val and val not in addr_parts and not val.isdigit():
+                addr_parts.append(val)
+    if addr_parts:
+        detail["address"] = " ".join(addr_parts)
+    elif fields.get("address_line"):
+        detail["address"] = fields["address_line"]
+
+    # Se address veio vazio mas tem intersection, usa intersection
+    intersection = fields.get("intersection", "")
+    if not detail["address"] and intersection:
+        detail["address"] = intersection
+
+    # Location text
+    location_parts = []
+    if detail["address"]:
+        location_parts.append(detail["address"])
+    if detail["city"]:
+        location_parts.append(detail["city"])
+    if detail["county"]:
+        location_parts.append(detail["county"] + " County")
+    detail["location_text"] = " / ".join(location_parts) if location_parts else ""
+
+    # Working For: "Five Stars / AT&T" → prime="Five Stars", client="AT&T"
+    working_for = fields.get("working_for", "")
+    if working_for:
+        parts = [p.strip() for p in working_for.split("/") if p.strip()]
+        if len(parts) >= 2:
+            detail["prime"] = parts[0]
+            detail["client"] = parts[1]
+        elif len(parts) == 1:
+            detail["client"] = parts[0]
+
+    # Start Date e Duration → calcular Expire
+    start_date_raw = fields.get("start_date", "")
+    duration_raw = fields.get("duration", "")
+    detail["start_date"] = start_date_raw
+
+    if start_date_raw:
+        # Parse "05/20/2026 9:00 AM" ou "05/20/2026"
+        start_dt = None
+        for fmt in ["%m/%d/%Y %I:%M %p", "%m/%d/%Y %H:%M", "%m/%d/%Y"]:
+            try:
+                clean = re.split(r'\s{2,}|\t', start_date_raw)[0].strip()
+                start_dt = datetime.strptime(clean, fmt)
+                break
+            except ValueError:
+                continue
+
+        if start_dt and duration_raw:
+            # Parse "30 DAYS" → 30
+            dur_match = re.search(r"(\d+)", duration_raw)
+            if dur_match:
+                dur_days = int(dur_match.group(1))
+                detail["duration_days"] = dur_days
+                expire_dt = start_dt + timedelta(days=dur_days)
+                detail["expire"] = expire_dt.strftime("%m/%d/%Y")
+                log.debug(f"[WI] {tnum}: expire calculado = {detail['expire']} "
+                          f"(start={clean} + {dur_days}d)")
+
+    # Se expire nao calculou, tenta extrair do body texto
+    if not detail["expire"] and body:
+        detail["expire"] = normalize_expire(extract_expire_date(body, tnum))
+
+    # Distance/Direction → footage
+    distance = fields.get("distance", "")
+    if distance:
+        ft_match = re.search(r"(\d+)\s*(?:FT|FEET|ft)", distance, re.IGNORECASE)
+        if ft_match:
+            detail["footage"] = int(ft_match.group(1))
+
+    # Marking Instructions + Remarks → notes
+    detail["marking_instructions"] = fields.get("marking", "")
+    detail["remarks"] = fields.get("remarks", "")
+
+    # ── 4. Parse utility responses ──
+    # No portal logado, a Positive Response table pode aparecer como no portal publico
+    # OU a lista "Member" no painel direito (sem status de resposta — so lista as utilities)
+    # Tentamos a tabela de Positive Response primeiro
+
+    js_extract_responses = """() => {
+        const out = {responses: []};
+        const tables = document.querySelectorAll('table');
+        for (const table of tables) {
+            const txt = (table.innerText || '').toLowerCase();
+            if (!txt.includes('status') || !txt.includes('name')) continue;
+            if (!txt.includes('facilities') && !txt.includes('phone') && !txt.includes('code')) continue;
+
+            const rows = Array.from(table.querySelectorAll('tr'));
+            let headers = [];
+            let headerIdx = -1;
+            for (let ri = 0; ri < rows.length; ri++) {
+                const cells = rows[ri].querySelectorAll('th, td');
+                const vals = Array.from(cells).map(c => (c.innerText || '').trim());
+                const lower = vals.map(v => v.toLowerCase());
+                if (lower.some(v => v === 'status') && lower.some(v => v === 'name')) {
+                    headers = lower;
+                    headerIdx = ri;
+                    break;
+                }
+            }
+            if (headerIdx < 0) continue;
+
+            const idx = (key) => headers.findIndex(h => h.includes(key));
+            const iStatus = idx('status'),
+                  iCode   = idx('code'),
+                  iName   = idx('name'),
+                  iFac    = idx('facilities'),
+                  iPhone  = idx('phone');
+
+            for (let ri = headerIdx + 1; ri < rows.length; ri++) {
+                const cells = rows[ri].querySelectorAll('td');
+                const vals = Array.from(cells).map(c => (c.innerText || '').trim());
+                if (vals.length < 3) continue;
+                if (vals.every(v => !v)) continue;
+
+                const get = (i) => (i >= 0 && i < vals.length) ? vals[i] : '';
+                const status = get(iStatus);
+                const code   = get(iCode);
+                let name     = get(iName);
+                let facilities = get(iFac);
+                const phone  = get(iPhone);
+
+                if (!name) continue;
+
+                name       = name.split('\\n').map(s => s.trim()).filter(Boolean)[0] || '';
+                facilities = facilities.split('\\n').map(s => s.trim()).filter(Boolean)[0] || '';
+
+                const fullText = vals.join('\\n');
+                const eventRegex = /([A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}\\s+\\d{1,2}:\\d{2}\\s*[AP]M)\\s*\\|\\|\\s*([^\\n|]+)/g;
+                const matches = [...fullText.matchAll(eventRegex)];
+                let respondedDate = null;
+                let comment = '';
+                if (matches.length > 0) {
+                    let bestIdx = 0;
+                    let bestDate = new Date(matches[0][1]);
+                    for (let mi = 1; mi < matches.length; mi++) {
+                        const d = new Date(matches[mi][1]);
+                        if (!isNaN(d) && (isNaN(bestDate) || d > bestDate)) {
+                            bestDate = d;
+                            bestIdx = mi;
+                        }
+                    }
+                    respondedDate = matches[bestIdx][1].trim();
+                    comment = matches[bestIdx][2].trim();
+                }
+
+                out.responses.push({status, code, name, facilities, phone, comment, respondedDate});
+            }
+        }
+        return out;
+    }"""
+
+    resp_data = {"responses": []}
+    try:
+        resp_data = await page.evaluate(js_extract_responses)
+    except Exception:
+        pass
+
+    # Se nao achou tabela de Positive Response no portal logado,
+    # as respostas serao obtidas depois pelo sync_wi (portal publico)
+    for row in resp_data.get("responses", []):
+        name = (row.get("name") or "").strip()
+        code = (row.get("code") or "").strip()
+        status_raw = (row.get("status") or "").strip()
+        facilities = (row.get("facilities") or "").strip()
+        comment = (row.get("comment") or "").strip()
+        rd_str = row.get("respondedDate")
+
+        if not name:
+            continue
+        if name.lower() in ("name", "status", "code", "facilities", "phone"):
+            continue
+
+        # Remove sufixo de codigo do nome (padroes Diggers)
+        if code:
+            for pat in [
+                re.compile(r'\s*-\s*' + re.escape(code) + r'\s*$'),
+                re.compile(r'\s*\(' + re.escape(code) + r'\)\s*$'),
+                re.compile(r'\s+' + re.escape(code) + r'\s*$'),
+            ]:
+                if pat.search(name):
+                    name = pat.sub('', name).strip(' -')
+                    break
+        name = re.sub(r"\s*\([A-Z]{2,5}\d{1,4}\)\s*$", "", name).strip()
+        name = re.sub(r"\s+[A-Z]{2,5}\d{1,4}\s*$", "", name).strip(' -')
+
+        if not _is_valid_utility_name(name):
+            continue
+
+        responded_date = None
+        if rd_str:
+            for fmt in ["%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p",
+                        "%b %d, %Y %I:%M:%S %p", "%B %d, %Y %I:%M:%S %p"]:
+                try:
+                    responded_date = datetime.strptime(rd_str.strip(), fmt).replace(tzinfo=None).isoformat()
+                    break
+                except ValueError:
+                    continue
+
+        cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
+        response_text = comment if comment else status_raw
+
+        detail["responses"].append({
+            "utility": name,
+            "status_raw": status_raw,
+            "status": cls_status,
+            "response": response_text,
+            "comment": comment,
+            "responded_date": responded_date,
+            "_unrecognized": cls_unrec,
+        })
+
+    log.info(f"[WI] Detail {tnum}: type={detail['ticket_type']!r} | "
+             f"{detail['city'] or '?'}, {detail['county'] or '?'} | "
+             f"expire={detail['expire'] or 'N/A'} | {len(detail['responses'])} utilities")
+
+    return detail
+
+
+async def import_wi(triggered_by="manual"):
+    """Importa tickets novos do WI via Diggers Hotline portal (com login).
+
+    Fluxo em 6 fases:
+      1. Login no portal cliente
+      2. Excavator Search por range de data
+      3. Filtra tickets novos (não existem no Supabase)
+      4. Scrape detalhes de cada ticket novo
+      5. Geocoding em batch
+      6. Batch upsert no Supabase + sync de respostas
+    """
+    if not WI_USER or not WI_PASS:
+        log.error("[WI] import_wi: WI_USER/WI_PASS não definidos no .env — abortando")
+        return 0
+
+    log.info(f"{'='*55}")
+    log.info(f"  OneDrill 811  IMPORT WI (Diggers Hotline)  [{triggered_by}]")
+    log.info(f"{'='*55}")
+
+    # ── Determinar range de datas ──
+    last_date = _get_wi_last_search_date()
+    today_str = datetime.now().strftime("%m/%d/%Y")
+
+    if last_date:
+        from_date = last_date
+        log.info(f"[WI] Pesquisando de {from_date} até {today_str} (última pesquisa)")
+    else:
+        from_date = f"01/01/{datetime.now().year}"
+        log.info(f"[WI] Primeira execução — pesquisando de {from_date} até {today_str}")
+
+    # ── Tickets existentes no Supabase ──
+    existing = sb_get("tickets", "&state=eq.WI")
+    existing_nums = {t["ticket"] for t in existing}
+    projects = sb_get("projects")
+    log.info(f"[WI] {len(existing_nums)} tickets WI já no Supabase")
+
+    canceled_set = get_canceled_set("WI")
+    if canceled_set:
+        log.info(f"[WI] Cache: {len(canceled_set)} tickets cancelados conhecidos")
+
+    perfil = _profile_path("WI")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = await browser.new_page()
+        page.set_default_timeout(60000)
+
+        # ── FASE 1: Login ──
+        ok = await _login_diggers(page)
+        if not ok:
+            log.error("[WI] Import: login falhou — abortando")
+            await browser.close()
+            return 0
+
+        # ── FASE 2: Excavator Search ──
+        search_results = await _search_diggers_excavator(page, from_date, today_str, debug=True)
+
+        if not search_results:
+            log.info("[WI] Import: nenhum ticket encontrado na pesquisa")
+            _set_wi_last_search_date(today_str)
+            await browser.close()
+            return 0
+
+        # ── FASE 3: Filtrar tickets novos (skip Relo-No-Show) ──
+        new_tickets_to_scrape = []
+        relo_skipped = 0
+        for item in search_results:
+            tnum = item["ticket"]
+            if tnum in existing_nums:
+                continue
+            if tnum in canceled_set:
+                continue
+            # Filtrar Relo-No-Show se ticket_type veio do ExtJS Store
+            grid_type = item.get("ticket_type", "").strip()
+            if grid_type and "relo" in grid_type.lower():
+                relo_skipped += 1
+                log.info(f"[WI] {tnum}: tipo '{grid_type}' → skip (Relo-No-Show)")
+                continue
+            new_tickets_to_scrape.append(tnum)
+        if relo_skipped:
+            log.info(f"[WI] {relo_skipped} tickets Relo-No-Show filtrados")
+
+        log.info(f"[WI] Search retornou {len(search_results)} tickets, "
+                 f"{len(new_tickets_to_scrape)} novos para importar")
+
+        if not new_tickets_to_scrape:
+            log.info("[WI] Import: nenhum ticket novo para importar")
+            _set_wi_last_search_date(today_str)
+            await browser.close()
+            return 0
+
+        # ── FASE 4: Dados da grid + respostas via portal público ──
+        # A grid do Excavator Search já tem: county, city, address, street, start_date.
+        # O portal público dá: utility responses.
+        # Expire: calculado de start_date + 30 dias (duração padrão WI).
+        # Não tenta clicar tickets na grid (ExtJS não abre detail ao clicar row).
+
+        # Mapeia dados da grid por ticket number
+        grid_data_map = {}
+        for item in search_results:
+            grid_data_map[item["ticket"]] = item
+
+        await browser.close()  # Fecha browser do portal logado
+
+        # ── Scrape respostas em batch via portal público ──
+        log.info(f"[WI] Buscando respostas de {len(new_tickets_to_scrape)} tickets no portal publico...")
+        pub_results = await scrape_wi(new_tickets_to_scrape)
+
+        parsed_tickets = []
+        for tnum in new_tickets_to_scrape:
+            grid = grid_data_map.get(tnum, {})
+            pub = pub_results.get(tnum, {})
+
+            county = grid.get("county", "")
+            city = grid.get("city", "")
+            # Address = numero da casa + rua  (grid cols separados)
+            addr_num = grid.get("address_num", "")
+            street = grid.get("street", "")
+            address = f"{addr_num} {street}".strip() if (addr_num or street) else ""
+
+            # Start Date → expire (+30 dias padrão WI)
+            # Store retorna JS Date string: "Wed May 20 2026 09:00:00 GMT-0400 (...)"
+            start_raw = grid.get("start_date", "")
+            expire = ""
+            if start_raw:
+                sdt = None
+                # Primeiro: JS Date string (do ExtJS Store)
+                js_clean = re.sub(r"\s*GMT[+-]\d{4}.*$", "", start_raw).strip()
+                for fmt in ["%a %b %d %Y %H:%M:%S", "%a %b %d %Y",
+                            "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+                            "%m/%d/%Y %H:%M", "%m/%d/%Y"]:
+                    try:
+                        sdt = datetime.strptime(js_clean, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if not sdt:
+                    # Fallback: tenta o raw original (pode ser formato portal)
+                    for fmt in ["%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+                                "%m/%d/%Y %H:%M", "%m/%d/%Y"]:
+                        try:
+                            clean = re.split(r"\s{2,}|\t", start_raw)[0].strip()
+                            sdt = datetime.strptime(clean, fmt)
+                            break
+                        except ValueError:
+                            continue
+                if sdt:
+                    expire = (sdt + timedelta(days=30)).strftime("%m/%d/%Y")
+
+            # Location text (da grid OU do pub)
+            location_text = pub.get("location_text", "")
+            if not location_text:
+                parts = [p for p in [address, city, f"{county} County" if county else ""] if p]
+                location_text = " / ".join(parts)
+
+            # Responses do portal público
+            responses = pub.get("responses", [])
+
+            # Campos extras do ExtJS Store
+            marking = grid.get("marking_instructions", "")
+            remarks = grid.get("remarks", "")
+            intersection = grid.get("intersection", "")
+            if not address and intersection:
+                address = intersection
+
+            parsed_tickets.append({
+                "tnum": tnum,
+                "detail": {
+                    "ticket_type": grid.get("ticket_type", "Standard"),
+                    "address": address, "city": city, "county": county,
+                    "township": "",  # WI não tem township separado; city = place
+                    "expire": expire, "location_text": location_text,
+                    "work_type": "Main line",
+                    "client": "", "prime": "", "job_id": "",
+                    "old_ticket": "", "responses": responses,
+                    "geo_lat": None, "geo_lon": None,
+                    "footage": 0,
+                    "marking_instructions": marking if isinstance(marking, str) else "",
+                    "remarks": remarks if isinstance(remarks, str) else "",
+                    "duration_days": 30, "start_date": start_raw,
+                },
+            })
+
+    log.info(f"[WI] FASE 4 OK: {len(parsed_tickets)} tickets com detalhes")
+
+    if not parsed_tickets:
+        _set_wi_last_search_date(today_str)
+        return 0
+
+    # ── FASE 5: Geocoding + Build ticket data ──
+    new_ticket_data = []
+    geocode_count = 0
+
+    for item in parsed_tickets:
+        tnum = item["tnum"]
+        d = item["detail"]
+
+        city = d.get("city", "")
+        township = d.get("township", "")
+        street = d.get("address", "")
+        county = d.get("county", "")
+
+        geo_lat = d.get("geo_lat")
+        geo_lon = d.get("geo_lon")
+
+        # Geocode se não tiver boundary coords
+        if not geo_lat and street and city:
+            geo_lat, geo_lon = await geocode_address(street, city, "WI")
+            geocode_count += 1
+
+        # Adjust coords by location
+        work_type = d.get("work_type") or "Main line"
+        if geo_lat and geo_lon:
+            location_for_adjust = d.get("location_text") or ""
+            geo_lat, geo_lon, work_type = adjust_coords_by_location(
+                geo_lat, geo_lon, location_for_adjust, work_type
+            )
+
+        # Resolve county se não veio do portal
+        if not county and (city or township):
+            try:
+                county = await resolve_county(
+                    f"{city}, {township}".strip(", "), "WI", geo_lat, geo_lon
+                )
+            except Exception:
+                pass
+
+        # Match com projeto por Job#
+        project_id = None
+        job_id = d.get("job_id", "")
+        if job_id:
+            for proj in projects:
+                if job_id.strip() in (proj.get("name", "") + proj.get("description", "")):
+                    project_id = proj["id"]
+                    break
+
+        # Verificar ticket antigo (renovação)
+        old_ticket_num = d.get("old_ticket", "")
+        old_expire_str = ""
+        old_status_str = ""
+        inherited_path = None
+
+        if old_ticket_num:
+            log.info(f"[WI] {tnum}: Substitui ticket anterior {old_ticket_num}")
+            try:
+                old_tickets = sb_get("tickets", f"&ticket=eq.{_qv(old_ticket_num)}&state=eq.WI")
+                if old_tickets:
+                    ot = old_tickets[0]
+                    if ot.get("field_path"):
+                        inherited_path = ot["field_path"]
+                    old_expire_str = normalize_expire(ot.get("expire") or "")
+                    old_status_str = (ot.get("status") or "").strip()
+            except Exception as e:
+                log.debug(f"[WI] Erro buscando ticket antigo {old_ticket_num}: {e}")
+
+        # Build history
+        history_entries = [
+            {"ts": int(datetime.now().timestamp() * 1000),
+             "action": f"Importado 811 - {city or '?'}, WI",
+             "color": "#10a574"}
+        ]
+        if inherited_path:
+            history_entries.append(
+                {"ts": int(datetime.now().timestamp() * 1000),
+                 "action": f"Trajeto herdado do ticket {old_ticket_num}",
+                 "color": "#6d28d9"}
+            )
+        if old_ticket_num and (old_expire_str or old_status_str):
+            history_entries.append(
+                {"ts": int(datetime.now().timestamp() * 1000),
+                 "action": f"[RENOVAÇÃO] {old_ticket_num} → {tnum} (graça até {old_expire_str or 'N/A'}, status antigo: {old_status_str or 'N/A'})",
+                 "color": "#7c3aed"}
+            )
+
+        location_str = f"{city}, {township}".strip(", ")
+
+        # Notes: combina location + marking instructions + remarks
+        notes_parts = []
+        if d.get("location_text"):
+            notes_parts.append(f"[811 Location] {d['location_text']}")
+        if d.get("marking_instructions"):
+            notes_parts.append(f"[Marking] {d['marking_instructions']}")
+        if d.get("remarks"):
+            notes_parts.append(f"[Remarks] {d['remarks']}")
+        notes = "\n".join(notes_parts)
+
+        # Footage do campo Distance/Direction
+        ticket_footage = d.get("footage", 0) or 0
+
+        ticket_data = {
+            "ticket": tnum, "company": "One Drill", "state": "WI",
+            "location": location_str, "address": street,
+            "status": "Open", "expire": d.get("expire", ""),
+            "footage": ticket_footage,
+            "client": d.get("client", ""), "prime": d.get("prime", ""),
+            "tipo": work_type,
+            "job": job_id, "notes": notes,
+            "project_id": project_id, "pending": "",
+            "old_ticket2": old_ticket_num,
+            "status_old": old_status_str, "expire_old": old_expire_str,
+            "field_path": inherited_path,
+            "geocoded_lat": geo_lat, "geocoded_lon": geo_lon,
+            "county": county,
+            "history": history_entries, "attachments": [],
+        }
+        new_ticket_data.append(ticket_data)
+        log.info(f"[WI] Preparado: {tnum}  {location_str}"
+                 f"{' [' + county + ' Co]' if county else ''}")
+
+    if geocode_count:
+        log.info(f"[WI] Geocoding: {geocode_count} endereços processados")
+
+    # ── FASE 6: Batch upsert ──
+    inserted = 0
+    to_insert = [td for td in new_ticket_data if td['ticket'] not in existing_nums]
+
+    if to_insert:
+        try:
+            for i in range(0, len(to_insert), BATCH_SIZE):
+                chunk = to_insert[i:i + BATCH_SIZE]
+                sb_upsert("tickets", chunk, on_conflict="ticket")
+                inserted += len(chunk)
+                for td in chunk:
+                    existing_nums.add(td['ticket'])
+                if i + BATCH_SIZE < len(to_insert):
+                    time.sleep(0.3)
+            log.info(f"[WI] ✅ Batch upsert: {inserted} tickets inseridos")
+        except Exception as e:
+            log.warning(f"[WI] Batch falhou ({e}), tentando 1-por-1...")
+            inserted = 0
+            for td in to_insert:
+                try:
+                    if td['ticket'] not in existing_nums:
+                        sb_insert("tickets", td)
+                        existing_nums.add(td['ticket'])
+                    inserted += 1
+                except Exception as e2:
+                    log.error(f"[WI] Erro inserindo {td['ticket']}: {e2}")
+
+    # ── Salvar respostas coletadas durante o import ──
+    all_responses = []
+    now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    for item in parsed_tickets:
+        tnum = item["tnum"]
+        detail = item["detail"]
+        if not detail["responses"]:
+            continue
+        # Buscar ticket_id do Supabase
+        try:
+            t_list = sb_get("tickets", f"&ticket=eq.{_qv(tnum)}&state=eq.WI&select=id")
+            if not t_list:
+                continue
+            tid = t_list[0]["id"]
+        except Exception:
+            continue
+
+        for resp in detail["responses"]:
+            all_responses.append({
+                "ticket_id": tid, "ticket_num": tnum, "state": "WI",
+                "utility_name": resp["utility"], "status": resp["status"],
+                "response_text": resp.get("response") or resp.get("status_raw", ""),
+                "synced_at": now_iso,
+                "responded_at": resp.get("responded_date") or now_iso,
+            })
+
+    if all_responses:
+        resp_saved = 0
+        RESP_CHUNK = 10
+        for i in range(0, len(all_responses), RESP_CHUNK):
+            chunk = all_responses[i:i + RESP_CHUNK]
+            try:
+                sb_upsert("ticket_811_responses", chunk)
+                resp_saved += len(chunk)
+            except Exception:
+                # Fallback 1-por-1
+                for single in chunk:
+                    try:
+                        sb_upsert("ticket_811_responses", [single])
+                        resp_saved += 1
+                    except Exception as e2:
+                        log.debug(f"[WI] Resp skip: {single.get('ticket_num')} {single.get('utility_name')}: {e2}")
+            if i + RESP_CHUNK < len(all_responses):
+                time.sleep(0.2)
+        log.info(f"[WI] {resp_saved}/{len(all_responses)} respostas salvas do import")
+
+    # ── Salvar data da última pesquisa ──
+    _set_wi_last_search_date(today_str)
+
+    log.info(f"[WI] === Import WI concluído: {inserted} tickets novos ===")
+    return inserted
+
+
+async def sync_and_import_wi(triggered_by="manual"):
+    """Import + Sync WI completo (equivalente ao sync_and_import de IN/FL)."""
+    imported = await import_wi(triggered_by)
+    await sync_wi(triggered_by)
+    return imported
+
+
+# ── │ SECTION: CONTACTS_FL │ SCRAPE CONTATOS DE UTILITIES (FL - Sunshine 811)
 def get_already_processed_tickets(state="FL"):
     """Retorna set de ticket_ref que já têm contatos salvos."""
     try:
@@ -4625,7 +7429,7 @@ def export_excel():
             cell.fill = PatternFill("solid", fgColor="1a6cf0")
             cell.alignment = Alignment(horizontal="center")
 
-        STATUS_COLOR = {"Open": "FFCCCC", "Clear": "CCFFCC", "Damage": "FFE5B4", "Closed": "EEEEEE"}
+        STATUS_COLOR = {"Open": "FFCCCC", "Clear": "CCFFCC", "Damage": "FFE5B4", "Closed": "EEEEEE", "Cancel": "E0D7F7"}
         for row, t in enumerate(tickets, 2):
             vals = [
                 t.get("ticket", ""), proj_map.get(t.get("project_id", ""), ""),
@@ -7370,6 +10174,7 @@ if __name__ == "__main__":
     parser.add_argument("--rescrape",   action="store_true", help="Re-scrape notes")
     parser.add_argument("--cleanup",    action="store_true", help="Excluir tickets cancelados")
     parser.add_argument("--cleanup_all", action="store_true", help="Cleanup IN + FL em paralelo")
+    parser.add_argument("--cleanup-wi-dhl", action="store_true", help="Cleanup retroativo: tickets WI Clear com todas responses Closed by DHL → Cancel")
     parser.add_argument("--contacts",   action="store_true", help="Scrape contatos de utilities (FL)")
     parser.add_argument("--force",      action="store_true", help="Forçar re-scrape de TODOS")
     parser.add_argument("--backfill",   action="store_true", help="Backfill: adicionar eventos de clear no histórico")
@@ -7400,6 +10205,8 @@ if __name__ == "__main__":
     parser.add_argument("--save-pdf",   action="store_true", help="Salvar PDF de tickets Clear/Damage via impressora")
     parser.add_argument("--sync-il",    action="store_true", help="Sincronizar respostas JULIE (Illinois)")
     parser.add_argument("--sync-wi",    action="store_true", help="Sincronizar respostas Diggers Hotline (Wisconsin)")
+    parser.add_argument("--imp-wi",     action="store_true", help="Importar tickets novos WI (Diggers Hotline) + sync respostas")
+    parser.add_argument("--imp-il",     action="store_true", help="Importar tickets novos IL (JULIE Ticket Entry) + sync respostas")
     parser.add_argument("--no-lock",    action="store_true", help="Pular verificação de lock file")
     args = parser.parse_args()
 
@@ -7421,6 +10228,10 @@ if __name__ == "__main__":
                 asyncio.run(save_ticket_pdfs("IN", force=args.force))
         elif getattr(args, 'sync_il', False):
             asyncio.run(sync_il())
+        elif getattr(args, 'imp_il', False):
+            asyncio.run(sync_and_import_il())
+        elif getattr(args, 'imp_wi', False):
+            asyncio.run(sync_and_import_wi())
         elif getattr(args, 'sync_wi', False):
             asyncio.run(sync_wi())
         elif getattr(args, 'fix_renewals', False):
@@ -7457,6 +10268,8 @@ if __name__ == "__main__":
             asyncio.run(cleanup_all())
         elif args.cleanup:
             asyncio.run(cleanup_canceled(args.state or "IN"))
+        elif getattr(args, 'cleanup_wi_dhl', False):
+            cleanup_wi_dhl_clears()
         elif args.rescrape:
             asyncio.run(rescrape_notes(args.state or "FL", force=args.force))
         elif args.backfill:

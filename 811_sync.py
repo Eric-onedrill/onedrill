@@ -2559,6 +2559,31 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                 log.info(f"[{state}] {tnum}: AUTO-CANCEL — todas utilities Closed by DHL (ticket invalidado)")
                 summary.canceled += 1
 
+            # ── WI: MIX CLEAR + CANCEL → TICKET CLEAR ──
+            # Cenário WI: algumas utilities responderam (Marked/Clear) e outras
+            # foram "Closed by DHL" (Cancel). Closed by DHL NÃO é pendência real
+            # (prazo expirou, utility não vai responder mais). Ticket está liberado.
+            # Só pra WI — outros estados não usam essa lógica.
+            if state == "WI" and not all_cancel and none_pending and t.get("status") == "Open":
+                wi_has_cancel = any(s == "Cancel" for s in relevant_statuses)
+                wi_has_clear = any(s == "Clear" for s in relevant_statuses)
+                wi_all_resolved = bool(relevant_statuses) and all(
+                    s in ("Clear", "Cancel") for s in relevant_statuses
+                )
+                if wi_all_resolved and wi_has_clear and wi_has_cancel:
+                    clear_dt, is_fallback = _get_latest_response_date(deduped_responses, ticket_num=tnum)
+                    clear_ts = int(datetime.now().timestamp() * 1000)
+                    clear_label = clear_dt.strftime('%m/%d/%Y')
+                    hist = t.get("history") or []
+                    n_cancel = sum(1 for s in relevant_statuses if s == "Cancel")
+                    clear_note = f"[AUTO 811] Clear em {clear_label} — {n_cancel} utility(s) Closed by DHL (ignoradas)"
+                    hist.append({"ts": clear_ts, "action": clear_note, "color": "#16a34a"})
+                    new_notes = append_auto_note(patch.get("notes") or t.get("notes"), clear_note)
+                    patch.update({"status": "Clear", "notes": new_notes, "history": hist})
+                    needs_patch = True
+                    log.info(f"[{state}] {tnum}: AUTO-CLEAR (WI mix) — {len(relevant_statuses)-n_cancel} Clear + {n_cancel} Closed by DHL")
+                    summary.cleared += 1
+
             if none_pending and all_responded and t.get("status") == "Open":
                 # AUTO-CLEAR (Fix 2026-05-14): clear_ts = now (quando ticket mudou pra Clear)
                 # clear_label = data real da ultima resposta (info no historico)

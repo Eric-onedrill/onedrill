@@ -5091,7 +5091,13 @@ async def scrape_diggers_ticket(page, tnum, retry=True, debug_dump=False):
                     continue
 
         cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
-        response_text = comment if comment else status_raw
+        # Se status_raw indica "Not Participating" / "Closed by DHL", preservar
+        # como "Not Participating" pra que o frontend identifique corretamente.
+        sr_low = status_raw.lower()
+        if "not participating" in sr_low or "closed by dhl" in sr_low or "closed by diggers" in sr_low:
+            response_text = "Not Participating"
+        else:
+            response_text = comment if comment else status_raw
 
         result["responses"].append({
             "utility": name,
@@ -6727,7 +6733,11 @@ async def _scrape_diggers_ticket_detail(page, tnum, debug=False):
                     continue
 
         cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
-        response_text = comment if comment else status_raw
+        sr_low = status_raw.lower()
+        if "not participating" in sr_low or "closed by dhl" in sr_low or "closed by diggers" in sr_low:
+            response_text = "Not Participating"
+        else:
+            response_text = comment if comment else status_raw
 
         detail["responses"].append({
             "utility": name,
@@ -8444,6 +8454,138 @@ def scan_emails_for_responses(commit=False, state_filter=None, days_back=7):
     log.info(f"    Skipped (sem match):      {skipped_no_match}")
     log.info(f"    Erros:                    {errors}")
     log.info("=" * 55)
+
+
+# ── │ SECTION: COMPARE_WI_EXCEL │ Compara Excel com Supabase ─────────────────
+def compare_wi_excel(xlsx_path):
+    """Compara planilha .xlsx com tickets WI no Supabase.
+
+    Detecta colunas pela primeira linha (busca por nomes contendo 'ticket' e 'status').
+    Reporta:
+      - Tickets na planilha que NÃO estão no banco
+      - Tickets no banco WI que NÃO estão na planilha
+      - Status divergente em tickets que existem nos dois
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        log.error("openpyxl não instalado. Rode: pip install openpyxl")
+        return
+
+    if not os.path.exists(xlsx_path):
+        log.error(f"Arquivo não encontrado: {xlsx_path}")
+        return
+
+    log.info(f"[CompareWI] Lendo {xlsx_path}...")
+    wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        log.error("[CompareWI] Planilha vazia")
+        return
+
+    # Detecta header (primeira linha que tem 'ticket' em alguma célula)
+    header_row_idx = None
+    header_idx = {}
+    for i, row in enumerate(rows):
+        cells = [(str(c) if c is not None else "").strip().lower() for c in row]
+        if any("ticket" in c for c in cells):
+            header_row_idx = i
+            for j, c in enumerate(cells):
+                if c:
+                    header_idx[c] = j
+            break
+
+    if header_row_idx is None:
+        log.error("[CompareWI] Cabeçalho não encontrado (esperado 'Ticket #' ou similar)")
+        return
+
+    tnum_col = next((v for k, v in header_idx.items() if "ticket" in k), None)
+    status_col = next((v for k, v in header_idx.items() if k == "status" or k.endswith("status")), None)
+    state_col = next((v for k, v in header_idx.items() if k == "state" or k == "estado"), None)
+
+    if tnum_col is None:
+        log.error("[CompareWI] Coluna 'Ticket' não encontrada no header")
+        return
+
+    excel_tickets = {}
+    for row in rows[header_row_idx + 1:]:
+        if not row or tnum_col >= len(row):
+            continue
+        tnum_raw = row[tnum_col]
+        if tnum_raw is None:
+            continue
+        tnum = str(tnum_raw).strip()
+        if not tnum or not tnum.replace(".", "").replace("-", "").isdigit():
+            continue
+        # Normaliza (planilha pode ter ".0" final pra ints)
+        if tnum.endswith(".0"):
+            tnum = tnum[:-2]
+        status = ""
+        if status_col is not None and status_col < len(row) and row[status_col] is not None:
+            status = str(row[status_col]).strip()
+        excel_tickets[tnum] = {"status": status}
+
+    log.info(f"[CompareWI] Planilha: {len(excel_tickets)} tickets únicos")
+
+    db_tickets_list = sb_get("tickets", "&state=eq.WI&select=ticket,status,location,client,prime,job")
+    db_tickets = {}
+    for t in db_tickets_list:
+        tn = str(t.get("ticket") or "").strip()
+        if tn:
+            db_tickets[tn] = t
+
+    log.info(f"[CompareWI] Banco WI: {len(db_tickets)} tickets")
+
+    excel_set = set(excel_tickets.keys())
+    db_set = set(db_tickets.keys())
+
+    missing_in_db = sorted(excel_set - db_set)
+    extra_in_db = sorted(db_set - excel_set)
+    in_both = excel_set & db_set
+
+    status_mismatch = []
+    for tnum in sorted(in_both):
+        excel_status = (excel_tickets[tnum]["status"] or "").lower()
+        db_status = (db_tickets[tnum].get("status") or "").lower()
+        if excel_status and db_status and excel_status != db_status:
+            status_mismatch.append((tnum, excel_tickets[tnum]["status"], db_tickets[tnum].get("status")))
+
+    log.info("=" * 60)
+    log.info("  COMPARAÇÃO Excel × Supabase (state=WI)")
+    log.info("=" * 60)
+    log.info(f"  Planilha (unique):       {len(excel_set)}")
+    log.info(f"  Banco WI:                {len(db_set)}")
+    log.info(f"  Em AMBOS:                {len(in_both)}")
+    log.info(f"  Faltando no BANCO:       {len(missing_in_db)}")
+    log.info(f"  Extra no BANCO:          {len(extra_in_db)}")
+    log.info(f"  Status divergente:       {len(status_mismatch)}")
+    log.info("=" * 60)
+
+    if missing_in_db:
+        log.info("")
+        log.info("📋 NA PLANILHA, AUSENTE NO BANCO:")
+        for tnum in missing_in_db:
+            log.info(f"   - {tnum} (status excel: {excel_tickets[tnum]['status'] or '?'})")
+
+    if extra_in_db:
+        log.info("")
+        log.info("💾 NO BANCO, AUSENTE NA PLANILHA:")
+        for tnum in extra_in_db:
+            t = db_tickets[tnum]
+            loc = t.get("location") or "?"
+            client = t.get("client") or ""
+            prime = t.get("prime") or ""
+            log.info(f"   - {tnum} | {t.get('status','?'):8} | {loc} | client={client} prime={prime}")
+
+    if status_mismatch:
+        log.info("")
+        log.info("⚠ STATUS DIVERGENTE (planilha ≠ banco):")
+        for tnum, ex, db in status_mismatch:
+            log.info(f"   - {tnum}: planilha={ex:8} banco={db}")
+
+    log.info("=" * 60)
 
 
 # ── │ SECTION: EMAIL_SCAN_WI │ EMAIL SCAN WISCONSIN (Outlook 365) ────────────
@@ -10526,6 +10668,7 @@ if __name__ == "__main__":
     parser.add_argument("--reclassify-wi", action="store_true", help="Re-aplica classify nas responses WI existentes (sem ir ao portal) + re-checa auto-cancel")
     parser.add_argument("--scan-email-wi", action="store_true", help="Scan emails da pasta Winsconsin (Outlook 365) — confirmações de utilities. Sem --commit é dry run.")
     parser.add_argument("--list-outlook-folders", action="store_true", help="Lista pastas IMAP da conta Outlook 365 (debug)")
+    parser.add_argument("--compare-wi-excel", type=str, help="Compara planilha .xlsx com tickets WI no banco. Ex: --compare-wi-excel \"C:\\path\\to\\file.xlsx\"")
     parser.add_argument("--contacts",   action="store_true", help="Scrape contatos de utilities (FL)")
     parser.add_argument("--force",      action="store_true", help="Forçar re-scrape de TODOS")
     parser.add_argument("--backfill",   action="store_true", help="Backfill: adicionar eventos de clear no histórico")
@@ -10627,6 +10770,8 @@ if __name__ == "__main__":
             list_outlook_folders()
         elif getattr(args, 'scan_email_wi', False):
             scan_emails_wi(commit=args.commit, days_back=getattr(args, 'days_back', 14))
+        elif getattr(args, 'compare_wi_excel', None):
+            compare_wi_excel(args.compare_wi_excel)
         elif args.rescrape:
             asyncio.run(rescrape_notes(args.state or "FL", force=args.force))
         elif args.backfill:

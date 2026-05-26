@@ -728,6 +728,7 @@
 :root {
   /* Surfaces */
   --bg: #f4f3f0;
+  --bg2: #eae8e3;
   --white: #ffffff;
   --surface: #ffffff;
   --border: #e2e0da;

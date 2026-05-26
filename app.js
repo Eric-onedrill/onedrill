@@ -1868,7 +1868,7 @@ function isInRenewalGrace(t){
 
   // 1. expireOld direto (definido na renovação manual)
   let cutover=t.expireOld||t.expire_old||'';
-  if(cutover&&cutover!=='—')cutoverMs=_eod(cutover).getTime();
+  if(cutover&&cutover!=='—'){cutoverMs=_eod(cutover).getTime();if(isNaN(cutoverMs))cutoverMs=0;}
 
   // 2. Fallback: busca expiração do ticket antigo no sistema
   if(!cutoverMs){
@@ -2852,7 +2852,7 @@ async function confirmDelProj(){
 }
 function openMoveProj(tid){
   const t=tickets.find(x=>x.id===tid);if(!t)return;
-  document.getElementById('move-proj-ticket-info').innerHTML=`Ticket: ${t.ticket}`+(t.project_locked?'<div style="margin-top:6px;font-size:11px;padding:5px 10px;background:var(--accent-bg);border:1px solid var(--border);border-radius:var(--r);color:var(--accent)">🔒 Projeto travado — ao salvar, o novo projeto será travado também.<br><button class="btn btn-sm" onclick="unlockProject('+t.id+')" style="margin-top:4px;font-size:10px">🔓 Desbloquear projeto</button></div>':'');
+  document.getElementById('move-proj-ticket-info').innerHTML=`Ticket: ${esc(t.ticket)}`+(t.project_locked?'<div style="margin-top:6px;font-size:11px;padding:5px 10px;background:var(--accent-bg);border:1px solid var(--border);border-radius:var(--r);color:var(--accent)">🔒 Projeto travado — ao salvar, o novo projeto será travado também.<br><button class="btn btn-sm" onclick="unlockProject('+t.id+')" style="margin-top:4px;font-size:10px">🔓 Desbloquear projeto</button></div>':'');
   const sel=document.getElementById('move-proj-sel');
   sel.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}"${t.projectId===p.id?' selected':''}>${esc(p.name)}</option>`).join('');
   openModal('ov-move-proj');
@@ -3346,7 +3346,7 @@ async function doImport(){
   if(mode==='replace'){
     pt.textContent='Limpando tickets antigos...';
     await sb.from('tickets').delete().neq('id',0);
-    tickets=[];projects=projects.filter(p=>p._manual);
+    tickets=[];projects=projects.filter(p=>p._manual||parsedProjectTotals.has(p.id));
   }
 
   // ── BATCH IMPORT ──
@@ -3384,7 +3384,8 @@ async function doImport(){
         const newPid=existing.project_locked?existing.projectId:(pid||existing.projectId);
         const newStatus=existing.status_locked?existing.status:r.status;
         Object.assign(existing,{company:r.company,state:r.state,location:r.location,status:newStatus,expire:r.expire,footage:r.footage,completedFeet:r.completedFeet||existing.completedFeet||0,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,projectId:newPid});
-        if(oldStatus!==newStatus)existing.history.push({ts:Date.now(),action:`Status: ${oldStatus} → ${newStatus}`,color:scol(newStatus)});
+        existing.history=existing.history||[];// Fix audit: garante array antes de push
+      if(oldStatus!==newStatus)existing.history.push({ts:Date.now(),action:`Status: ${oldStatus} → ${newStatus}`,color:scol(newStatus)});
         existing.history.push({ts:Date.now(),action:'Atualizado via Excel ✅'+(existing.project_locked?' (projeto travado 🔒)':''),color:'#16a34a'});
         batchBuffer.push(existing);
         updated++;
@@ -3826,7 +3827,7 @@ async function applyBulkUpdate(){
 
       // Atualiza objeto em memória primeiro
       if(r.newFootage!==undefined)r.t.footage=r.newFootage;
-      if(r.newCompletedFeet!==undefined)r.t.completedFeet=r.newCompletedFeet;
+      if(r.newCompletedFeet!==undefined&&_hasCompletedFeetCol)r.t.completedFeet=r.newCompletedFeet;
       if(r.newProjectId!==undefined){
         r.t.projectId=r.newProjectId;
         r.t.project_locked=!!r.newProjectId;// alocação manual sempre tranca
@@ -4026,7 +4027,7 @@ function _buildUrgencyAlert(expiring){
   div.innerHTML='<span style="font-size:18px">🚨</span><div><div style="font-weight:700;color:#dc2626">'+critical.length+' ticket'+(critical.length>1?'s':'')+' urgente'+(critical.length>1?'s':'')+'</div>'
     +'<div style="font-size:10px;color:#991b1b">Vence em ≤3 dias · campo pendente</div></div>'
     +'<span onclick="event.stopPropagation();this.parentElement.remove()" style="margin-left:auto;color:#dc2626;font-size:16px;padding:0 4px;cursor:pointer">✕</span>';
-  div.onclick=function(){nav('tickets');setTimeout(function(){document.getElementById('tbl-stat').value='A Realizar';document.getElementById('tbl-exp').value='3';renderTable();},100);div.remove();};
+  div.onclick=function(){nav('tickets');setTimeout(function(){document.getElementById('tbl-stat').value='Open';document.getElementById('tbl-exp').value='3';renderTable();},100);div.remove();};
   document.body.appendChild(div);
   // Injeta animation CSS se não existe
   if(!document.getElementById('urgency-css')){

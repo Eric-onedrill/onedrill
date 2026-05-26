@@ -914,4 +914,9 @@ if ('serviceWorker' in navigator) {
       })
       .catch(err => console.warn('[SW] falhou:', err));
     // Limpa flag quando vai navegar pra fora (pra permitir reload em proxima visita)
-    window.addEventListener('beforeunload', () =>
+    window.addEventListener('beforeunload', () => {
+      sessionStorage.removeItem('sw-reloaded-once');
+    });
+  </script>
+</body>
+</html>

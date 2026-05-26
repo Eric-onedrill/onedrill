@@ -2416,7 +2416,7 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
         if deduped_responses:
             statuses = [r["status"] for r in deduped_responses]
             none_pending = not any(s == "Pending" for s in statuses)
-            all_responded = all(s in ("Clear", "Pending") for s in statuses)
+            all_responded = all(s in ("Clear", "Pending", "Cancel") for s in statuses)
             # WI: todas as utilities (excluindo "Not Participating") foram "Closed by DHL"
             # → ticket invalidado (Wis. Stat. §182.0175) → vira Cancel.
             # Not Participating não conta — utility disse "não tenho rede ali", é fora do escopo.

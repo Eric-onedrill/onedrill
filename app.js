@@ -2320,22 +2320,29 @@ async function renderUtils(t){
     const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
     const notpart=data.filter(u=>u._isNotPart);
     const marked=data.filter(u=>u.status==='Marked');
+    const canceled=data.filter(u=>u.status==='Cancel');
     if(sm){
       const parts=[];
       if(inGrace)parts.push('<span style="color:#7c3aed">🔄 graça'+(novoClareado?' (novo clareou)':'')+'</span>');
       if(pending.length)parts.push(`<span style="color:var(--red)">${pending.length} pendente${pending.length>1?'s':''}</span>`);
       if(marked.length)parts.push(`<span style="color:var(--amber)">${marked.length} marcada${marked.length>1?'s':''}</span>`);
       if(notpart.length)parts.push(`<span style="color:#d97706">⚠ ${notpart.length} não participa</span>`);
+      if(canceled.length)parts.push(`<span style="color:#dc2626">${canceled.length} cancelada${canceled.length>1?'s':''}</span>`);
       if(cleared.length)parts.push(`<span style="color:var(--green)">${cleared.length} clear</span>`);
       sm.innerHTML=parts.join(' · ');
     }
-    const badgeClass={Pending:'ub-pending',Clear:'ub-clear',Marked:'ub-marked',Private:'ub-private',Unmarked:'ub-clear'};
-    const label={Pending:'Pendente',Clear:'Clear',Marked:'Marcado',Private:'Privado',Unmarked:'Desmarcado'};
+    const badgeClass={Pending:'ub-pending',Clear:'ub-clear',Marked:'ub-marked',Private:'ub-private',Unmarked:'ub-clear',Cancel:'ub-cancel'};
+    const label={Pending:'Pendente',Clear:'Clear',Marked:'Marcado',Private:'Privado',Unmarked:'Desmarcado',Cancel:'Cancel'};
     // Override pra Not Participating: badge laranja + label especifico
     const getBadgeClass=u=>u._isNotPart?'ub-notpart':(badgeClass[u.status]||'ub-pending');
     const getLabel=u=>u._isNotPart?'⚠ Não Participa':(label[u.status]||u.status);
-    const order={Pending:0,Marked:1,Private:2,Clear:3,Unmarked:4};
-    data.sort((a,b)=>(order[a.status]||9)-(order[b.status]||9));
+    const order={Pending:0,Marked:1,Private:2,Cancel:3,Clear:4,Unmarked:5};
+    data.sort((a,b)=>{
+      // Not Participating sempre depois de Cancel e antes de Clear normal
+      const aO=a._isNotPart?3.5:(order[a.status]??9);
+      const bO=b._isNotPart?3.5:(order[b.status]??9);
+      return aO-bO;
+    });
     el.innerHTML=graceBanner+data.map(u=>{
       const resp=(u.response_text||'').trim();
       let detail='';
@@ -2343,6 +2350,9 @@ async function renderUtils(t){
       if(resp && u._isNotPart){
         const short=resp.length>80?resp.substring(0,80)+'…':resp;
         detail=`<div style="font-size:10px;color:#d97706;margin-top:2px;line-height:1.3;font-weight:600">⚠ ${esc(short)}</div>`;
+      } else if(resp && u.status==='Cancel'){
+        const short=resp.length>80?resp.substring(0,80)+'…':resp;
+        detail=`<div style="font-size:10px;color:#dc2626;margin-top:2px;line-height:1.3;opacity:.85">${esc(short)}</div>`;
       } else if(resp && u.status==='Clear'){
         const short=resp.length>80?resp.substring(0,80)+'…':resp;
         detail=`<div style="font-size:10px;color:var(--green);margin-top:2px;line-height:1.3;opacity:.85">${esc(short)}</div>`;

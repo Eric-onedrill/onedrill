@@ -632,13 +632,13 @@ def classify(status_text, response_text=""):
     # WI / Diggers Hotline: "Not Participating" = utility não atende a área (similar ao 3U)
     if "3u" in full or "not service provider" in full or "not participating" in full:
         return "Clear", False
-    # WI: "Closed by DHL" = Diggers Hotline fechou administrativamente porque ticket
-    # ultrapassou o prazo legal de 10 working days (Wis. Stat. §182.0175) sem positive
-    # response da utility. NÃO é Clear técnico — utility nunca confirmou marcação nem
-    # ausência de facilities. Como o ticket está legalmente invalidado, classifica como
-    # Cancel (não Clear). Excavator deve renovar o ticket antes de qualquer escavação.
+    # WI: "Closed by DHL" = Diggers Hotline fechou administrativamente porque utility
+    # não respondeu dentro do prazo legal (Wis. Stat. §182.0175). Equivale a "Not
+    # Participating" — utility não participa do programa de positive response.
+    # Excavator fica legalmente protegido. Classifica como Clear.
+    # No frontend, esses aparecem em laranja pra indicar que vale checar email.
     if "closed by dhl" in full or "closed by diggers" in full:
-        return "Cancel", False
+        return "Clear", False
     if "3h" in full or "privately owned" in full or "private facility owner" in full:
         return "Clear", False
     if "3e" in full and ("already performed" in full or "canceled" in full):
@@ -2415,9 +2415,16 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
             statuses = [r["status"] for r in deduped_responses]
             none_pending = not any(s == "Pending" for s in statuses)
             all_responded = all(s in ("Clear", "Pending") for s in statuses)
-            # WI: todas as utilities foram "Closed by DHL" (admin close, ticket invalidado
-            # após 10 working days sem positive response) → ticket inteiro vira Cancel.
-            all_cancel = bool(statuses) and all(s == "Cancel" for s in statuses)
+            # WI: todas as utilities (excluindo "Not Participating") foram "Closed by DHL"
+            # → ticket invalidado (Wis. Stat. §182.0175) → vira Cancel.
+            # Not Participating não conta — utility disse "não tenho rede ali", é fora do escopo.
+            def _is_not_part(r):
+                txt = ((r.get("response", "") or "") + " "
+                       + (r.get("comment", "") or "") + " "
+                       + (r.get("status_raw", "") or "")).lower()
+                return "not participating" in txt or "not service provider" in txt
+            relevant_statuses = [r["status"] for r in deduped_responses if not _is_not_part(r)]
+            all_cancel = bool(relevant_statuses) and all(s == "Cancel" for s in relevant_statuses)
             ticket_locked = t.get("status_locked", False)
 
             for resp in deduped_responses:
@@ -3554,6 +3561,110 @@ def cleanup_wi_dhl_clears():
         sb_batch_patch("ticket_811_responses", response_patches, id_field="id")
 
     log.info(f"[CLEANUP-WI-DHL] ✅ Concluído: {len(affected)} tickets revertidos pra Cancel")
+
+
+def reclassify_wi_responses():
+    """Re-aplica classify() em todas as responses WI do banco e re-checa auto-cancel.
+
+    Útil quando a regra do classify muda e queremos atualizar dados existentes sem
+    re-scrapear o portal. Lê cada response WI, chama classify(status_raw, response_text),
+    patcheia se status mudou. Depois pra cada ticket afetado, re-roda a lógica
+    de all_cancel (excluindo "Not Participating" que é fora do escopo).
+
+    Idempotente — pode rodar várias vezes.
+    """
+    log.info("[RECLASSIFY-WI] Iniciando reclassify retroativo...")
+
+    resps = sb_get(
+        "ticket_811_responses",
+        "&state=eq.WI&select=id,ticket_num,utility_name,status,response_text,status_raw"
+    )
+    if not resps:
+        log.info("[RECLASSIFY-WI] Nenhuma response WI encontrada")
+        return
+
+    log.info(f"[RECLASSIFY-WI] {len(resps)} responses WI carregadas")
+
+    response_patches = []
+    changed_tickets = set()
+
+    for r in resps:
+        resp_text = r.get("response_text") or ""
+        status_raw = r.get("status_raw") or ""
+        new_status, _ = classify(status_raw, resp_text)
+        current = r.get("status")
+        if new_status != current:
+            response_patches.append({"id": r["id"], "status": new_status})
+            changed_tickets.add(r["ticket_num"])
+            log.info(f"   {r['ticket_num']}/{r['utility_name']}: {current} → {new_status}")
+
+    if not response_patches:
+        log.info("[RECLASSIFY-WI] Nenhuma response precisa atualizar")
+    else:
+        log.info(f"[RECLASSIFY-WI] Aplicando {len(response_patches)} response patches...")
+        sb_batch_patch("ticket_811_responses", response_patches, id_field="id")
+        log.info(f"[RECLASSIFY-WI] ✅ {len(response_patches)} responses atualizadas")
+
+    if not changed_tickets:
+        log.info("[RECLASSIFY-WI] Concluído (sem mudanças)")
+        return
+
+    log.info(f"[RECLASSIFY-WI] Re-checando auto-cancel em {len(changed_tickets)} ticket(s)...")
+
+    def _is_not_part(r):
+        txt = ((r.get("response_text") or "") + " " + (r.get("status_raw") or "")).lower()
+        return "not participating" in txt or "not service provider" in txt
+
+    ticket_patches = []
+    cancel_ts = int(datetime.now().timestamp() * 1000)
+    cancel_label = datetime.now().strftime('%m/%d/%Y')
+    cancel_note = f"[AUTO 811] Cancelado em {cancel_label} — ticket invalidado (Closed by DHL após 10 working days)"
+
+    for tnum in sorted(changed_tickets):
+        t_rows = sb_get(
+            "tickets",
+            f"&state=eq.WI&ticket=eq.{_qv(tnum)}&select=id,ticket,status,history,notes,status_locked"
+        )
+        if not t_rows:
+            continue
+        t = t_rows[0]
+        if t.get("status") == "Cancel":
+            continue
+        if t.get("status_locked", False):
+            log.info(f"   [RECLASSIFY-WI] {tnum}: 🔒 status_locked — pulando")
+            continue
+
+        t_resps = sb_get(
+            "ticket_811_responses",
+            f"&ticket_num=eq.{_qv(tnum)}&select=status,response_text,status_raw"
+        )
+        if not t_resps:
+            continue
+
+        relevant = [r for r in t_resps if not _is_not_part(r)]
+        if not relevant:
+            continue
+
+        if all(r.get("status") == "Cancel" for r in relevant):
+            hist = t.get("history") or []
+            hist.append({"ts": cancel_ts, "action": cancel_note, "color": "#6d28d9"})
+            new_notes = append_auto_note(t.get("notes"), cancel_note)
+            ticket_patches.append({
+                "id": t["id"],
+                "status": "Cancel",
+                "notes": new_notes,
+                "history": hist,
+            })
+            log.info(f"   [RECLASSIFY-WI] {tnum}: AUTO-CANCEL ({len(relevant)} relevantes, todas Cancel)")
+
+    if ticket_patches:
+        log.info(f"[RECLASSIFY-WI] Aplicando {len(ticket_patches)} ticket patches...")
+        sb_batch_patch("tickets", ticket_patches, id_field="id")
+        log.info(f"[RECLASSIFY-WI] ✅ {len(ticket_patches)} tickets → Cancel")
+    else:
+        log.info("[RECLASSIFY-WI] Nenhum ticket precisa virar Cancel")
+
+    log.info("[RECLASSIFY-WI] Concluído")
 
 
 # ── │ SECTION: JULIE │ JULIE (Illinois 811) — SCRAPE PÚBLICO ──────────────────
@@ -8335,6 +8446,243 @@ def scan_emails_for_responses(commit=False, state_filter=None, days_back=7):
     log.info("=" * 55)
 
 
+# ── │ SECTION: EMAIL_SCAN_WI │ EMAIL SCAN WISCONSIN (Outlook 365) ────────────
+def list_outlook_folders():
+    """Lista pastas IMAP da conta Outlook 365. Útil pra configurar OUTLOOK_FOLDER.
+
+    Usa OUTLOOK_USER e OUTLOOK_PASS do .env. Imprime a hierarquia completa.
+    """
+    import imaplib
+
+    USER = os.getenv("OUTLOOK_USER")
+    PASS = os.getenv("OUTLOOK_PASS")
+    HOST = os.getenv("OUTLOOK_HOST", "outlook.office365.com")
+
+    if not USER or not PASS:
+        log.error("[OutlookFolders] OUTLOOK_USER/OUTLOOK_PASS não definidos no .env")
+        return
+
+    try:
+        imap = imaplib.IMAP4_SSL(HOST)
+        imap.login(USER, PASS)
+        status, folders = imap.list()
+        if status != "OK":
+            log.error(f"[OutlookFolders] Erro ao listar pastas: {status}")
+            imap.logout()
+            return
+        log.info("=" * 55)
+        log.info(f"  PASTAS IMAP de {USER}")
+        log.info("=" * 55)
+        for f in folders:
+            line = f.decode("utf-8", errors="replace") if isinstance(f, bytes) else str(f)
+            log.info(f"  {line}")
+        log.info("=" * 55)
+        imap.logout()
+    except Exception as e:
+        log.error(f"[OutlookFolders] Erro: {e}")
+
+
+def scan_emails_wi(commit=False, days_back=14):
+    """Scan emails da pasta Winsconsin (Outlook 365) buscando confirmações de utilities.
+
+    Formato esperado (Windstream PRS / KorWeb):
+        Subject: Ticket NNNNNNNN for CODE - Status Change
+        Body:    Ticket: NNNNNNNN
+                 Member Code: CODE
+                 Response: _CLEARED (ou _MARKED, _COMPLETE, etc.)
+
+    Quando match: utility WI que tinha status=Cancel (Closed by DHL) ou Pending
+    é atualizada pra Clear, com response_text "Email confirmation (CODE): CLEARED em DD/MM/YYYY",
+    e o ticket recebe entry no histórico.
+
+    Args:
+        commit: Se True, atualiza banco. Se False (dry run), só loga o que faria.
+        days_back: Quantos dias pra trás varrer (default 14).
+    """
+    import imaplib
+    import email as email_mod
+
+    USER = os.getenv("OUTLOOK_USER")
+    PASS = os.getenv("OUTLOOK_PASS")
+    HOST = os.getenv("OUTLOOK_HOST", "outlook.office365.com")
+    FOLDER = os.getenv("OUTLOOK_FOLDER", "Inbox/Clientes/Five Stars/Winsconsin")
+
+    if not USER or not PASS:
+        log.error("[EmailScanWI] OUTLOOK_USER/OUTLOOK_PASS não definidos no .env")
+        return
+
+    log.info("=" * 55)
+    log.info(f"  EMAIL SCAN WI {'(DRY RUN)' if not commit else '(COMMIT)'}")
+    log.info(f"  Pasta: {FOLDER}")
+    log.info(f"  Buscando emails dos últimos {days_back} dias")
+    log.info("=" * 55)
+
+    try:
+        imap = imaplib.IMAP4_SSL(HOST)
+        imap.login(USER, PASS)
+    except Exception as e:
+        log.error(f"[EmailScanWI] Erro IMAP login: {e}")
+        return
+
+    folder_select = f'"{FOLDER}"' if " " in FOLDER else FOLDER
+    status, _ = imap.select(folder_select)
+    if status != "OK":
+        log.error(f"[EmailScanWI] Pasta '{FOLDER}' não encontrada. Use --list-outlook-folders pra ver as pastas reais")
+        try:
+            imap.logout()
+        except Exception:
+            pass
+        return
+
+    since_date = (datetime.now() - timedelta(days=days_back)).strftime("%d-%b-%Y")
+    status, msg_ids = imap.search(None, f'(SINCE {since_date})')
+
+    if status != "OK" or not msg_ids or not msg_ids[0]:
+        log.info("[EmailScanWI] Nenhum email no período")
+        imap.logout()
+        return
+
+    ids = msg_ids[0].split()
+    log.info(f"[EmailScanWI] Analisando {len(ids)} emails...")
+
+    matched = 0
+    updated = 0
+    skipped_neg = 0
+    skipped_no_ticket = 0
+    skipped_no_match = 0
+    errors = 0
+    affected_tickets = set()
+
+    for msg_id in ids:
+        try:
+            status, msg_data = imap.fetch(msg_id, "(RFC822)")
+            if status != "OK" or not msg_data or not msg_data[0]:
+                continue
+
+            raw = msg_data[0][1]
+            msg = email_mod.message_from_bytes(raw)
+
+            subject = _decode_email_header(msg.get("Subject", ""))
+            sender = _decode_email_header(msg.get("From", ""))
+
+            # ── Parse subject — formato "Ticket NNNNN for CODE - Status Change" ──
+            subj_m = re.search(r"Ticket\s+(\d{8,})\s+for\s+(\w+)", subject, re.IGNORECASE)
+            if not subj_m:
+                continue
+            ticket_num = subj_m.group(1)
+            member_code = subj_m.group(2).upper()
+
+            # Body fields (estrutura KorWeb)
+            body = _extract_email_body(msg)
+            response = ""
+            completed_on = ""
+            if body:
+                resp_m = re.search(r"Response\s*:?\s*_?(\w+)", body)
+                if resp_m:
+                    response = resp_m.group(1).upper()
+                comp_m = re.search(r"Completed\s*on\s*:?\s*([\d/]+\s+[\d:]+\s*[AP]M)", body)
+                if comp_m:
+                    completed_on = comp_m.group(1).strip()
+
+            if not response:
+                # Tenta achar via Work Performed
+                if body:
+                    wp_m = re.search(r"Work\s*Performed[\s\W]+(\w+)", body)
+                    if wp_m:
+                        response = wp_m.group(1).upper()
+
+            matched += 1
+            log.info(f"  [{ticket_num}] code={member_code} response={response or '?'} completed={completed_on or '?'} from={sender[:40]}")
+
+            if response not in ("CLEARED", "MARKED", "COMPLETE", "CLEAR", "COMPLETED", "NOCONFLICT"):
+                log.info("    -> response não-positiva, pula")
+                skipped_neg += 1
+                continue
+
+            # ── Match ticket no banco — só WI ──
+            tickets_db = sb_get("tickets", f"&state=eq.WI&ticket=eq.{_qv(ticket_num)}&select=id,state,ticket,status,history,notes")
+            if not tickets_db:
+                log.warning(f"    -> ticket WI {ticket_num} não achado no banco")
+                skipped_no_ticket += 1
+                continue
+            t = tickets_db[0]
+
+            # ── Match utility por member_code (sufixo no utility_name) ──
+            t_resps = sb_get(
+                "ticket_811_responses",
+                f"&ticket_num=eq.{_qv(ticket_num)}&select=id,utility_name,status,response_text"
+            )
+            target = None
+            for r in t_resps:
+                uname = (r.get("utility_name") or "").upper()
+                if member_code in uname:
+                    target = r
+                    break
+
+            if not target:
+                log.info(f"    -> nenhuma utility com code '{member_code}' no ticket {ticket_num}")
+                skipped_no_match += 1
+                continue
+
+            old_status = target.get("status")
+            old_text = (target.get("response_text") or "")[:60]
+            log.info(f"    -> MATCH: {target['utility_name']} ({old_status}: '{old_text}')")
+
+            if old_status in ("Clear", "Marked"):
+                log.info("    -> já está Clear/Marked, pula")
+                continue
+
+            if commit:
+                new_text = f"Email confirmation ({member_code}): {response}"
+                if completed_on:
+                    new_text += f" em {completed_on}"
+                try:
+                    sb_patch("ticket_811_responses", target["id"], {
+                        "status": "Clear",
+                        "response_text": new_text,
+                        "synced_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    })
+                    # Histórico do ticket
+                    hist = t.get("history") or []
+                    hist_ts = int(datetime.now().timestamp() * 1000)
+                    hist_note = f"[AUTO EMAIL WI] {target['utility_name']} respondeu por email — {response}"
+                    if completed_on:
+                        hist_note += f" em {completed_on}"
+                    hist.append({"ts": hist_ts, "action": hist_note, "color": "#0ea5e9"})
+                    new_notes = append_auto_note(t.get("notes"), hist_note)
+                    sb_patch("tickets", t["id"], {"history": hist, "notes": new_notes})
+                    log.info("    -> ATUALIZADO no banco (response + histórico)")
+                    updated += 1
+                    affected_tickets.add(ticket_num)
+                except Exception as e:
+                    log.error(f"    -> ERRO ao atualizar: {e}")
+                    errors += 1
+            else:
+                log.info(f"    -> [DRY RUN] atualizaria {old_status} → Clear ({response})")
+                updated += 1
+                affected_tickets.add(ticket_num)
+        except Exception as e:
+            log.warning(f"  Erro processando email: {e}")
+            errors += 1
+            continue
+
+    try:
+        imap.logout()
+    except Exception:
+        pass
+
+    log.info("=" * 55)
+    log.info("  EMAIL SCAN WI CONCLUIDO:")
+    log.info(f"    Emails analisados:        {len(ids)}")
+    log.info(f"    Parser identificou:       {matched}")
+    log.info(f"    Updated{' (DRY)' if not commit else ''}:                  {updated}")
+    log.info(f"    Tickets afetados:         {len(affected_tickets)}")
+    log.info(f"    Skipped (resp negativa):  {skipped_neg}")
+    log.info(f"    Skipped (ticket no banco):{skipped_no_ticket}")
+    log.info(f"    Skipped (utility no ticket): {skipped_no_match}")
+    log.info(f"    Erros:                    {errors}")
+    log.info("=" * 55)
+
 
 # ── │ SECTION: PDF_SAVE │ SAVE PDF (via Print Dialog — simula humano) ────────
 
@@ -10175,6 +10523,9 @@ if __name__ == "__main__":
     parser.add_argument("--cleanup",    action="store_true", help="Excluir tickets cancelados")
     parser.add_argument("--cleanup_all", action="store_true", help="Cleanup IN + FL em paralelo")
     parser.add_argument("--cleanup-wi-dhl", action="store_true", help="Cleanup retroativo: tickets WI Clear com todas responses Closed by DHL → Cancel")
+    parser.add_argument("--reclassify-wi", action="store_true", help="Re-aplica classify nas responses WI existentes (sem ir ao portal) + re-checa auto-cancel")
+    parser.add_argument("--scan-email-wi", action="store_true", help="Scan emails da pasta Winsconsin (Outlook 365) — confirmações de utilities. Sem --commit é dry run.")
+    parser.add_argument("--list-outlook-folders", action="store_true", help="Lista pastas IMAP da conta Outlook 365 (debug)")
     parser.add_argument("--contacts",   action="store_true", help="Scrape contatos de utilities (FL)")
     parser.add_argument("--force",      action="store_true", help="Forçar re-scrape de TODOS")
     parser.add_argument("--backfill",   action="store_true", help="Backfill: adicionar eventos de clear no histórico")
@@ -10270,6 +10621,12 @@ if __name__ == "__main__":
             asyncio.run(cleanup_canceled(args.state or "IN"))
         elif getattr(args, 'cleanup_wi_dhl', False):
             cleanup_wi_dhl_clears()
+        elif getattr(args, 'reclassify_wi', False):
+            reclassify_wi_responses()
+        elif getattr(args, 'list_outlook_folders', False):
+            list_outlook_folders()
+        elif getattr(args, 'scan_email_wi', False):
+            scan_emails_wi(commit=args.commit, days_back=getattr(args, 'days_back', 14))
         elif args.rescrape:
             asyncio.run(rescrape_notes(args.state or "FL", force=args.force))
         elif args.backfill:

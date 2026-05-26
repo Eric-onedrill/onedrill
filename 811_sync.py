@@ -632,13 +632,15 @@ def classify(status_text, response_text=""):
     # WI / Diggers Hotline: "Not Participating" = utility não atende a área (similar ao 3U)
     if "3u" in full or "not service provider" in full or "not participating" in full:
         return "Clear", False
-    # WI: "Closed by DHL" = Diggers Hotline fechou administrativamente porque utility
-    # não respondeu dentro do prazo legal (Wis. Stat. §182.0175). Equivale a "Not
-    # Participating" — utility não participa do programa de positive response.
-    # Excavator fica legalmente protegido. Classifica como Clear.
-    # No frontend, esses aparecem em laranja pra indicar que vale checar email.
+    # WI: "Closed by DHL" = Diggers Hotline fechou porque utility não respondeu
+    # dentro do prazo legal (Wis. Stat. §182.0175).
+    # DISTINÇÃO CRÍTICA:
+    #   - Se Facilities diz "Not Participating" → utility não participa → Clear
+    #   - Se NÃO diz "Not Participating" → utility ignorou o prazo → Cancel
+    # A checagem de "not participating" acima (L633) já cobre o 1º caso.
+    # Aqui trata só o 2º: prazo expirou sem resposta real.
     if "closed by dhl" in full or "closed by diggers" in full:
-        return "Clear", False
+        return "Cancel", False
     if "3h" in full or "privately owned" in full or "private facility owner" in full:
         return "Clear", False
     if "3e" in full and ("already performed" in full or "canceled" in full):
@@ -5090,13 +5092,17 @@ async def scrape_diggers_ticket(page, tnum, retry=True, debug_dump=False):
                 except ValueError:
                     continue
 
-        cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
-        # Se status_raw indica "Not Participating" / "Closed by DHL", preservar
-        # como "Not Participating" pra que o frontend identifique corretamente.
-        sr_low = status_raw.lower()
-        if "not participating" in sr_low or "closed by dhl" in sr_low or "closed by diggers" in sr_low:
+        # DISTINÇÃO: "Not Participating" (coluna Facilities) vs "Closed by DHL" genérico
+        # Se Facilities diz "Not Participating" → utility realmente não participa → Clear
+        # Se NÃO diz → prazo expirou sem resposta → Cancel (closed by DHL)
+        fac_low = facilities.lower()
+        is_not_part = "not participating" in fac_low or "not service provider" in fac_low
+        if is_not_part:
+            # Força classify a ver "not participating" no texto combinado
+            cls_status, cls_unrec = classify(status_raw, "not participating " + comment + " " + facilities)
             response_text = "Not Participating"
         else:
+            cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
             response_text = comment if comment else status_raw
 
         result["responses"].append({
@@ -6732,11 +6738,13 @@ async def _scrape_diggers_ticket_detail(page, tnum, debug=False):
                 except ValueError:
                     continue
 
-        cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
-        sr_low = status_raw.lower()
-        if "not participating" in sr_low or "closed by dhl" in sr_low or "closed by diggers" in sr_low:
+        fac_low = facilities.lower()
+        is_not_part = "not participating" in fac_low or "not service provider" in fac_low
+        if is_not_part:
+            cls_status, cls_unrec = classify(status_raw, "not participating " + comment + " " + facilities)
             response_text = "Not Participating"
         else:
+            cls_status, cls_unrec = classify(status_raw, comment + " " + facilities)
             response_text = comment if comment else status_raw
 
         detail["responses"].append({

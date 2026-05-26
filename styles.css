@@ -173,6 +173,12 @@
   border: 1px solid #fdba74 !important;
   font-weight: 700 !important;
 }
+.util-badge.ub-cancel {
+  background: #fef2f2 !important;
+  color: #dc2626 !important;
+  border: 1px solid #fca5a5 !important;
+  font-weight: 600 !important;
+}
 
 /* ══════════════════════════════════════════════
    29c. Mobile v4 — conservador (NAO esconde conteudo)

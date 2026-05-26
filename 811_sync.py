@@ -798,9 +798,9 @@ def _is_valid_utility_name(name):
     # Prefixo ID ex: "ID2227"
     if n.startswith("ID") and re.match(r"^ID\d+$", n):
         return False
-    # Código puro letras+números sem espaço: "NI0005", "ID8000"
-    # Ou sigla curta só-letras (≤5 chars): "COMCN", "AEP", "TECO"
-    if re.match(r"^[A-Z0-9]{2,10}$", n) and (re.search(r"[0-9]", n) or len(n) <= 5):
+    # Código puro letras+números COM dígitos: "NI0005", "ID8000" → rejeita
+    # Siglas puras só-letras (MCI, AEP, TECO) são utilities reais → aceita
+    if re.match(r"^[A-Z0-9]{2,10}$", n) and re.search(r"[0-9]", n):
         return False
     # Lixo da UI do portal: "All (6)", "Current (3)", "Show all (9)"
     if re.match(r"^(All|Current|Show\s+all|Show|Hide|Filter|Previous|Next|Page)\s*\(?\s*\d*\s*\)?\s*$", n, re.IGNORECASE):
@@ -9598,6 +9598,10 @@ def run_self_tests():
     _assert("NIPSCO GAS & ELECTRIC",    True,  _is_valid_utility_name("NIPSCO GAS & ELECTRIC (VALPARAISO)"))
     _assert("FRONTIER",                 True,  _is_valid_utility_name("FRONTIER"))
     _assert("AT&T",                     True,  _is_valid_utility_name("AT&T"))
+    # Siglas curtas reais (bug fix — MCI era rejeitada por ter ≤5 chars)
+    _assert("MCI",                      True,  _is_valid_utility_name("MCI"))
+    _assert("AEP",                      True,  _is_valid_utility_name("AEP"))
+    _assert("TECO",                     True,  _is_valid_utility_name("TECO"))
     # Inválidos (lixo de UI — era o bug)
     _assert("All (6)",                  False, _is_valid_utility_name("All (6)"))
     _assert("All (7)",                  False, _is_valid_utility_name("All (7)"))
@@ -9613,7 +9617,7 @@ def run_self_tests():
     # Inválidos (códigos/IDs)
     _assert("ID2227",                   False, _is_valid_utility_name("ID2227"))
     _assert("NI0005",                   False, _is_valid_utility_name("NI0005"))
-    _assert("COMCN",                    False, _is_valid_utility_name("COMCN"))
+    _assert("COMCN (sigla sem dígito)",  True,  _is_valid_utility_name("COMCN"))
     # Inválidos (vazio/curto)
     _assert("vazio",                    False, _is_valid_utility_name(""))
     _assert("None",                     False, _is_valid_utility_name(None))

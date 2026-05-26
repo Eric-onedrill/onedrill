@@ -2311,10 +2311,11 @@ async function renderUtils(t){
     // "Não Participa" = utility não atende a área ou não participa do programa
     // WI: "Closed by DHL" = DHL fechou administrativamente (utility não respondeu)
     // FL/IN/IL: "3U: Not service provider" = mesma ideia
+    // "Not Participating" = utility não participa (Clear laranja)
+    // "Closed by DHL" SEM "Not Participating" = prazo expirou (Cancel normal)
     const isNotPart=u=>{const rt=(u.response_text||'').toLowerCase();
-      return rt.includes('not participating')||rt.includes('not service provider')
-        ||rt.includes('closed by dhl')||rt.includes('closed by diggers');};
-    data.forEach(u=>{ u._isNotPart=(u.status==='Clear'||u.status==='Cancel')&&isNotPart(u); });
+      return rt.includes('not participating')||rt.includes('not service provider');};
+    data.forEach(u=>{ u._isNotPart=isNotPart(u); });
     const pending=data.filter(u=>u.status==='Pending');
     const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
     const notpart=data.filter(u=>u._isNotPart);

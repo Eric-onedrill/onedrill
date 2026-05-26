@@ -2308,11 +2308,13 @@ async function renderUtils(t){
     }
     // Fix 2026-05-14: detecta Not Participating como variante visual (badge laranja)
     // Continua sendo status Clear no banco/sistema, so muda o visual no detalhe
-    // "Não Participa" é conceito exclusivo de Wisconsin (Diggers Hotline)
-    // Em FL/IN/IL, "3U: Not service provider" é Clear normal (verde)
-    const isNotPart=u=>(u.state==='WI')&&((u.response_text||'').toLowerCase().includes('not participating')||
-                        (u.response_text||'').toLowerCase().includes('not service provider'));
-    data.forEach(u=>{ u._isNotPart=u.status==='Clear'&&isNotPart(u); });
+    // "Não Participa" = utility não atende a área ou não participa do programa
+    // WI: "Closed by DHL" = DHL fechou administrativamente (utility não respondeu)
+    // FL/IN/IL: "3U: Not service provider" = mesma ideia
+    const isNotPart=u=>{const rt=(u.response_text||'').toLowerCase();
+      return rt.includes('not participating')||rt.includes('not service provider')
+        ||rt.includes('closed by dhl')||rt.includes('closed by diggers');};
+    data.forEach(u=>{ u._isNotPart=(u.status==='Clear'||u.status==='Cancel')&&isNotPart(u); });
     const pending=data.filter(u=>u.status==='Pending');
     const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
     const notpart=data.filter(u=>u._isNotPart);

@@ -1227,117 +1227,9 @@ body::after{
 }
 .err-banner.visible{display:block;animation:reveal .4s ease}
 
-/* ─────────────────────────────────────────────
-   SCREENS (rotação automática)
-   ───────────────────────────────────────────── */
-.screens-wrap{
-  position:relative;
-  display:grid;
-  grid-template-columns:1fr;
-  grid-template-rows:1fr;
-  min-height:0;
-  overflow:hidden;
-}
-.screen{
-  grid-column:1;
-  grid-row:1;
-  display:grid;
-  grid-template-rows:auto 1fr;
-  gap:14px;
-  min-height:0;
-  opacity:0;
-  visibility:hidden;          /* esconde do screenshot/leitor de tela quando inativa */
-  pointer-events:none;
-  transform:translateY(8px);
-  transition:opacity .55s ease, transform .55s ease, visibility 0s linear .55s;
-}
-.screen.active{
-  opacity:1;
-  visibility:visible;
-  pointer-events:auto;
-  transform:translateY(0);
-  transition:opacity .55s ease, transform .55s ease, visibility 0s linear 0s;
-}
+/* ─── (screen rotation removed — single screen) ─── */
 
-/* SCREEN INDICATOR (header) */
-.screen-switcher{
-  display:flex;
-  align-items:center;
-  gap:0;
-  background:var(--card);
-  border:1px solid var(--border-strong);
-  border-radius:6px;
-  padding:3px;
-  position:relative;
-  overflow:hidden;
-}
-.screen-tab{
-  position:relative;
-  z-index:2;
-  background:transparent;
-  border:none;
-  color:var(--text2);
-  font-family:var(--mono);
-  font-size:10.5px;
-  letter-spacing:.16em;
-  text-transform:uppercase;
-  font-weight:600;
-  padding:6px 13px;
-  cursor:pointer;
-  transition:color .25s;
-  border-radius:4px;
-}
-.screen-tab.active{color:var(--bg)}
-.screen-tab:hover:not(.active){color:var(--text)}
-.screen-tab-bg{
-  position:absolute;
-  z-index:1;
-  top:3px;
-  bottom:3px;
-  background:var(--accent);
-  border-radius:4px;
-  transition:left .35s cubic-bezier(.4,0,.2,1), width .35s cubic-bezier(.4,0,.2,1);
-}
-.screen-tab-bg::after{
-  content:'';
-  position:absolute;
-  bottom:0;
-  left:0;
-  height:2px;
-  background:rgba(10,14,20,.4);
-  border-radius:0 0 4px 4px;
-  width:var(--progress, 0%);
-  transition:width .3s linear;
-}
-
-/* ─────────────────────────────────────────────
-   TELA 2 — OPERAÇÕES (Forecast + Lead Time)
-   ───────────────────────────────────────────── */
-.ops-section{
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-}
-.ops-section-head{
-  display:flex;
-  align-items:baseline;
-  justify-content:space-between;
-  padding:0 4px;
-}
-.ops-section-title{
-  font-family:var(--display);
-  font-size:22px;
-  letter-spacing:.18em;
-  color:var(--accent);
-  line-height:1;
-}
-.ops-section-sub{
-  font-family:var(--mono);
-  font-size:10px;
-  color:var(--muted);
-  text-transform:uppercase;
-  letter-spacing:.16em;
-}
+/* (Tela 2 removida — CSS de Forecast/LeadTime mantido como dead code abaixo por segurança) */
 
 /* FORECAST CARDS — 3 estados */
 .forecast-grid{
@@ -1611,11 +1503,6 @@ body::after{
       </div>
     </div>
     <div class="head-meta">
-      <div class="screen-switcher" id="screen-switcher">
-        <span class="screen-tab-bg" id="screen-tab-bg"></span>
-        <button class="screen-tab active" data-screen="1">Status</button>
-        <button class="screen-tab" data-screen="2">Operações</button>
-      </div>
       <button class="refresh-btn" id="refresh-btn" title="Atualizar agora">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"/>
@@ -1638,10 +1525,7 @@ body::after{
     </div>
   </header>
 
-  <div class="screens-wrap" id="screens-wrap">
-
-  <!-- ═══════════ SCREEN 1: STATUS ═══════════ -->
-  <div class="screen active" data-screen="1">
+  <div class="status-content" style="display:grid;grid-template-rows:auto 1fr;gap:14px;min-height:0">
 
   <section class="hero">
     <!-- OPEN CARD -->
@@ -1768,32 +1652,7 @@ body::after{
 
   <section class="states" id="states"></section>
 
-  </div><!-- /screen 1 -->
-
-  <!-- ═══════════ SCREEN 2: OPERAÇÕES ═══════════ -->
-  <div class="screen" data-screen="2">
-
-    <!-- FORECAST DO BACKLOG POR ESTADO -->
-    <div class="ops-section">
-      <div class="ops-section-head">
-        <div class="ops-section-title">FORECAST DO BACKLOG · POR ESTADO</div>
-        <div class="ops-section-sub">footage open ÷ velocidade média 7d</div>
-      </div>
-      <div class="forecast-grid" id="forecast-grid"></div>
-    </div>
-
-    <!-- LEAD TIME -->
-    <div class="ops-section leadtime-section">
-      <div class="ops-section-head">
-        <div class="ops-section-title">LEAD TIME · TEMPO ATÉ LIBERAÇÃO</div>
-        <div class="ops-section-sub">média Open → Clear · últimos 7 dias</div>
-      </div>
-      <div class="leadtime-grid" id="leadtime-grid"></div>
-    </div>
-
-  </div><!-- /screen 2 -->
-
-  </div><!-- /screens-wrap -->
+  </div><!-- /status-content -->
 
   <div class="foot">
     <div class="foot-section">
@@ -2632,8 +2491,8 @@ function renderStates(b){
   root.innerHTML = html;
 }
 
-function renderScreen2(b){
-  // ─── FORECAST GRID ───
+/* renderScreen2 removido — tela única */
+function _renderScreen2_REMOVED(b){
   const fcRoot = document.getElementById('forecast-grid');
   const states = b.orderedStates.length ? b.orderedStates : [];
   // Garante 3 slots visuais
@@ -2829,7 +2688,6 @@ async function refresh(){
   renderHero(b);
   renderProduction(b.totals.clearFt);
   renderStates(b);
-  renderScreen2(b);
   renderFoot(b);
 
   nextRefreshAt = Date.now() + REFRESH_MS;
@@ -2848,122 +2706,7 @@ async function manualRefresh(){
   setTimeout(()=>btn.classList.remove('spinning'), 500);
 }
 
-/* ─────────────────────────────────────────────
-   SCREEN ROTATION — robusto pra TV/kiosk
-   ─────────────────────────────────────────────
-   - Usa setTimeout encadeado em vez de setInterval (alguns
-     navegadores de TV pausam setInterval em background ou
-     com tela ociosa).
-   - Não pausa por mouseenter (TV não tem mouse).
-   - Detecta visibilidade da página: pausa se a aba estiver
-     escondida e retoma ao voltar.
-   - Tempos POR TELA: tela 1 (status) tem o dobro da tela 2 (operações).
-*/
-const SCREEN_DURATIONS = {
-  1: 24_000,  // tela 1: STATUS — informação principal, fica mais tempo
-  2: 12_000,  // tela 2: OPERAÇÕES — leitura mais rápida
-};
-function getCurrentScreenDuration(){
-  return SCREEN_DURATIONS[currentScreen] || 18_000;
-}
-
-let currentScreen = 1;
-let rotateTimeout = null;
-let rotateProgressTimer = null;
-let rotateStartedAt = 0;
-let rotatePaused = false;
-
-function setScreen(n){
-  if(n === currentScreen) return;
-  currentScreen = n;
-  document.querySelectorAll('.screen').forEach(s=>{
-    s.classList.toggle('active', Number(s.dataset.screen) === n);
-  });
-  document.querySelectorAll('.screen-tab').forEach(t=>{
-    t.classList.toggle('active', Number(t.dataset.screen) === n);
-  });
-  positionTabBg();
-  rotateStartedAt = Date.now();
-  updateProgress();
-  console.log('[BI] Trocou pra tela', n, '— durará', getCurrentScreenDuration()/1000, 's');
-}
-
-function positionTabBg(){
-  const sw = document.getElementById('screen-switcher');
-  const bg = document.getElementById('screen-tab-bg');
-  if(!sw || !bg) return;
-  const active = sw.querySelector('.screen-tab.active');
-  if(!active) return;
-  const swRect = sw.getBoundingClientRect();
-  const aRect = active.getBoundingClientRect();
-  bg.style.left = (aRect.left - swRect.left) + 'px';
-  bg.style.width = aRect.width + 'px';
-}
-
-function updateProgress(){
-  const bg = document.getElementById('screen-tab-bg');
-  if(!bg) return;
-  if(rotatePaused){
-    bg.style.setProperty('--progress', '0%');
-    return;
-  }
-  const elapsed = Date.now() - rotateStartedAt;
-  const dur = getCurrentScreenDuration();
-  const pct = Math.min(100, (elapsed / dur) * 100);
-  bg.style.setProperty('--progress', pct + '%');
-}
-
-function scheduleNextRotate(){
-  if(rotateTimeout) clearTimeout(rotateTimeout);
-  const dur = getCurrentScreenDuration();
-  rotateTimeout = setTimeout(()=>{
-    if(!rotatePaused){
-      setScreen(currentScreen === 1 ? 2 : 1);
-    }
-    scheduleNextRotate(); // sempre re-agenda, mesmo se pausado
-  }, dur);
-}
-
-function startRotation(){
-  stopRotation();
-  rotateStartedAt = Date.now();
-  console.log('[BI] Rotação iniciada — tela 1:', SCREEN_DURATIONS[1]/1000, 's | tela 2:', SCREEN_DURATIONS[2]/1000, 's');
-  scheduleNextRotate();
-  rotateProgressTimer = setInterval(updateProgress, 200);
-}
-
-function stopRotation(){
-  if(rotateTimeout) clearTimeout(rotateTimeout);
-  if(rotateProgressTimer) clearInterval(rotateProgressTimer);
-  rotateTimeout = null;
-  rotateProgressTimer = null;
-}
-
-function setupScreenSwitcher(){
-  document.querySelectorAll('.screen-tab').forEach(t=>{
-    t.addEventListener('click', ()=>{
-      const n = Number(t.dataset.screen);
-      if(n !== currentScreen){
-        setScreen(n);
-        // Após click manual, reinicia o timer pra dar 18s na nova tela
-        scheduleNextRotate();
-      }
-    });
-  });
-  // Pausa quando a aba/tela fica inativa, retoma quando volta
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.hidden){
-      rotatePaused = true;
-    } else {
-      rotatePaused = false;
-      rotateStartedAt = Date.now();
-      // Re-agenda pra evitar disparo imediato após hibernação
-      scheduleNextRotate();
-    }
-  });
-  // Reposiciona BG ao redimensionar
-  window.addEventListener('resize', positionTabBg);
-}
+/* (Screen rotation removido — tela única) */
 
 async function init(){
   // Live pill: demo vs prod
@@ -2989,9 +2732,6 @@ async function init(){
   // Botão manual refresh
   document.getElementById('refresh-btn').addEventListener('click', manualRefresh);
 
-  // Screen switcher
-  setupScreenSwitcher();
-
   // Wire up modal de produção diária
   wireProductionUI();
 
@@ -2999,13 +2739,7 @@ async function init(){
   tick();
   await refresh();
 
-  // Posiciona BG do tab e inicia rotação após primeiro render
-  // 200ms é suficiente pra DOM estar 100% pintado mesmo em TVs lentas
-  setTimeout(()=>{
-    positionTabBg();
-    startRotation();
-    console.log('[BI] Init completo. Tela atual:', currentScreen, '| Demo:', isDemo);
-  }, 200);
+  console.log('[BI] Init completo. Tela única. Demo:', isDemo);
 
   if(!isDemo){
     // setTimeout encadeado evita sobreposição de fetches em redes lentas

@@ -1018,7 +1018,7 @@ function nav(page){
   if(page==='contacts')renderContacts();
   if(page==='analytics')renderAnalytics();
   if(page==='completed')renderCompletedPage();
-  if(page==='timeline')renderTimeline();
+  // Timeline removido
 }
 
 // Navega pra aba Contatos já pré-filtrando state+county do ticket atual.

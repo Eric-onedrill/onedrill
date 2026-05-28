@@ -2474,10 +2474,7 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                 return 2  # lowest priority
             if "re-mark not needed" in raw or "remark not needed" in raw or raw == "21":
                 return 1  # ack de extensão — melhor que NR, pior que real
-            # LATE FINAL RESPONSE (Code 999) = portal avisando atraso, não é resposta real
-            if "late final response" in raw or raw == "999":
-                return 1
-            return 0      # real response (including RE-MARK NEEDED = reset)
+            return 0      # real response (LATE FINAL RESPONSE = Pending via classify, date resolve no dedup)
 
         latest_by_utility = {}
         for resp in data["responses"]:

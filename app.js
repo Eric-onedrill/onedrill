@@ -2018,8 +2018,19 @@ function ticketExpiredEffective(t){
   const now=new Date();
   if(t.expire&&t.expire!=='—'&&_eod(t.expire)<now)return'expired';
   if(isRenewed(t)&&!newTicketFullyCleared(t)){
-    const cut=graceCutoverDate(t);
-    if(cut&&cut!=='—'&&_eod(cut)<now)return'grace';
+    // Carência só existe quando o antigo era Clear (protegia o trabalho).
+    // Se antigo era Open/Pending, não havia carência — ticket novo é Open normal.
+    // Regra 1 do effectiveStatus: "ANTIGO não-Clear → sem carência protetora"
+    const snap=(t.statusOld||t.status_old||'').trim();
+    let oldWasClear=snap==='Clear';
+    if(!oldWasClear&&utilCacheLoaded){
+      const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+      if(oldNum){const ou=utilCache[oldNum]||[];if(ou.length>0&&!ou.some(u=>u.status==='Pending'))oldWasClear=true;}
+    }
+    if(oldWasClear){
+      const cut=graceCutoverDate(t);
+      if(cut&&cut!=='—'&&_eod(cut)<now)return'grace';
+    }
   }
   return'';
 }

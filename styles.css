@@ -1942,7 +1942,11 @@ body {
 .fi--max-180    { max-width: 180px; }
 .fi--max-150    { max-width: 150px; }
 .fi--max-120    { max-width: 120px; }
+.fi--max-100    { max-width: 100px; }
 .fi--w-180      { width: 180px; }
+
+/* Dentro do tbar, filtros nao ocupam 100% — ficam auto */
+.tbar .fi { width: auto; }
 
 .frow {
   display: flex;

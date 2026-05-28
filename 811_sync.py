@@ -2472,8 +2472,11 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
             raw = (r.get("status_raw") or "").lower()
             if raw.startswith("no response"):
                 return 2  # lowest priority
-            if "re-mark not needed" in raw or "remark not needed" in raw:
+            if "re-mark not needed" in raw or "remark not needed" in raw or raw == "21":
                 return 1  # ack de extensão — melhor que NR, pior que real
+            # LATE FINAL RESPONSE (Code 999) = portal avisando atraso, não é resposta real
+            if "late final response" in raw or raw == "999":
+                return 1
             return 0      # real response (including RE-MARK NEEDED = reset)
 
         latest_by_utility = {}
@@ -2520,11 +2523,11 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
         # → NÃO rodar auto-clear/revert (status fica como estava)
         # O expire já foi atualizado acima (linha ~2445). Seguir com anterior.
         if deduped_responses:
-            _all_remark_skip = all(
-                "re-mark not needed" in (r.get("status_raw") or "").lower()
-                or "remark not needed" in (r.get("status_raw") or "").lower()
-                for r in deduped_responses
-            )
+            def _is_remark(r):
+                raw = (r.get("status_raw") or "").lower()
+                return ("re-mark not needed" in raw or "remark not needed" in raw
+                        or raw == "21")
+            _all_remark_skip = all(_is_remark(r) for r in deduped_responses)
             if _all_remark_skip:
                 log.info(f"[{state}] {tnum}: 📋 Extensão (RE-MARK NOT NEEDED × {len(deduped_responses)}) "
                          f"— mantendo respostas e status anteriores (expire={patch.get('expire', t.get('expire', '?'))})")
@@ -3990,9 +3993,13 @@ async def scrape_julie_ticket(page, tnum, retry=True):
                             continue
 
                 status, _cls_unrec = classify(response_code, description + " " + comment)
+                # status_raw = texto descritivo (MARKED, RE-MARK NOT NEEDED, etc)
+                # NÃO usar response_code numérico (21, 20, 999) — a dedup _is_non_real()
+                # e o all-RE-MARK skip dependem de texto legível em status_raw.
+                raw_text = description if description and description != "-" else response_code
                 result["responses"].append({
                     "utility": member_name,
-                    "status_raw": response_code,
+                    "status_raw": raw_text,
                     "status": status,
                     "response": description,
                     "comment": comment,
@@ -10096,10 +10103,10 @@ def run_self_tests():
     # classify: code 60 W&P → Clear, recognized
     _assert("Clear: W&P code 60", "Clear", classify("60", "WATCH AND PROTECT")[0])
     _assert("Clear: W&P recognized", False, classify("60", "WATCH AND PROTECT")[1])
-    # classify: RE-MARK NOT NEEDED (Code 21) → Clear (ack extensão sem remarcar)
-    _assert("Clear: RE-MARK NOT NEEDED", "Clear", classify("RE-MARK NOT NEEDED", "")[0])
-    _assert("Clear: RE-MARK NOT NEEDED recognized", False, classify("RE-MARK NOT NEEDED", "")[1])
-    _assert("Clear: REMARK NOT NEEDED variant", "Clear", classify("REMARK NOT NEEDED", "")[0])
+    # classify: RE-MARK NOT NEEDED (Code 21) → Pending (ack extensão, NÃO é clear real)
+    _assert("Pending: RE-MARK NOT NEEDED", "Pending", classify("RE-MARK NOT NEEDED", "")[0])
+    _assert("Pending: RE-MARK NOT NEEDED recognized", False, classify("RE-MARK NOT NEEDED", "")[1])
+    _assert("Pending: REMARK NOT NEEDED variant", "Pending", classify("REMARK NOT NEEDED", "")[0])
     # classify: RE-MARK NEEDED (Code 22) → Pending (reset, precisa remarcar)
     _assert("Pending: RE-MARK NEEDED", "Pending", classify("RE-MARK NEEDED", "")[0])
     _assert("Pending: RE-MARK NEEDED recognized", False, classify("RE-MARK NEEDED", "")[1])

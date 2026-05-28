@@ -151,6 +151,7 @@ function filterTickets(opts={}){
     status='',
     projectId='',
     client='',
+    prime='',
     search='',
     state='',
     utility='',
@@ -195,6 +196,9 @@ function filterTickets(opts={}){
 
     // Cliente
     if(client && t.client!==client) return false;
+
+    // Prime
+    if(prime && t.prime!==prime) return false;
 
     // Estado
     if(state && t.state!==state) return false;
@@ -1138,11 +1142,10 @@ function buildPopup(t,c){
   const es=effectiveStatus(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const isStale=expireIsStale(t);
-  // FIX 2026-05-13: vencido e vencido independente do status (exceto Closed/Cancel).
-  // Eric reportou: ticket Clear vencido nao mostrava popup, mas precisa renovar antes de trabalhar.
-  const isExp=t.expire&&t.expire!=='—'&&es!=='Closed'&&es!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  // Bloqueio "não cavar" — baseado em datas, NUNCA suprimido pela trava. '' / 'expired' / 'grace'.
+  const isExp=ticketExpiredEffective(t);
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
-    +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
+    +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — '+(isExp==='grace'?'CARÊNCIA VENCIDA':'VENCIDO')+'</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data não confirmada</div>':'')
     +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
     +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
@@ -1153,7 +1156,7 @@ function buildPopup(t,c){
     +(t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${esc(t.tipo)}</div>`:'')
     +`<div><span style="color:#9a9888">Status: </span><span style="color:${scol(es)};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div style="display:flex;flex-wrap:wrap;gap:2px;margin:4px 0">'+pu.slice(0,4).map(p=>'<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#fef2f2;color:#dc2626;font-family:monospace;white-space:nowrap">'+esc(p.utility_name.length>18?p.utility_name.substring(0,18)+'…':p.utility_name)+'</span>').join('')+(pu.length>4?'<span style="font-size:9px;color:#9a9888">+'+( pu.length-4)+'</span>':'')+'</div>';})()
-    +`<div><span style="color:#9a9888">Expira: </span><span${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`
+    +`<div><span style="color:#9a9888">Expira: </span><span${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?(isExp==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`
     +(t.address?`<div><span style="color:#9a9888">Endereço: </span>${esc(t.address)}</div>`:'')
     +`<div style="margin-top:7px;padding-top:7px;border-top:1px solid #e2e0da;display:flex;gap:8px">`
     +`<a href="#" onclick="openTicketDetail(${t.id});return false;" style="color:#1a6cf0;font-size:12px;font-weight:600">Detalhes →</a>`
@@ -1218,11 +1221,11 @@ function showPanel(t){
   const isStale=expireIsStale(t);
   const proj=projects.find(p=>p.id===t.projectId);
   currentPanelId=t.id;
-  // FIX 2026-05-13: vencido independente de status (exceto Closed/Cancel)
-  const isExp=t.expire&&t.expire!=='—'&&es!=='Closed'&&es!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
+  // Bloqueio "não cavar" — baseado em datas, NUNCA suprimido pela trava. '' / 'expired' / 'grace'.
+  const isExp=ticketExpiredEffective(t);
   document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
   document.getElementById('pbody').innerHTML=
-    (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — VENCIDO</div>':'')
+    (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — '+(isExp==='grace'?'CARÊNCIA VENCIDA':'VENCIDO')+'</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:6px 10px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data de vencimento ainda não confirmada</div>':'')
     +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
@@ -1232,7 +1235,7 @@ function showPanel(t){
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
     +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
-    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?' ⚠ VENCIDO':''}</span></div>`;
+    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?(isExp==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
 }
 
@@ -1441,15 +1444,15 @@ function openTicketDetail(id){
   // pra QUALQUER ticket vencido (exceto Closed/Cancel).
   // Antes: so Open/Damage. Eric reportou que ticket Clear vencido
   // tambem precisa avisar pra renovar antes de trabalhar.
-  const isExpired=t.expire&&t.expire!=='—'&&es!=='Closed'&&es!=='Cancel'&&_eod(t.expire)<new Date()&&!inGrace&&!isStale;
-  if(isExpired)showExpiredAlert(t);
+  const isExpired=ticketExpiredEffective(t);
+  if(isExpired)showExpiredAlert(t,isExpired);
 
   const proj=projects.find(p=>p.id===t.projectId);
   document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]+')':'');
   document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(inGrace?' · 🔄 Carência até '+graceCutoverDate(t):'');
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
 
-  const expiredBanner=isExpired?'<div style="background:#dc2626;color:white;padding:10px 14px;border-radius:var(--r);margin-bottom:10px;text-align:center;font-weight:700;font-size:14px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — TICKET VENCIDO ('+esc(t.expire)+')</div>':'';
+  const expiredBanner=isExpired?'<div style="background:#dc2626;color:white;padding:10px 14px;border-radius:var(--r);margin-bottom:10px;text-align:center;font-weight:700;font-size:14px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — '+(isExpired==='grace'?'CARÊNCIA VENCIDA (renovar/liberar antes de cavar)':'TICKET VENCIDO ('+esc(t.expire)+')')+'</div>':'';
 
   // Ticket renovado cujo scraper 811 ainda não confirmou a data nova no portal.
   // Mostra aviso em vez de banner vermelho — evita falso "VENCIDO".
@@ -1499,7 +1502,7 @@ function openTicketDetail(id){
     +`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${esc(t.job||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${esc(t.address||'—')}</span></div>`
-    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale?' style="color:#b45309"':'')}>${isStale?'⏳ aguardando sync 811':esc(t.expire||'—')}${isExpired?' ⚠ VENCIDO':''}</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale?' style="color:#b45309"':'')}>${isStale?'⏳ aguardando sync 811':esc(t.expire||'—')}${isExpired?(isExpired==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>`
     +(t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${esc(t.notes)}</div>`:'')
     +(hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>`
@@ -1595,16 +1598,17 @@ function openTicketDetail(id){
 }
 
 // ── EXPIRED TICKET FULLSCREEN ALERT ──
-function showExpiredAlert(t){
+function showExpiredAlert(t,kind){
   if(_expAlertEl){_expAlertEl.remove();_expAlertEl=null;}
+  const isGrace=kind==='grace';
   const el=document.createElement('div');
   el.id='expired-alert-overlay';
   el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:20px;text-align:center">'
     +'<div style="font-size:60px;margin-bottom:16px">⛔</div>'
     +'<div style="font-size:28px;font-weight:700;color:white;margin-bottom:8px;text-shadow:0 2px 8px rgba(0,0,0,.3)">NÃO TRABALHAR</div>'
-    +'<div style="font-size:20px;color:rgba(255,255,255,.9);margin-bottom:16px">TICKET VENCIDO</div>'
+    +'<div style="font-size:20px;color:rgba(255,255,255,.9);margin-bottom:16px">'+(isGrace?'CARÊNCIA VENCIDA':'TICKET VENCIDO')+'</div>'
     +'<div style="font-family:var(--mono);font-size:24px;color:white;padding:8px 20px;background:rgba(0,0,0,.3);border-radius:12px;margin-bottom:8px">'+esc(t.ticket)+'</div>'
-    +'<div style="font-size:16px;color:rgba(255,255,255,.8);margin-bottom:20px">Expirou em '+esc(t.expire)+'</div>'
+    +'<div style="font-size:16px;color:rgba(255,255,255,.8);margin-bottom:20px">'+(isGrace?'Carência venceu — ticket novo ainda não liberado':'Expirou em '+esc(t.expire))+'</div>'
     +'<div style="background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.5);border-radius:12px;padding:14px 28px;margin-bottom:16px">'
     +'<div style="font-size:20px;font-weight:700;color:white">📞 LIGAR AO OFFICE</div>'
     +'<div style="font-size:14px;color:rgba(255,255,255,.8);margin-top:4px">Call the office before any work</div>'
@@ -1702,6 +1706,7 @@ async function renewTicket(){
   const oldNum=t.ticket;
   const oldExpire=normalizeExpire(t.expire);
   const oldStatus=t.status;
+  const oldStatusLocked=t.status_locked;
 
   if(dup){
     if(!confirm('Ticket '+newTicket+' já existe no sistema (importado pelo scraper).\n\nDeseja MESCLAR?\n• O trajeto e dados do ticket atual serão mantidos\n• O registro duplicado ('+newTicket+') será removido\n• O número será atualizado para '+newTicket))return;
@@ -1771,6 +1776,11 @@ async function renewTicket(){
     t.expire='';
   }
   if(t.projectId)t.project_locked=true;// trava projeto ao renovar
+  // Ticket novo nasce Open e destravado — as utilities respondem DE NOVO. statusOld preserva
+  // o Clear do antigo p/ a carência exibir Clear até o vencimento; sem isto, a trava manual 🔒
+  // do antigo viajava pro novo e congelava Clear pra sempre, mesmo com utilities pendentes.
+  t.status='Open';
+  t.status_locked=false;
   t.history=t.history||[];
   t.history.push({ts:Date.now(),action:'[RENOVAÇÃO] '+oldNum+' → '+newTicket+(merged?' (mesclado)':'')+' (graça até '+oldExpire+')',color:'#7c3aed'});
   const ok=await saveTicketToDb(t);
@@ -1787,6 +1797,7 @@ async function renewTicket(){
     // Rollback completo incluindo expire (que foi zerado acima)
     // Fix bug #16: rollback também em camelCase só — ticketToDb é a guarda única.
     t.ticket=oldNum;t.oldTicket2=prevChain;t.expireOld='';t.statusOld='';t.expire=oldExpire;
+    t.status=oldStatus;t.status_locked=oldStatusLocked;
     t.history.pop();
     toast('Erro ao salvar renovação. Tente dar Refresh (⟳) e tentar novamente.','danger');
   }
@@ -1990,6 +2001,27 @@ function graceCutoverDate(t){
     if(oldNum){const oldT=tickets.find(x=>String(x.ticket).trim()===oldNum);if(oldT&&oldT.expire&&oldT.expire!=='—')d=oldT.expire;}
   }
   return d||'—';
+}
+
+/**
+ * Bloqueio efetivo de trabalho ("não cavar"), baseado em DATAS — NUNCA suprimido pela trava.
+ * Retorna '' (ok), 'expired' (expire do próprio ticket vencido) ou 'grace' (renovado,
+ * carência vencida e ticket novo ainda não liberado). Regra do Eric: a trava 🔒 não esconde
+ * o vencido; e se o ticket novo já está Clear de verdade (utilities respondidas), vale a
+ * data do novo e não a carência — por isso só bloqueia quando newTicketFullyCleared é falso.
+ */
+function ticketExpiredEffective(t){
+  const es=effectiveStatus(t);
+  if(es==='Closed'||es==='Cancel')return'';
+  if(expireIsStale(t))return'';                    // data ainda não confirmada pelo portal
+  if(isRenewed(t)&&isInRenewalGrace(t))return'';   // carência ativa → coberto
+  const now=new Date();
+  if(t.expire&&t.expire!=='—'&&_eod(t.expire)<now)return'expired';
+  if(isRenewed(t)&&!newTicketFullyCleared(t)){
+    const cut=graceCutoverDate(t);
+    if(cut&&cut!=='—'&&_eod(cut)<now)return'grace';
+  }
+  return'';
 }
 
 async function setManualStatus(newStatus){
@@ -2397,14 +2429,15 @@ function riskLabel(s){
 function renderTable(){
   const sr=(document.getElementById('tbl-srch').value||'').toLowerCase();
   const st=document.getElementById('tbl-stat').value;
+  const sta=document.getElementById('tbl-state')?.value||'';
   const pr=document.getElementById('tbl-proj').value;
-  const cl=document.getElementById('tbl-cli').value;
+  const pm=document.getElementById('tbl-prime')?.value||'';
   const ut=document.getElementById('tbl-util')?.value||'';
   const ed=document.getElementById('tbl-exp')?.value||'';
 
   const isCompletedProj=pr&&projects.find(p=>p.id===pr&&p.status==='Completed');
   const _stReal=st==='Sem Trajeto'?'':st;
-  let f=filterTickets({status:_stReal,projectId:pr,client:cl,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
+  let f=filterTickets({status:_stReal,projectId:pr,prime:pm,state:sta,search:sr,utility:ut,expireDays:ed,excludeCompleted:!isCompletedProj,onlyGrace:_graceFilterActive});
   if(st==='Sem Trajeto')f=f.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
 
   f.sort((a,b)=>{
@@ -3521,14 +3554,22 @@ function exportExpiring(){
   });
   if(!f.length){toast('Nenhum ticket vencendo.','warn');return;}
   const wb=XLSX.utils.book_new();
-  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes','Old Ticket #','Expire Old']];
+  const rows=[['Ticket #','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Projeto','Utilities Pendentes','Old Ticket #','Status Old','Expire Old','Pending (Old)','Utilities Pendentes (Old)','Respostas (Old)']];
   for(const t of f){
     const proj=projects.find(p=>p.id===t.projectId)?.name||'';
     const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
-    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,proj,pends,t.oldTicket2||'',t.expireOld||'']);
+    const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    let oldPendNames='',oldAllResps='',oldPendCount='';
+    if(oldNum){
+      const oldPends=getTicketPendingUtils(oldNum);
+      oldPendNames=oldPends.map(p=>p.utility_name).join(', ');
+      oldPendCount=oldPends.length?String(oldPends.length):'0';
+      oldAllResps=getTicketUtils(oldNum).map(u=>u.utility_name+' ('+u.status+')').join(', ');
+    }
+    rows.push([t.ticket,t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,proj,pends,t.oldTicket2||'',t.statusOld||'',t.expireOld||'',oldPendCount,oldPendNames,oldAllResps]);
   }
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30},{wch:16},{wch:12}];
+  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:10},{wch:20},{wch:30},{wch:30},{wch:16},{wch:10},{wch:12},{wch:10},{wch:30},{wch:40}];
   XLSX.utils.book_append_sheet(wb,ws,'Vencendo');
   XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(f.length+' tickets exportados','success');
@@ -3537,16 +3578,37 @@ function exportExpiring(){
 function exportFiltered(){
   const sr=(document.getElementById('tbl-srch')?.value||'').toLowerCase();
   const st=document.getElementById('tbl-stat')?.value||'';
+  const sta=document.getElementById('tbl-state')?.value||'';
   const pr=document.getElementById('tbl-proj')?.value||'';
-  const cl=document.getElementById('tbl-cli')?.value||'';
+  const pm=document.getElementById('tbl-prime')?.value||'';
   const ut=document.getElementById('tbl-util')?.value||'';
-  const f=filterTickets({status:st,projectId:pr,client:cl,search:sr,utility:ut});
+  const ed=document.getElementById('tbl-exp')?.value||'';
+  const f=filterTickets({status:st,projectId:pr,prime:pm,state:sta,search:sr,utility:ut,expireDays:ed,onlyGrace:_graceFilterActive});
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
   const _doneFtExp=f.reduce((s,t)=>s+(t.completedFeet||0),0);
-  const tData=[['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Pending','Empresa','Old Ticket #','Expire Old'],...f.map(t=>[t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,t.pending,t.company,t.oldTicket2||'',t.expireOld||'']),['','','','','','','TOTAL:',totalFt,_doneFtExp,'','','','','','','','']];
+  const tData=[
+    ['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Pending','Utilities Pendentes','Empresa','Old Ticket #','Status Old','Expire Old','Pending (Old)','Utilities Pendentes (Old)','Respostas (Old)'],
+    ...f.map(t=>{
+      const pends=getTicketPendingUtils(String(t.ticket).trim());
+      const pendNames=pends.map(p=>p.utility_name).join(', ');
+      // ── Dados do ticket antigo (renovação) ──
+      const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+      let oldPendNames='',oldAllResps='',oldPendCount='';
+      if(oldNum){
+        const oldPends=getTicketPendingUtils(oldNum);
+        oldPendNames=oldPends.map(p=>p.utility_name).join(', ');
+        oldPendCount=oldPends.length?String(oldPends.length):'0';
+        const oldAll=getTicketUtils(oldNum);
+        oldAllResps=oldAll.map(u=>u.utility_name+' ('+u.status+')').join(', ');
+      }
+      return [t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,t.pending,pendNames,t.company,t.oldTicket2||'',t.statusOld||'',t.expireOld||'',oldPendCount,oldPendNames,oldAllResps];
+    }),
+    ['','','','','','','TOTAL:',totalFt,_doneFtExp,'','','','','','','','','','','','','']
+  ];
   const ws=XLSX.utils.aoa_to_sheet(tData);
+  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:30},{wch:10},{wch:8},{wch:30},{wch:20},{wch:16},{wch:10},{wch:12},{wch:10},{wch:30},{wch:40}];
   XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   XLSX.writeFile(wb,'OneDrill_Filtrado_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast('Excel filtrado: '+f.length+' tickets · '+totalFt.toLocaleString()+' ft','success');
@@ -5048,9 +5110,9 @@ function syncProjectSelects(){
   const tp=document.getElementById('tbl-proj');if(tp){const tv=tp.value;tp.innerHTML=mkOpts('Todos projetos');if(tv)tp.value=tv;}
   const tm=document.getElementById('tm-proj');if(tm){const mv=tm.value;tm.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');if(mv)tm.value=mv;}
 }
-function syncClients(){
-  const cls=[...new Set(tickets.map(t=>t.client).filter(Boolean))].sort();
-  ['fcli','tbl-cli'].forEach(id=>{const el=document.getElementById(id);if(el){const pv=el.value;el.innerHTML='<option value="">Todos clientes</option>'+cls.map(c=>`<option>${esc(c)}</option>`).join('');if(pv)el.value=pv;}});
+function syncPrimes(){
+  const primes=[...new Set(tickets.map(t=>t.prime).filter(Boolean))].sort();
+  ['tbl-prime'].forEach(id=>{const el=document.getElementById(id);if(el){const pv=el.value;el.innerHTML='<option value="">Todos primes</option>'+primes.map(c=>`<option>${esc(c)}</option>`).join('');if(pv)el.value=pv;}});
 }
 function syncMapUtilFilter(){
   if(!utilCacheLoaded)return;
@@ -5187,7 +5249,7 @@ function renderTimeline(){
 }
 
 function syncAll(){
-  rebuildSupersededSet();syncProjectSelects();syncClients();syncLocations();updateCompletedSidebar();
+  rebuildSupersededSet();syncProjectSelects();syncPrimes();syncLocations();updateCompletedSidebar();
   if(utilCacheLoaded){syncUtilFilter();syncMapUtilFilter();}
   const ap=document.querySelector('.page.active')?.id;
   if(ap==='pg-map'){renderList();renderMap();}

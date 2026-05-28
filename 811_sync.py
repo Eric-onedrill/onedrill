@@ -83,7 +83,7 @@ MANUTENÇÃO E TESTES
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse
+import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse, shutil
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -649,11 +649,17 @@ def classify(status_text, response_text=""):
     # rep must be present during excavation. Clear, but needs W&P coordination.
     if "watch and protect" in full:
         return "Clear", False
-    # IL/JULIE: Code 21 — Re-mark Not Needed. Quando o ticket é estendido sem
-    # solicitar nova marcação, as utilities respondem isso — significa que as
-    # marcações originais continuam válidas. É Clear, não Pending.
+    # IL/JULIE: Code 21 — Re-mark Not Needed. É um ACK de extensão de prazo, NÃO uma
+    # liberação real (Eric 2026-05-27: "não é clear real, é ack de extensão"). → Pending.
+    # Se a utility marcou de verdade numa revisão anterior, o dedup em save_to_supabase
+    # mantém aquela resposta real (Clear) sobre este ack (JULIE traz todas as revisões).
     if "re-mark not needed" in full or "remark not needed" in full:
-        return "Clear", False
+        return "Pending", False
+    # IL/JULIE: Code 22 — Re-mark Needed. Quando o ticket é estendido COM
+    # solicitação de nova marcação, todas as utilities precisam remarcar.
+    # RESET total: todas voltam a Pending até marcarem de novo.
+    if "re-mark needed" in full or "remark needed" in full:
+        return "Pending", False
     # IL/JULIE: Ticket aberto pra reportar facility exposed/damaged. Utility precisa
     # inspecionar antes de liberar escavação. Tratamos como Pending até resposta real.
     if "reporting of an exposed" in full or "reporting of a damaged" in full:
@@ -2278,6 +2284,98 @@ def send_unrecognized_alert(state, items):
         log.warning(f"[Unrecognized] Erro ao enviar email: {e}")
 
 
+# Marcador no history pra não reenviar o alerta do mesmo ticket travado+renovado
+LOCKED_RENEWED_MARKER = "[ALERTA] travado+renovado"
+
+
+def send_locked_renewed_alert(state, items):
+    """Email avisando tickets TRAVADOS (status_locked) que foram renovados —
+    sinal de que o operador esqueceu de destravar antes de renovar.
+    Retorna True se enviou (pra só então marcar no history e não reenviar)."""
+    import smtplib
+    from email.mime.text import MIMEText
+
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_pass = os.getenv("GMAIL_PASS")
+    alert_to = os.getenv("ALERT_EMAIL")
+
+    if not all([gmail_user, gmail_pass, alert_to]):
+        log.info("[LockedRenewed] Email não configurado — alerta pulado")
+        return False
+
+    subject = f"[OneDrill] {len(items)} ticket(s) travado(s) e renovado(s) — {state}"
+    body = "Estes tickets estão com status TRAVADO (clear manual 🔒) E foram renovados.\n"
+    body += "O normal é DESTRAVAR antes de renovar — confira se esqueceu de algum.\n"
+    body += f"Estado: {state}\n"
+    body += f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    body += "\n" + "=" * 60 + "\n\n"
+
+    for i, t in enumerate(items, 1):
+        body += f"{i}. Ticket: {t.get('ticket')}\n"
+        body += f"   Status: {t.get('status')} (travado)\n"
+        body += f"   Renovou: {t.get('old_ticket2')}\n"
+        body += f"   Carência (expire_old): {t.get('expire_old') or '—'}\n\n"
+
+    body += "=" * 60 + "\n"
+    body += "\nAção: abra o ticket no OneDrill e destrave (🔓) se a renovação exige novas liberações.\n"
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = gmail_user
+    msg["To"] = alert_to
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(gmail_user, gmail_pass)
+            s.send_message(msg)
+        log.info(f"[LockedRenewed] Alerta enviado para {alert_to} ({len(items)} ticket(s))")
+        return True
+    except Exception as e:
+        log.warning(f"[LockedRenewed] Erro ao enviar email: {e}")
+        return False
+
+
+def check_locked_renewed_alert(state):
+    """Detecta tickets TRAVADOS (status_locked) renovados nesse estado e, pros que ainda
+    não foram alertados, manda 1 email e marca no history (dedup — 1 alerta por ticket)."""
+    try:
+        rows = sb_get(
+            "tickets",
+            f"&state=eq.{state}&status_locked=eq.true"
+            "&select=id,ticket,status,old_ticket2,expire_old,history",
+        )
+    except Exception as e:
+        log.warning(f"[LockedRenewed] Erro ao buscar travados ({state}): {e}")
+        return
+
+    pend = []
+    for t in rows:
+        if (t.get("status") or "") in ("Closed", "Cancel"):
+            continue  # terminal — trabalho concluído, não precisa de ação
+        if not (t.get("old_ticket2") or "").strip():
+            continue  # não é renovado
+        hist = t.get("history") or []
+        if any(LOCKED_RENEWED_MARKER in (h.get("action") or "") for h in hist):
+            continue  # já alertado antes
+        pend.append(t)
+
+    if not pend:
+        return
+
+    if not send_locked_renewed_alert(state, pend):
+        return  # email desligado/falhou — não marca, tenta de novo no próximo sync
+
+    ts = int(datetime.now().timestamp() * 1000)
+    label = datetime.now().strftime("%m/%d/%Y")
+    for t in pend:
+        hist = t.get("history") or []
+        hist.append({"ts": ts, "action": f"{LOCKED_RENEWED_MARKER} — alertado por email em {label}", "color": "#b45309"})
+        try:
+            sb_patch("tickets", t["id"], {"history": hist})
+        except Exception as e:
+            log.warning(f"[LockedRenewed] Erro ao marcar {t.get('ticket')}: {e}")
+
+
 # ── │ SECTION: SAVE │ SAVE TO SUPABASE ────────────────────────────────────────
 def save_to_supabase(state, results, tickets, grace_old_map=None):
     grace_old_map = grace_old_map or {}
@@ -2360,25 +2458,45 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
 
         # Dedup responses por utility.
         # Regras:
-        #   1. "No Response" (utility não respondeu) SEMPRE perde pra resposta real
-        #   2. Resposta real NUNCA é sobrescrita por "No Response"
-        #   3. Entre duas respostas reais: usa responded_date (mais recente ganha)
-        #   4. Se datas não comparáveis: mantém a última (ordem do portal = cronológica)
+        #   1. "No Response" / "RE-MARK NOT NEEDED" SEMPRE perde pra resposta real
+        #   2. Resposta real NUNCA é sobrescrita por "No Response" ou "RE-MARK NOT NEEDED"
+        #   3. "RE-MARK NOT NEEDED" ganha de "No Response" (é ack, melhor que silêncio)
+        #   4. Entre duas respostas reais: usa responded_date (mais recente ganha)
+        #   5. Se datas não comparáveis: mantém a última (ordem do portal = cronológica)
+        #
+        # "RE-MARK NOT NEEDED" (Code 21) = extensão sem remarcação. Não é resposta
+        # real — significa "minha resposta anterior continua valendo". O portal JULIE
+        # retorna respostas de TODAS as revisões (00X…03X), então a revisão anterior
+        # com a resposta real está no mesmo dataset. Basta não deixar RE-MARK sobrescrever.
+        def _is_non_real(r):
+            raw = (r.get("status_raw") or "").lower()
+            if raw.startswith("no response"):
+                return 2  # lowest priority
+            if "re-mark not needed" in raw or "remark not needed" in raw:
+                return 1  # ack de extensão — melhor que NR, pior que real
+            return 0      # real response (including RE-MARK NEEDED = reset)
+
         latest_by_utility = {}
         for resp in data["responses"]:
             key = resp["utility"]
             if key in latest_by_utility:
                 existing = latest_by_utility[key]
-                ex_is_nr = (existing.get("status_raw") or "").lower().startswith("no response")
-                new_is_nr = (resp.get("status_raw") or "").lower().startswith("no response")
-                # "No Response" SEMPRE perde pra resposta real
-                if ex_is_nr and not new_is_nr:
-                    log.debug(f"  [Dedup] {tnum}/{key}: No Response → {resp['status']} ({resp.get('status_raw','')})")
-                elif not ex_is_nr and new_is_nr:
-                    log.debug(f"  [Dedup] {tnum}/{key}: mantém {existing['status']} ({existing.get('status_raw','')}), ignora No Response")
-                    continue  # Mantém resposta real, ignora No Response
+                ex_nr = _is_non_real(existing)
+                new_nr = _is_non_real(resp)
+
+                # Resposta real (0) SEMPRE ganha de não-real (1, 2)
+                if ex_nr and not new_nr:
+                    log.debug(f"  [Dedup] {tnum}/{key}: {existing.get('status_raw','')[:30]} → {resp['status']} ({resp.get('status_raw','')[:30]})")
+                elif not ex_nr and new_nr:
+                    log.debug(f"  [Dedup] {tnum}/{key}: mantém {existing['status']} ({existing.get('status_raw','')[:30]}), ignora {resp.get('status_raw','')[:30]}")
+                    continue  # Mantém resposta real
+                elif ex_nr and new_nr:
+                    # Ambas não-reais: menor valor (maior prioridade) ganha
+                    if new_nr > ex_nr:
+                        log.debug(f"  [Dedup] {tnum}/{key}: mantém {existing.get('status_raw','')[:30]}, ignora {resp.get('status_raw','')[:30]}")
+                        continue  # Ex é melhor (ex: REMARK > NR)
                 else:
-                    # Ambas reais (ou ambas No Response): usa data se disponível
+                    # Ambas reais: usa data se disponível
                     existing_date = existing.get("responded_date") or ""
                     new_date = resp.get("responded_date") or ""
                     if existing_date and new_date and new_date < existing_date:
@@ -2394,6 +2512,25 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
             _apply_local_overrides(t, deduped_responses)
         except Exception as _ovr_e:
             log.warning(f"[Override] erro: {_ovr_e}")
+
+        # ── RE-MARK NOT NEEDED: extensão de prazo — skip total ──
+        # Quando TODAS as respostas são "RE-MARK NOT NEEDED" (Code 21), é só
+        # extensão de prazo sem remarcação. Não são respostas reais.
+        # → NÃO salvar no banco (mantém respostas anteriores intactas)
+        # → NÃO rodar auto-clear/revert (status fica como estava)
+        # O expire já foi atualizado acima (linha ~2445). Seguir com anterior.
+        if deduped_responses:
+            _all_remark_skip = all(
+                "re-mark not needed" in (r.get("status_raw") or "").lower()
+                or "remark not needed" in (r.get("status_raw") or "").lower()
+                for r in deduped_responses
+            )
+            if _all_remark_skip:
+                log.info(f"[{state}] {tnum}: 📋 Extensão (RE-MARK NOT NEEDED × {len(deduped_responses)}) "
+                         f"— mantendo respostas e status anteriores (expire={patch.get('expire', t.get('expire', '?'))})")
+                if needs_patch:
+                    ticket_patches.append(patch)
+                continue
 
         # Coleta records para bulk upsert
         now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
@@ -2681,6 +2818,9 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
     if summary.unrecognized_list:
         save_unrecognized_responses(summary.unrecognized_list)
         send_unrecognized_alert(state, summary.unrecognized_list)
+
+    # ── Alerta: tickets travados que foram renovados (esqueceu de destravar antes de renovar) ──
+    check_locked_renewed_alert(state)
 
     return summary
 
@@ -4668,16 +4808,192 @@ async def sync_and_import_il(triggered_by="manual"):
     return imported
 
 
-async def save_ticket_pdfs_il(force=False):
-    """Salva PDF de tickets IL via page.pdf() — JULIE é público, sem pyautogui.
+# ── │ SECTION: PDF_HELPERS │ Helpers pra geração de PDFs ─────────────────────
 
-    Muito mais simples que FL/IN: abre a página de response display no JULIE,
-    busca o ticket e gera o PDF direto pelo Playwright (headless).
+def _sanitize_folder(name):
+    """Remove caracteres inválidos pra nome de pasta."""
+    if not name or not name.strip():
+        return "(Sem Nome)"
+    return re.sub(r'[/\\:*?"<>|]', '-', name.strip()).rstrip('.')
+
+
+def _build_renewal_groups(all_tickets):
+    """Agrupa tickets por cadeia de renovação via old_ticket2.
+
+    Retorna dict: ticket_id → {
+        'folder': 'NUM1 - NUM2 - NUM3' ou None (avulso),
+        'members': [ticket_numbers sorted]
+    }
     """
-    all_tickets = sb_get("tickets", "&state=eq.IL&status=in.(Clear,Damage)&order=ticket")
-    if not all_tickets:
-        log.info("[IL] PDF: nenhum ticket Clear/Damage")
+    by_num = {}
+    for t in all_tickets:
+        num = (t.get('ticket') or '').strip()
+        if num:
+            by_num[num] = t
+
+    # parent map: new_ticket → oldest predecessor
+    parent = {}
+    for t in all_tickets:
+        num = (t.get('ticket') or '').strip()
+        old_raw = (t.get('old_ticket2') or '').strip()
+        if num and old_raw:
+            # "A → B" format — pega o primeiro (mais antigo)
+            parts = [p.strip() for p in old_raw.split('→') if p.strip()]
+            if parts:
+                parent[num] = parts[0]
+
+    def find_root(num, visited=None):
+        if visited is None:
+            visited = set()
+        if num in visited:
+            return num
+        visited.add(num)
+        return find_root(parent[num], visited) if num in parent else num
+
+    # Agrupar por raiz
+    groups = {}
+    for t in all_tickets:
+        num = (t.get('ticket') or '').strip()
+        if not num:
+            continue
+        root = find_root(num)
+        groups.setdefault(root, set()).add(num)
+
+    # Resultado
+    result = {}
+    for root, members in groups.items():
+        sorted_members = sorted(members)
+        folder = ' - '.join(sorted_members) if len(sorted_members) > 1 else None
+        for num in sorted_members:
+            if num in by_num:
+                result[by_num[num]['id']] = {
+                    'folder': folder,
+                    'members': sorted_members
+                }
+    return result
+
+
+def _compute_pdf_paths(t, projects_map, renewal_groups, base_dir):
+    """Computa paths do PDF principal e duplicata Damage.
+
+    Retorna dict com: pdf_path, damage_path (ou None), pdf_filename, query_tnum, used_old
+    """
+    tid = t['id']
+    tnum = (t.get('ticket') or '').strip()
+    state = (t.get('state') or '?').upper()
+    prime = _sanitize_folder(t.get('prime') or '(SEM PRIME)')
+
+    proj_id = t.get('project_id')
+    proj_name = '(Sem Projeto)'
+    if proj_id and proj_id in projects_map:
+        proj_name = projects_map[proj_id].get('name') or '(Sem Projeto)'
+    proj_name = _sanitize_folder(proj_name)
+
+    group = renewal_groups.get(tid, {})
+    renewal_folder = group.get('folder')
+
+    query_tnum, used_old = _pdf_query_number(t)
+    pdf_filename = f"{query_tnum}.pdf" if used_old else f"{tnum}.pdf"
+
+    if renewal_folder:
+        pdf_dir = os.path.join(base_dir, "pdfs", state, prime, proj_name, _sanitize_folder(renewal_folder))
+    else:
+        pdf_dir = os.path.join(base_dir, "pdfs", state, prime, proj_name)
+    pdf_path = os.path.join(pdf_dir, pdf_filename)
+
+    damage_path = None
+    if t.get('status') == 'Damage':
+        if renewal_folder:
+            dmg_dir = os.path.join(base_dir, "Damage", state, prime, proj_name, _sanitize_folder(renewal_folder))
+        else:
+            dmg_dir = os.path.join(base_dir, "Damage", state, prime, proj_name)
+        damage_path = os.path.join(dmg_dir, pdf_filename)
+
+    return {
+        'pdf_path': pdf_path,
+        'damage_path': damage_path,
+        'pdf_filename': pdf_filename,
+        'query_tnum': query_tnum,
+        'used_old': used_old
+    }
+
+
+async def _il_pdf_go_back(page):
+    """Volta pro grid de Ticket Search após ver Full Ticket de um ticket.
+
+    Clica Exit até sair de todas as modais/views e voltar pro grid.
+    Se o grid sumir, re-abre Search → County.
+    """
+    # Clica Exit repetidamente (Full Ticket Exit, depois Inquire Exit)
+    for attempt in range(4):
+        found_exit = False
+        for sel in ['input[value="Exit"]', 'button:has-text("Exit")', 'a:has-text("Exit")']:
+            loc = page.locator(sel).first
+            try:
+                if await loc.count() and await loc.is_visible():
+                    await loc.click()
+                    found_exit = True
+                    await page.wait_for_timeout(1500)
+                    break
+            except Exception:
+                continue
+        if not found_exit:
+            break
+        await wait_stable(page)
+        # Checa se já voltou pro grid
+        try:
+            body = await page.locator("body").inner_text()
+            if "tickets for county" in body.lower() or "search for county" in body.lower():
+                return True
+        except Exception:
+            pass
+
+    # Grid não apareceu — tenta re-abrir
+    try:
+        body = await page.locator("body").inner_text()
+        if "tickets for county" in body.lower():
+            return True
+    except Exception:
+        pass
+
+    log.info("[IL] PDF: grid sumiu, re-abrindo Search County...")
+    try:
+        if await _il_open_search_screen(page):
+            if await _il_search_county(page, IL_SEARCH_COUNTY):
+                return True
+    except Exception as e:
+        log.warning(f"[IL] PDF: re-search falhou: {e}")
+    return False
+
+
+async def save_ticket_pdfs_il(force=False):
+    """Salva PDF de tickets IL via JULIE Ticket Entry (headless).
+
+    Fluxo por ticket:
+      1. Login JULIE Ticket Entry → menu Search → County COOK → grid
+      2. Dblclick ticket no grid → Inquire view
+      3. Click "Full Ticket" → modal Full Ticket display
+      4. Click "Print (large)" → abre janela nova (about:blank com texto completo)
+      5. page.pdf() na janela de print → salva PDF
+      6. Fecha popup → Exit Full Ticket → Exit Inquire → volta pro grid
+
+    Headless — não precisa de pyautogui. Pode usar o PC normalmente.
+    Estrutura: pdfs/IL/{PRIME}/{PROJECT}/{ticket}.pdf (ou subpasta de renovação).
+    Damage duplicado em Damage/IL/{PRIME}/{PROJECT}/{ticket}.pdf.
+    """
+    if not IL_USER or not IL_PASS:
+        log.error("[IL] PDF: IL_USER/IL_PASS não definidos no .env")
         return
+
+    all_tickets = sb_get("tickets", "&state=eq.IL&status=in.(Clear,Damage,Completed)&order=ticket")
+    if not all_tickets:
+        log.info("[IL] PDF: nenhum ticket Clear/Damage/Completed")
+        return
+
+    # Busca projetos pra resolver nome pelo project_id
+    projects = sb_get("projects", "&select=id,name") or []
+    projects_map = {p['id']: p for p in projects}
+    renewal_groups = _build_renewal_groups(all_tickets)
 
     if not force:
         all_tickets = [t for t in all_tickets if not any(
@@ -4686,111 +5002,256 @@ async def save_ticket_pdfs_il(force=False):
         )]
 
     if not all_tickets:
-        log.info("[IL] PDF: todos os tickets Clear/Damage já têm PDF")
+        log.info("[IL] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
         return
 
+    # Mapa ticket_base → dados Supabase pra match com grid
+    need_pdf = {}
+    for t in all_tickets:
+        tnum = (t.get("ticket") or "").strip()
+        if tnum:
+            need_pdf[tnum] = t
+
     log.info("=" * 55)
-    log.info(f"  SAVE-PDF IL (JULIE): {len(all_tickets)} tickets Clear/Damage")
+    log.info(f"  SAVE-PDF IL (JULIE Ticket Entry): {len(need_pdf)} tickets")
     log.info("=" * 55)
 
-    base_dir = os.path.join(BASE_DIR, "pdfs")
     saved = 0
     errors = 0
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = await browser.new_page()
-        page.set_default_timeout(30000)
+        page.set_default_timeout(60000)
 
-        await page.goto(JULIE_URL, wait_until="domcontentloaded")
-        await page.wait_for_timeout(2000)
+        try:
+            # ── Login ────────────────────────────────────────────────
+            if not await _il_login(page):
+                return
 
-        for idx, t in enumerate(all_tickets):
-            tnum = t["ticket"]
-            tid = t["id"]
+            # ── Search County → grid ─────────────────────────────────
+            if not await _il_open_search_screen(page):
+                return
+            if not await _il_search_county(page, IL_SEARCH_COUNTY):
+                return
 
-            # Decide qual número usar — renovado em grace usa o ANTIGO
-            query_tnum, used_old = _pdf_query_number(t)
-            if used_old:
-                log.info(f"  {tnum}: 🔄 RENOVADO em grace — usando número antigo {query_tnum} pro PDF")
+            # ── Parse grid e match com nossos tickets ────────────────
+            grid_rows = await _il_parse_grid(page)
+            grid_ours = _filter_il_onedrill(grid_rows)
+            grid_latest = _dedupe_latest_revision(grid_ours)
+            log.info(f"[IL] PDF: {len(grid_latest)} tickets ONEDRILL no grid, "
+                     f"{len(need_pdf)} precisam PDF")
 
-            client = re.sub(r'[/\\:*?"<>|]', '-', (t.get("client") or "SemCliente").strip()) or "SemCliente"
-            pdf_dir = os.path.join(base_dir, "IL", client)
-            os.makedirs(pdf_dir, exist_ok=True)
-            pdf_filename = f"{query_tnum}.pdf" if used_old else f"{tnum}.pdf"
-            pdf_path = os.path.join(pdf_dir, pdf_filename)
-            full_path = os.path.abspath(pdf_path)
-
-            if not force and os.path.exists(pdf_path):
-                sz = os.path.getsize(pdf_path)
-                if sz > 5000:
-                    log.info(f"  {tnum}: PDF já existe ({round(sz/1024)}KB), pulando")
+            processed = 0
+            for row in grid_latest:
+                base = row["ticket_base"]
+                if base not in need_pdf:
                     continue
 
-            try:
-                log.info(f"  ({idx+1}/{len(all_tickets)}) {tnum} (busca: {query_tnum})...")
+                t = need_pdf[base]
+                tnum = base
+                tid = t.get("id", "")
+                processed += 1
 
-                # Busca no JULIE (navega para estado limpo)
-                await page.goto(JULIE_URL, wait_until="domcontentloaded")
-                await page.wait_for_timeout(1500)
-                inp = page.locator('input[type="text"], input[type="search"]').first
-                await inp.click()
-                await inp.fill("")
-                await page.wait_for_timeout(200)
-                await inp.fill(query_tnum)
-                btn = page.locator('button:near(input):visible').first
+                # Computa paths via helper centralizado
+                paths = _compute_pdf_paths(t, projects_map, renewal_groups, BASE_DIR)
+                query_tnum = paths['query_tnum']
+                used_old = paths['used_old']
+                pdf_filename = paths['pdf_filename']
+                full_path = os.path.abspath(paths['pdf_path'])
+
+                if used_old:
+                    log.info(f"  {tnum}: RENOVADO em grace — PDF nomeado como {query_tnum}")
+
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                if not force and os.path.exists(full_path):
+                    sz = os.path.getsize(full_path)
+                    if sz > 5000:
+                        log.info(f"  {tnum}: PDF já existe ({round(sz/1024)}KB), pulando")
+                        continue
+
                 try:
-                    await btn.click()
-                except Exception:
-                    await inp.press("Enter")
-                await page.wait_for_timeout(4000)
-                await wait_stable(page)
+                    log.info(f"  ({processed}/{len(need_pdf)}) {tnum}...")
 
-                body = await page.locator("body").inner_text()
-                if "no matching records" in body.lower():
-                    log.warning(f"  {tnum}: não encontrado no JULIE")
+                    # ── 1. Dblclick no ticket no grid → Inquire view ──
+                    if not await _il_open_detail(page, row):
+                        log.warning(f"  {tnum}: não encontrou no grid")
+                        errors += 1
+                        continue
+
+                    # ── 2. Click "Full Ticket" ────────────────────────
+                    ft_clicked = False
+                    for sel in [
+                        'input[value="Full Ticket"]',
+                        'button:has-text("Full Ticket")',
+                        'a:has-text("Full Ticket")',
+                        'text="Full Ticket"',
+                        'input[value*="Full"]',
+                    ]:
+                        loc = page.locator(sel).first
+                        try:
+                            if await loc.count():
+                                try:
+                                    await loc.click(timeout=5000)
+                                except Exception:
+                                    await loc.evaluate("el => el.click()")
+                                ft_clicked = True
+                                break
+                        except Exception:
+                            continue
+
+                    if not ft_clicked:
+                        log.warning(f"  {tnum}: botão 'Full Ticket' não encontrado")
+                        await page.screenshot(
+                            path=os.path.join(BASE_DIR, f"debug_il_pdf_no_ft_{tnum}.png"))
+                        errors += 1
+                        await _il_pdf_go_back(page)
+                        continue
+
+                    await page.wait_for_timeout(2500)
+                    await wait_stable(page)
+
+                    # ── 3. Click "Print (large)" → captura popup ──────
+                    print_page = None
+                    try:
+                        async with page.expect_popup(timeout=10000) as popup_info:
+                            pl_clicked = False
+                            for sel in [
+                                'input[value="Print (large)"]',
+                                'button:has-text("Print (large)")',
+                                'input[value*="Print"][value*="large" i]',
+                            ]:
+                                loc = page.locator(sel).first
+                                try:
+                                    if await loc.count():
+                                        await loc.click()
+                                        pl_clicked = True
+                                        break
+                                except Exception:
+                                    continue
+
+                            if not pl_clicked:
+                                # Fallback: procura qualquer elemento com texto "Print" + "large"
+                                loc = page.locator('text=/Print.*large/i').first
+                                if await loc.count():
+                                    await loc.click()
+                                    pl_clicked = True
+                                else:
+                                    raise Exception("botão 'Print (large)' não encontrado")
+
+                        print_page = await popup_info.value
+                    except Exception as e:
+                        log.warning(f"  {tnum}: popup Print (large) falhou: {e}")
+                        await page.screenshot(
+                            path=os.path.join(BASE_DIR, f"debug_il_pdf_no_print_{tnum}.png"))
+                        errors += 1
+                        await _il_pdf_go_back(page)
+                        continue
+
+                    # ── 4. Gera PDF da janela de print (about:blank) ──
+                    await print_page.wait_for_load_state("domcontentloaded")
+                    await print_page.wait_for_timeout(2000)
+
+                    await print_page.emulate_media(media="screen")
+                    await print_page.pdf(path=full_path, format="Letter",
+                                         print_background=True)
+
+                    # Fecha janela de print
+                    try:
+                        await print_page.close()
+                    except Exception:
+                        pass
+
+                    # Fallback screenshot se PDF pequeno
+                    pdf_ok = (os.path.exists(full_path)
+                              and os.path.getsize(full_path) > 3000)
+                    if not pdf_ok:
+                        log.info(f"  {tnum}: page.pdf() insuficiente — fallback screenshot")
+                        # Re-abre Print (large) pra tirar screenshot
+                        try:
+                            async with page.expect_popup(timeout=8000) as popup2:
+                                for sel in ['input[value="Print (large)"]',
+                                            'button:has-text("Print (large)")']:
+                                    loc = page.locator(sel).first
+                                    try:
+                                        if await loc.count():
+                                            await loc.click()
+                                            break
+                                    except Exception:
+                                        continue
+                            p2 = await popup2.value
+                            await p2.wait_for_load_state("domcontentloaded")
+                            await p2.wait_for_timeout(1500)
+                            temp_png = full_path + ".tmp.png"
+                            await p2.screenshot(path=temp_png, full_page=True)
+                            await p2.close()
+                            if os.path.exists(temp_png) and os.path.getsize(temp_png) > 1000:
+                                from PIL import Image as _PILImage
+                                img = _PILImage.open(temp_png)
+                                if img.mode in ("RGBA", "P"):
+                                    img = img.convert("RGB")
+                                img.save(full_path, "PDF", resolution=100.0)
+                                log.info(f"  {tnum}: screenshot→PDF OK")
+                            try:
+                                os.remove(temp_png)
+                            except Exception:
+                                pass
+                        except Exception as ss_err:
+                            log.warning(f"  {tnum}: screenshot fallback falhou: {ss_err}")
+
+                    # ── 5. Valida + registra ──────────────────────────
+                    if os.path.exists(full_path) and os.path.getsize(full_path) > 3000:
+                        file_size = os.path.getsize(full_path)
+                        log.info(f"  ✅ {tnum}: PDF salvo ({round(file_size/1024)}KB)")
+
+                        # Duplica pra pasta Damage se aplicável
+                        if paths['damage_path']:
+                            dmg_full = os.path.abspath(paths['damage_path'])
+                            os.makedirs(os.path.dirname(dmg_full), exist_ok=True)
+                            shutil.copy2(full_path, dmg_full)
+                            log.info(f"  {tnum}: cópia Damage salva")
+
+                        attachments = t.get("attachments") or []
+                        attachments = [a for a in attachments if a.get("type") != "ticket_pdf"]
+                        att = {
+                            "name": pdf_filename,
+                            "type": "ticket_pdf",
+                            "saved_at": datetime.now().isoformat(),
+                            "size_kb": round(file_size / 1024, 1)
+                        }
+                        if used_old:
+                            att["old_ticket"] = query_tnum
+                            att["new_ticket"] = tnum
+                        attachments.append(att)
+                        hist = t.get("history") or []
+                        action_txt = (f"📄 PDF salvo ({round(file_size/1024)}KB)"
+                                      + (f" — usado # antigo {query_tnum}" if used_old else ""))
+                        hist.append({
+                            "ts": int(datetime.now().timestamp() * 1000),
+                            "action": action_txt,
+                            "color": "#7c3aed"
+                        })
+                        sb_patch("tickets", tid, {"attachments": attachments, "history": hist})
+                        saved += 1
+                    else:
+                        sz = os.path.getsize(full_path) if os.path.exists(full_path) else 0
+                        log.warning(f"  ⚠ {tnum}: PDF não salvo ou pequeno ({sz}B)")
+                        errors += 1
+
+                    # ── 6. Volta pro grid ─────────────────────────────
+                    await _il_pdf_go_back(page)
+
+                except Exception as e:
+                    log.error(f"  ❌ {tnum}: {e}")
                     errors += 1
-                    continue
+                    try:
+                        await _il_pdf_go_back(page)
+                    except Exception:
+                        pass
 
-                # Gera PDF via Playwright (headless)
-                await page.pdf(path=full_path, format="Letter", print_background=True)
-
-                if os.path.exists(full_path) and os.path.getsize(full_path) > 3000:
-                    file_size = os.path.getsize(full_path)
-                    log.info(f"  ✅ {tnum}: PDF salvo ({round(file_size/1024)}KB)")
-
-                    attachments = t.get("attachments") or []
-                    attachments = [a for a in attachments if a.get("type") != "ticket_pdf"]
-                    att = {
-                        "name": pdf_filename,
-                        "type": "ticket_pdf",
-                        "saved_at": datetime.now().isoformat(),
-                        "size_kb": round(file_size / 1024, 1)
-                    }
-                    if used_old:
-                        att["old_ticket"] = query_tnum
-                        att["new_ticket"] = tnum
-                    attachments.append(att)
-                    hist = t.get("history") or []
-                    action_txt = (f"📄 PDF salvo ({round(file_size/1024)}KB)"
-                                  + (f" — usado # antigo {query_tnum}" if used_old else ""))
-                    hist.append({
-                        "ts": int(datetime.now().timestamp() * 1000),
-                        "action": action_txt,
-                        "color": "#7c3aed"
-                    })
-                    sb_patch("tickets", tid, {"attachments": attachments, "history": hist})
-                    saved += 1
-                else:
-                    sz = os.path.getsize(full_path) if os.path.exists(full_path) else 0
-                    log.warning(f"  ⚠ {tnum}: PDF não salvo ou pequeno ({sz}B)")
-                    errors += 1
-
-            except Exception as e:
-                log.error(f"  ❌ {tnum}: {e}")
-                errors += 1
-
-        await browser.close()
+        finally:
+            await browser.close()
 
     log.info("=" * 55)
     log.info(f"  SAVE-PDF IL CONCLUÍDO: {saved} salvos, {errors} erros")
@@ -9030,32 +9491,28 @@ def _pdf_query_number(t):
 
 
 async def save_ticket_pdfs(state="FL", force=False):
-    """Salva PDF de tickets Clear e Damage simulando humano: clica impressora → Save as PDF.
+    """Salva PDF de tickets Clear, Damage e Completed via headless page.pdf().
 
-    Produz PDF idêntico ao salvo manualmente — válido para evidência legal.
-    Requer: pip install pyautogui
-    NOTA: NÃO USE mouse/teclado enquanto roda. Rode após expediente.
+    Headless — pode usar o PC normalmente enquanto roda.
+    Estrutura: pdfs/{STATE}/{PRIME}/{PROJECT}/{ticket}.pdf (ou subpasta de renovação).
+    Damage duplicado em Damage/{STATE}/{PRIME}/{PROJECT}/{ticket}.pdf.
 
     Fluxo por ticket:
-      1. Dashboard → Filtrar ticket → Abrir → Aba Text
-      2. JS click no FAB verde (impressora)
-      3. Encontra janela do Chrome via Win32 API
-      4. Clica Destination → Save as PDF → Save
-      5. Cola path do arquivo → Enter
+      1. Dashboard → Filtrar ticket → Abrir
+      2. Aba Text → captura innerHTML (corpo do ticket)
+      3. Aba Service Areas → captura innerHTML (tabela de respostas das utilities)
+      4. Combina ambos em HTML → page.pdf() (PDF com texto + responses)
     """
-    try:
-        import pyautogui
-    except ImportError:
-        log.error("[PDF] pyautogui não instalado. Rode: pip install pyautogui")
-        return
 
-    pyautogui.FAILSAFE = True
-    pyautogui.PAUSE = 0.3
-
-    all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Clear,Damage)&order=ticket")
+    all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Clear,Damage,Completed)&order=ticket")
     if not all_tickets:
-        log.info(f"[{state}] PDF: nenhum ticket Clear/Damage")
+        log.info(f"[{state}] PDF: nenhum ticket Clear/Damage/Completed")
         return
+
+    # Busca projetos pra resolver nome pelo project_id
+    projects = sb_get("projects", "&select=id,name") or []
+    projects_map = {p['id']: p for p in projects}
+    renewal_groups = _build_renewal_groups(all_tickets)
 
     if not force:
         all_tickets = [t for t in all_tickets if not any(
@@ -9064,23 +9521,21 @@ async def save_ticket_pdfs(state="FL", force=False):
         )]
 
     if not all_tickets:
-        log.info(f"[{state}] PDF: todos os tickets Clear/Damage já têm PDF")
+        log.info(f"[{state}] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
         return
 
     log.info("=" * 55)
-    log.info(f"  SAVE-PDF: {len(all_tickets)} tickets Clear/Damage ({state})")
-    log.info(f"  ⚠ NÃO USE mouse/teclado enquanto roda")
+    log.info(f"  SAVE-PDF: {len(all_tickets)} tickets Clear/Damage/Completed ({state})")
+    log.info(f"  Headless — pode usar o PC normalmente")
     log.info("=" * 55)
 
-    base_dir = os.path.join(BASE_DIR, "pdfs")
     perfil = _profile_path(state)
     saved = 0
     errors = 0
 
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(
-            perfil, headless=False, args=["--no-sandbox", "--start-maximized"],
-            no_viewport=True  # Usa tela inteira, não viewport fixo
+            perfil, headless=True, args=["--no-sandbox"],
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         page.set_default_timeout(TIMEOUT_PAGE)
@@ -9095,17 +9550,11 @@ async def save_ticket_pdfs(state="FL", force=False):
             ok = await auto_login_silent(state)
 
             if not ok:
-
-                log.warning(f"[{state}] auto_login_silent falhou, tentando manual...")
-
-                ok = await auto_login(state)
-            if not ok:
-                log.error(f"[{state}] PDF: login falhou")
+                log.error(f"[{state}] PDF: login falhou (auto_login_silent)")
                 return
             await asyncio.sleep(1)
             ctx = await p.chromium.launch_persistent_context(
-                perfil, headless=False, args=["--no-sandbox", "--start-maximized"],
-                no_viewport=True
+                perfil, headless=True, args=["--no-sandbox"],
             )
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
             page.set_default_timeout(TIMEOUT_PAGE)
@@ -9118,30 +9567,24 @@ async def save_ticket_pdfs(state="FL", force=False):
 
         log.info(f"[{state}] PDF: dashboard OK — processando {len(all_tickets)} tickets")
 
-        # Flag: se Save as PDF já foi selecionado 1x, Chrome lembra nas próximas
-        pdf_dest_selected = False
-
         for idx, t in enumerate(all_tickets):
             tnum = t["ticket"]
             tid = t["id"]
 
-            # Decide qual número usar pra busca/PDF — ticket renovado em grace
-            # usa o ANTIGO (que tem as respostas Clear das utilities)
-            query_tnum, used_old = _pdf_query_number(t)
+            # Computa paths via helper centralizado
+            paths = _compute_pdf_paths(t, projects_map, renewal_groups, BASE_DIR)
+            query_tnum = paths['query_tnum']
+            used_old = paths['used_old']
+            pdf_filename = paths['pdf_filename']
+            full_path = os.path.abspath(paths['pdf_path'])
+
             if used_old:
                 log.info(f"  {tnum}: 🔄 RENOVADO em grace — usando número antigo {query_tnum} pro PDF")
 
-            client = re.sub(r'[/\\:*?"<>|]', '-', (t.get("client") or "SemCliente").strip()) or "SemCliente"
-            pdf_dir = os.path.join(base_dir, state, client)
-            os.makedirs(pdf_dir, exist_ok=True)
-            # Nome do arquivo PDF: sempre o número ANTIGO se usado (evidência das utilities)
-            # + alias com número NOVO via attachment metadata. Assim PDF fica buscável pelos 2.
-            pdf_filename = f"{query_tnum}.pdf" if used_old else f"{tnum}.pdf"
-            pdf_path = os.path.join(pdf_dir, pdf_filename)
-            full_path = os.path.abspath(pdf_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
-            if not force and os.path.exists(pdf_path):
-                sz = os.path.getsize(pdf_path)
+            if not force and os.path.exists(full_path):
+                sz = os.path.getsize(full_path)
                 if sz > 10000:
                     log.info(f"  {tnum}: PDF já existe ({round(sz/1024)}KB), pulando")
                     continue
@@ -9161,7 +9604,7 @@ async def save_ticket_pdfs(state="FL", force=False):
                 await ticket_link.first.click()
                 await wait_stable(page)
 
-                # 3. Clicar na aba "Text"
+                # 3. Capturar aba "Text" (ticket body)
                 text_tab = page.locator('[role="tab"]:has-text("Text")').first
                 if await text_tab.count():
                     await click_and_wait(page, text_tab, "tab")
@@ -9174,58 +9617,74 @@ async def save_ticket_pdfs(state="FL", force=False):
                     await page.wait_for_timeout(500)
                 await page.wait_for_timeout(1000)
 
-                # 5. JS click no FAB verde (impressora)
-                clicked = await page.evaluate("""() => {
-                    const sels = ['button[mat-fab]', 'button.mat-fab', '.mat-fab',
-                                  'button.mdc-fab'];
-                    for (const s of sels) {
-                        const el = document.querySelector(s);
-                        if (el) { el.click(); return true; }
-                    }
-                    return false;
-                }""")
+                text_html = await page.evaluate('''() => {
+                    let el = document.querySelector('mat-tab-body.mat-mdc-tab-body-active .mat-mdc-tab-body-content');
+                    if (!el) el = document.querySelector('mat-tab-body.mat-tab-body-active .mat-tab-body-content');
+                    return el ? el.innerHTML : '';
+                }''')
 
-                if not clicked:
-                    log.warning(f"  {tnum}: FAB impressora não encontrado")
-                    errors += 1
-                    continue
+                # 5. Capturar aba "Service Areas" (respostas das utilities)
+                sa_tab = page.locator('[role="tab"]:has-text("Service Areas")').first
+                sa_html = ""
+                if await sa_tab.count():
+                    await click_and_wait(page, sa_tab, "tab")
+                    await page.wait_for_timeout(1000)
+                    for _ in range(10):
+                        sa_body = await page.locator("body").inner_text()
+                        if any(k in sa_body for k in ["Marked", "No Conflict", "Clear", "Unmarked", "Underground"]):
+                            break
+                        await page.wait_for_timeout(500)
+                    sa_html = await page.evaluate('''() => {
+                        let el = document.querySelector('mat-tab-body.mat-mdc-tab-body-active .mat-mdc-tab-body-content');
+                        if (!el) el = document.querySelector('mat-tab-body.mat-tab-body-active .mat-tab-body-content');
+                        return el ? el.innerHTML : '';
+                    }''')
+                    log.info(f"  {tnum}: Text={len(text_html)}ch + ServiceAreas={len(sa_html)}ch")
 
-                log.info(f"  {tnum}: FAB clicado — aguardando print dialog...")
-                time.sleep(5)
-
-                # 6. Chrome já tem "Save as PDF" selecionado (lembra da última vez)
-                #    Só pressiona Enter pra abrir o file dialog "Save As"
-                pyautogui.press('enter')
-                log.info(f"  {tnum}: Enter → abrindo Save As...")
-                time.sleep(4)
-
-                # 7. No file dialog: colar path e salvar
-                import subprocess
-                subprocess.run(
-                    ["powershell", "-command",
-                     f'Set-Clipboard -Value "{full_path}"'],
-                    capture_output=True, timeout=5
+                # 6. Montar HTML combinado (Text + Service Areas) e gerar PDF
+                combined = (
+                    '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+                    '* { box-sizing: border-box; margin: 0; padding: 0; }'
+                    "body { font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.4; color: #333; }"
+                    '.text-section { padding: 10px; white-space: pre-wrap; }'
+                    '.text-section pre { white-space: pre-wrap; font-family: inherit; font-size: inherit; }'
+                    '.responses-section { page-break-before: always; padding: 10px; }'
+                    'table { width: 100%; border-collapse: collapse; font-size: 10px; font-family: Arial, sans-serif; }'
+                    'th { background: #f0f0f0; font-weight: bold; border-bottom: 2px solid #999; padding: 6px 8px; text-align: left; }'
+                    'td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }'
+                    'mat-icon, button, mat-paginator, .mat-mdc-paginator, .mat-column-actions { display: none; }'
+                    'a { color: #333; text-decoration: none; }'
+                    '</style></head><body>'
+                    f'<div class="text-section">{text_html}</div>'
+                    + (f'<div class="responses-section">{sa_html}</div>' if sa_html else '')
+                    + '</body></html>'
                 )
-                time.sleep(0.5)
 
-                pyautogui.hotkey('alt', 'n')   # Foca campo "File name"
-                time.sleep(0.3)
-                pyautogui.hotkey('ctrl', 'a')  # Seleciona tudo
-                time.sleep(0.2)
-                pyautogui.hotkey('ctrl', 'v')  # Cola path completo
-                time.sleep(1)
-                pyautogui.press('enter')       # Salva
-                log.info(f"  {tnum}: Path: {full_path}")
-                time.sleep(3)
-
-                # Se pergunta "substituir?", confirma
-                pyautogui.press('enter')
-                time.sleep(2)
+                pdf_page = await ctx.new_page()
+                await pdf_page.set_content(combined, wait_until="domcontentloaded")
+                await pdf_page.wait_for_timeout(500)
+                await pdf_page.emulate_media(media="screen")
+                await pdf_page.pdf(
+                    path=full_path,
+                    format="Letter",
+                    print_background=True,
+                    margin={"top": "0.4in", "bottom": "0.4in",
+                            "left": "0.4in", "right": "0.4in"},
+                )
+                await pdf_page.close()
+                log.info(f"  {tnum}: PDF combinado (Text+ServiceAreas) → {full_path}")
 
                 # 10. Verificar se salvou
                 if os.path.exists(full_path) and os.path.getsize(full_path) > 10000:
                     file_size = os.path.getsize(full_path)
                     log.info(f"  ✅ {tnum}: PDF salvo ({round(file_size/1024)}KB)")
+
+                    # Duplica pra pasta Damage se aplicável
+                    if paths['damage_path']:
+                        dmg_full = os.path.abspath(paths['damage_path'])
+                        os.makedirs(os.path.dirname(dmg_full), exist_ok=True)
+                        shutil.copy2(full_path, dmg_full)
+                        log.info(f"  {tnum}: 📋 cópia Damage salva")
 
                     attachments = t.get("attachments") or []
                     attachments = [a for a in attachments if a.get("type") != "ticket_pdf"]
@@ -9255,36 +9714,210 @@ async def save_ticket_pdfs(state="FL", force=False):
                     sz = os.path.getsize(full_path) if os.path.exists(full_path) else 0
                     log.warning(f"  ⚠ {tnum}: PDF não salvo ou pequeno ({sz}B)")
                     errors += 1
-                    # Fecha dialogs residuais
-                    pyautogui.press('escape')
-                    time.sleep(1)
-                    pyautogui.press('escape')
-                    time.sleep(1)
 
-                # 11. Volta ao dashboard
+                # Volta ao dashboard
                 await back_to_dashboard(page, state)
 
             except Exception as e:
                 log.error(f"  ❌ {tnum}: {e}")
                 errors += 1
                 try:
-                    pyautogui.press('escape')
-                    time.sleep(0.5)
-                    pyautogui.press('escape')
-                    time.sleep(0.5)
-                except Exception:
-                    pass
-                try:
                     await back_to_dashboard(page, state)
                 except Exception:
                     pass
-
-            await page.wait_for_timeout(500)
 
         await ctx.close()
 
     log.info("=" * 55)
     log.info(f"  SAVE-PDF CONCLUÍDO: {saved} salvos, {errors} erros")
+    log.info("=" * 55)
+
+
+async def save_ticket_pdfs_wi(force=False):
+    """Salva PDF de tickets WI via page.pdf() — Diggers Hotline é público, headless.
+
+    Fluxo por ticket:
+      1. Portal Diggers → Find Tickets → Digita ticket → Search
+      2. Espera iframe com resultado (URL: .../client/item/ticket/{id}?pr=true)
+      3. Navega direto pra URL do iframe (página limpa com ticket + Positive Response)
+      4. page.pdf() gera PDF com tudo (info + members + responses)
+
+    Estrutura: pdfs/WI/{PRIME}/{PROJECT}/{ticket}.pdf (ou subpasta de renovação).
+    Damage duplicado em Damage/WI/{PRIME}/{PROJECT}/{ticket}.pdf.
+    """
+    all_tickets = sb_get("tickets", "&state=eq.WI&status=in.(Clear,Damage,Completed)&order=ticket")
+    if not all_tickets:
+        log.info("[WI] PDF: nenhum ticket Clear/Damage/Completed")
+        return
+
+    # Busca projetos pra resolver nome pelo project_id
+    projects = sb_get("projects", "&select=id,name") or []
+    projects_map = {p['id']: p for p in projects}
+    renewal_groups = _build_renewal_groups(all_tickets)
+
+    if not force:
+        all_tickets = [t for t in all_tickets if not any(
+            (a.get("type") or "") == "ticket_pdf"
+            for a in (t.get("attachments") or [])
+        )]
+
+    if not all_tickets:
+        log.info("[WI] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
+        return
+
+    log.info("=" * 55)
+    log.info(f"  SAVE-PDF WI (DIGGERS): {len(all_tickets)} tickets Clear/Damage/Completed")
+    log.info("=" * 55)
+
+    saved = 0
+    errors = 0
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = await browser.new_page()
+        page.set_default_timeout(30000)
+
+        for idx, t in enumerate(all_tickets):
+            tnum = t["ticket"]
+            tid = t["id"]
+
+            # Computa paths via helper centralizado
+            paths = _compute_pdf_paths(t, projects_map, renewal_groups, BASE_DIR)
+            query_tnum = paths['query_tnum']
+            used_old = paths['used_old']
+            pdf_filename = paths['pdf_filename']
+            full_path = os.path.abspath(paths['pdf_path'])
+
+            if used_old:
+                log.info(f"  {tnum}: 🔄 RENOVADO em grace — usando número antigo {query_tnum} pro PDF")
+
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+            if not force and os.path.exists(full_path):
+                sz = os.path.getsize(full_path)
+                if sz > 5000:
+                    log.info(f"  {tnum}: PDF já existe ({round(sz/1024)}KB), pulando")
+                    continue
+
+            try:
+                log.info(f"  ({idx+1}/{len(all_tickets)}) {tnum} (busca: {query_tnum})...")
+
+                # ── 1. Navega pro portal Diggers ─────────────────────────────
+                await page.goto(DIGGERS_URL, wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)  # ExtJS demora pra inicializar
+
+                # ── 2. Espera e clica no botão Find Tickets ──────────────────
+                try:
+                    await page.wait_for_selector('#findTicketsButton-btnEl', timeout=15000, state="visible")
+                    await page.locator('#findTicketsButton-btnEl').click()
+                except Exception:
+                    try:
+                        await page.evaluate("""() => {
+                            const btn = document.querySelector('#findTicketsButton-btnEl');
+                            if (btn) btn.click();
+                        }""")
+                    except Exception as e:
+                        log.error(f"  {tnum}: erro clicando Find Tickets: {e}")
+                        errors += 1
+                        continue
+
+                await page.wait_for_timeout(2000)
+
+                # ── 3. Encontra input e digita ticket ────────────────────────
+                inp = page.locator('input[name="ticket-number"]').first
+                if not await inp.count():
+                    # Fallback: procurar em frames
+                    target_frame, inp = await _wait_for_diggers_element(
+                        page, 'input[name="ticket-number"]', timeout_s=15
+                    )
+                    if not target_frame or not inp:
+                        log.warning(f"  {tnum}: input ticket-number não encontrado")
+                        errors += 1
+                        continue
+
+                await inp.click()
+                await inp.fill(query_tnum)
+                await inp.press("Enter")
+
+                # ── 4. Espera iframe com resultado do ticket ─────────────────
+                ticket_frame_url = None
+                for _attempt in range(20):
+                    await page.wait_for_timeout(500)
+                    for frame in page.frames:
+                        if '/client/item/ticket/' in frame.url:
+                            ticket_frame_url = frame.url
+                            break
+                    if ticket_frame_url:
+                        break
+
+                if not ticket_frame_url:
+                    log.warning(f"  {tnum}: iframe do ticket não apareceu no Diggers")
+                    errors += 1
+                    continue
+
+                # Garantir que inclui Positive Response (?pr=true)
+                if 'pr=true' not in ticket_frame_url:
+                    sep = '&' if '?' in ticket_frame_url else '?'
+                    ticket_frame_url += f'{sep}pr=true'
+
+                # ── 5. Navega direto pra URL limpa (ticket + responses) ──────
+                await page.goto(ticket_frame_url, wait_until="domcontentloaded")
+                await page.wait_for_timeout(2000)
+
+                # ── 6. Gera PDF da página completa (ticket + Positive Response)
+                await page.emulate_media(media="screen")
+                await page.pdf(
+                    path=full_path, format="Letter", print_background=True,
+                    margin={"top": "0.4in", "bottom": "0.4in",
+                            "left": "0.4in", "right": "0.4in"},
+                )
+
+                if os.path.exists(full_path) and os.path.getsize(full_path) > 3000:
+                    file_size = os.path.getsize(full_path)
+                    log.info(f"  ✅ {tnum}: PDF salvo ({round(file_size/1024)}KB)")
+
+                    # Duplica pra pasta Damage se aplicável
+                    if paths['damage_path']:
+                        dmg_full = os.path.abspath(paths['damage_path'])
+                        os.makedirs(os.path.dirname(dmg_full), exist_ok=True)
+                        shutil.copy2(full_path, dmg_full)
+                        log.info(f"  {tnum}: 📋 cópia Damage salva")
+
+                    attachments = t.get("attachments") or []
+                    attachments = [a for a in attachments if a.get("type") != "ticket_pdf"]
+                    att = {
+                        "name": pdf_filename,
+                        "type": "ticket_pdf",
+                        "saved_at": datetime.now().isoformat(),
+                        "size_kb": round(file_size / 1024, 1)
+                    }
+                    if used_old:
+                        att["old_ticket"] = query_tnum
+                        att["new_ticket"] = tnum
+                    attachments.append(att)
+                    hist = t.get("history") or []
+                    action_txt = (f"📄 PDF salvo ({round(file_size/1024)}KB)"
+                                  + (f" — usado # antigo {query_tnum}" if used_old else ""))
+                    hist.append({
+                        "ts": int(datetime.now().timestamp() * 1000),
+                        "action": action_txt,
+                        "color": "#7c3aed"
+                    })
+                    sb_patch("tickets", tid, {"attachments": attachments, "history": hist})
+                    saved += 1
+                else:
+                    sz = os.path.getsize(full_path) if os.path.exists(full_path) else 0
+                    log.warning(f"  ⚠ {tnum}: PDF não salvo ou pequeno ({sz}B)")
+                    errors += 1
+
+            except Exception as e:
+                log.error(f"  ❌ {tnum}: {e}")
+                errors += 1
+
+        await browser.close()
+
+    log.info("=" * 55)
+    log.info(f"  SAVE-PDF WI CONCLUÍDO: {saved} salvos, {errors} erros")
     log.info("=" * 55)
 
 
@@ -9463,6 +10096,15 @@ def run_self_tests():
     # classify: code 60 W&P → Clear, recognized
     _assert("Clear: W&P code 60", "Clear", classify("60", "WATCH AND PROTECT")[0])
     _assert("Clear: W&P recognized", False, classify("60", "WATCH AND PROTECT")[1])
+    # classify: RE-MARK NOT NEEDED (Code 21) → Clear (ack extensão sem remarcar)
+    _assert("Clear: RE-MARK NOT NEEDED", "Clear", classify("RE-MARK NOT NEEDED", "")[0])
+    _assert("Clear: RE-MARK NOT NEEDED recognized", False, classify("RE-MARK NOT NEEDED", "")[1])
+    _assert("Clear: REMARK NOT NEEDED variant", "Clear", classify("REMARK NOT NEEDED", "")[0])
+    # classify: RE-MARK NEEDED (Code 22) → Pending (reset, precisa remarcar)
+    _assert("Pending: RE-MARK NEEDED", "Pending", classify("RE-MARK NEEDED", "")[0])
+    _assert("Pending: RE-MARK NEEDED recognized", False, classify("RE-MARK NEEDED", "")[1])
+    _assert("Pending: REMARK NEEDED variant", "Pending", classify("REMARK NEEDED", "")[0])
+    _assert("Pending: RE - MARK NEEDED", "Pending", classify("RE - MARK NEEDED", "")[0])
 
     # ── is_ticket_canceled() tests ──
     print("\nis_ticket_canceled():")
@@ -10733,7 +11375,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-cache",   action="store_true", help="Forçar re-scrape de todos (incluindo Clear em cache)")
     parser.add_argument("--selftest",   action="store_true", help="Rodar testes internos (classify, parser)")
     parser.add_argument("--backup",     action="store_true", help="Backup completo do banco de dados (JSON)")
-    parser.add_argument("--save-pdf",   action="store_true", help="Salvar PDF de tickets Clear/Damage via impressora")
+    parser.add_argument("--save-pdf",   action="store_true", help="Salvar PDF de tickets Clear/Damage/Completed (FL/IN via impressora, IL/WI via headless)")
     parser.add_argument("--sync-il",    action="store_true", help="Sincronizar respostas JULIE (Illinois)")
     parser.add_argument("--sync-wi",    action="store_true", help="Sincronizar respostas Diggers Hotline (Wisconsin)")
     parser.add_argument("--imp-wi",     action="store_true", help="Importar tickets novos WI (Diggers Hotline) + sync respostas")
@@ -10752,11 +11394,15 @@ if __name__ == "__main__":
         elif getattr(args, 'save_pdf', False):
             if args.state == "IL":
                 asyncio.run(save_ticket_pdfs_il(force=args.force))
+            elif args.state == "WI":
+                asyncio.run(save_ticket_pdfs_wi(force=args.force))
             elif args.state:
                 asyncio.run(save_ticket_pdfs(args.state, force=args.force))
             else:
                 asyncio.run(save_ticket_pdfs("FL", force=args.force))
                 asyncio.run(save_ticket_pdfs("IN", force=args.force))
+                asyncio.run(save_ticket_pdfs_il(force=args.force))
+                asyncio.run(save_ticket_pdfs_wi(force=args.force))
         elif getattr(args, 'sync_il', False):
             asyncio.run(sync_il())
         elif getattr(args, 'imp_il', False):

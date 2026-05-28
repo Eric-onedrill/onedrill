@@ -320,8 +320,15 @@
           <option>Cancel</option>
           <option value="Sem Trajeto">Sem Trajeto</option>
         </select>
+        <select class="fi fi--max-100" id="tbl-state" data-filter="tbl-state">
+          <option value="">Todos estados</option>
+          <option>FL</option>
+          <option>IN</option>
+          <option>IL</option>
+          <option>WI</option>
+        </select>
         <select class="fi fi--max-180" id="tbl-proj" data-filter="tbl-proj"><option value="">Todos projetos</option></select>
-        <select class="fi fi--max-150" id="tbl-cli" data-filter="tbl-client"><option value="">Todos clientes</option></select>
+        <select class="fi fi--max-150" id="tbl-prime" data-filter="tbl-prime"><option value="">Todos primes</option></select>
         <select class="fi fi--max-200" id="tbl-util" data-filter="tbl-utility"><option value="">Todas utilities</option></select>
         <select class="fi fi--max-150" id="tbl-exp" data-filter="tbl-expire">
           <option value="">Vencimento</option>
@@ -708,7 +715,7 @@
   <span id="tmsg"></span>
 </div>
 
-<script src="app.js?v=dc958a9b"></script>
+<script src="app.js?v=e2f05281"></script>
 
 <!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
 <script>
@@ -842,8 +849,9 @@
     'map-location':   () => redrawAll(),
     'map-utility':    () => redrawAll(),
     'tbl-status':     () => renderTable(),
+    'tbl-state':      () => renderTable(),
     'tbl-proj':       () => renderTable(),
-    'tbl-client':     () => renderTable(),
+    'tbl-prime':      () => renderTable(),
     'tbl-utility':    () => renderTable(),
     'tbl-expire':     () => renderTable(),
     'contacts-state': () => { repopulateCountyDropdown(); renderContacts(); },

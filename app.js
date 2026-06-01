@@ -978,7 +978,7 @@ function enterApp(){
   if(!isAdmin){const fss=document.getElementById('field-status-section');if(fss)fss.style.display='none';}
   syncAll();renderDash();
   loadLastSync();
-  loadUtilCache().then(()=>{renderDash();renderTable();buildNotifications();});
+  loadUtilCache().then(()=>{syncAll();buildNotifications();});
   loadContacts().then(()=>renderContacts());
   loadUtilCoverage();// Fase 3 filtro county — independente, não bloqueia
 
@@ -1147,7 +1147,7 @@ function buildPopup(t,c){
   return`<div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.6;min-width:180px;padding:2px">`
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — '+(isExp==='grace'?'CARÊNCIA VENCIDA':'VENCIDO')+'</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data não confirmada</div>':'')
-    +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
+    +(inGrace?(()=>{if(newTicketFullyCleared(t))return'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Liberado — novo clareou</div>';const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
     +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
     +(proj?`<div><span style="color:#9a9888">Projeto: </span>${esc(proj.name)}</div>`:'')
     +`<div><span style="color:#9a9888">Cliente: </span>${esc(t.client)}</div>`
@@ -1227,7 +1227,7 @@ function showPanel(t){
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — '+(isExp==='grace'?'CARÊNCIA VENCIDA':'VENCIDO')+'</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:6px 10px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data de vencimento ainda não confirmada</div>':'')
-    +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
+    +(inGrace?(()=>{if(newTicketFullyCleared(t))return'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Liberado — novo clareou</div>';const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Cliente</span><span class="mp-val">${esc(t.client)}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
@@ -1330,7 +1330,7 @@ function renderList(){
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
     +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${fmtProgress(t)}</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
     +miniProgressBar(t)
-    +(inGrace?(()=>{const os=t.statusOld||t.status_old||'Open';return os==='Clear'?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${graceCutoverDate(t)}</div>`:`<div style="font-size:10px;color:#b45309;font-weight:600;margin-top:2px">⚠ Carência (${esc(os)}) até ${graceCutoverDate(t)}</div>`;})():'')
+    +(inGrace?(()=>{if(newTicketFullyCleared(t))return`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Liberado — novo clareou</div>`;const os=t.statusOld||t.status_old||'Open';return os==='Clear'?`<div style="font-size:10px;color:#16a34a;font-weight:600;margin-top:2px">✅ Carência até ${graceCutoverDate(t)}</div>`:`<div style="font-size:10px;color:#b45309;font-weight:600;margin-top:2px">⚠ Carência (${esc(os)}) até ${graceCutoverDate(t)}</div>`;})():'')
     +(t.pending&&!inGrace?`<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:2px">⏳ ${esc(t.pending)}</div>`:'')
     +`</div>`;
   }).join(''):'<div style="text-align:center;padding:28px 16px;color:var(--muted);font-size:13px">Nenhum ticket</div>';
@@ -2029,7 +2029,14 @@ function ticketExpiredEffective(t){
     }
     if(oldWasClear){
       const cut=graceCutoverDate(t);
-      if(cut&&cut!=='—'&&_eod(cut)<now)return'grace';
+      if(cut&&cut!=='—'&&_eod(cut)<now){
+        // Carência do antigo expirou. Mas se o ticket NOVO tem expire próprio
+        // e ainda não venceu, é um Open normal com pendências — não bloqueia.
+        // Só mostra "CARÊNCIA VENCIDA" se o novo NÃO tem data (aguardando sync)
+        // ou se a data do novo também já venceu.
+        if(t.expire&&t.expire!=='—'&&_eod(t.expire)>=now)return'';
+        return'grace';
+      }
     }
   }
   return'';

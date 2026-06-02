@@ -598,13 +598,38 @@ async function deleteProjectFromDb(id){
 }
 
 /* ═══════════ 8. UTILITY CACHE (via Supabase client) ═══════════ */
-function getTicketPendingUtils(ticketNum){
+function getTicketPendingUtils(ticketNum, ticketObj){
+  if(ticketObj){
+    const merged=getMergedUtils(ticketObj);
+    if(merged)return merged.filter(u=>u.status==='Pending');
+  }
   const key=String(ticketNum||'').trim();
   return(utilCache[key]||[]).filter(u=>u.status==='Pending');
 }
 function getTicketUtils(ticketNum){
   const key=String(ticketNum||'').trim();
   return utilCache[key]||[];
+}
+/**
+ * WI Relo-No-Show: merge utilities do Relo (novo) com herdadas do Standard (antigo).
+ * Retorna array combinada ou null se não aplicável.
+ * Ativa SÓ quando: WI + renovado + novo tem MENOS utils que antigo.
+ */
+function getMergedUtils(t){
+  if(!utilCacheLoaded)return null;
+  if((t.state||'').toUpperCase()!=='WI')return null;
+  if(!isRenewed(t))return null;
+  const newKey=String(t.ticket||'').trim();
+  const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+  if(!oldNum)return null;
+  const newUtils=utilCache[newKey]||[];
+  const oldUtils=utilCache[oldNum]||[];
+  if(!oldUtils.length||newUtils.length>=oldUtils.length)return null;
+  // Merge: herda do antigo, sobrescreve com o novo
+  const merged={};
+  for(const u of oldUtils)merged[u.utility_name]={...u,_inherited:true};
+  for(const u of newUtils)merged[u.utility_name]=u;
+  return Object.values(merged);
 }
 
 async function loadUtilCache(){
@@ -1931,10 +1956,14 @@ function expireIsStale(t){
 function newTicketFullyCleared(t){
   if(!utilCacheLoaded)return false;
   if(!isRenewed(t))return false;
+  const releasedStatuses=new Set(['Clear','Private','Marked','Unmarked']);
+  // WI Relo-No-Show: avalia o conjunto COMBINADO (Relo + Standard herdadas)
+  const merged=getMergedUtils(t);
+  if(merged)return merged.length>0&&merged.every(u=>releasedStatuses.has(u.status));
+  // FL/IN/IL: lógica original
   const newKey=String(t.ticket||'').trim();
   const newUtils=utilCache[newKey]||[];
   if(newUtils.length===0)return false;
-  const releasedStatuses=new Set(['Clear','Private','Marked','Unmarked']);
   return newUtils.every(u=>releasedStatuses.has(u.status));
 }
 

@@ -2006,11 +2006,17 @@ function effectiveStatus(t){
     // Mesmo se o snapshot não dizia Clear, pode ser que o antigo tenha
     // virado Clear depois (ex: utility respondeu Clear no antigo mesmo
     // após a renovação). Cache em runtime checa.
+    // IMPORTANTE: "nenhuma Pending" NÃO basta — Cancel (Closed by DHL) e
+    // Not Participating NÃO são Clear real. Precisa ter pelo menos 1 utility
+    // com status liberador (Clear/Marked/Private/Unmarked).
     if(utilCacheLoaded){
       const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
       if(oldNum){
         const oldUtils=utilCache[oldNum]||[];
-        if(oldUtils.length>0&&!oldUtils.some(u=>u.status==='Pending')){
+        const released=new Set(['Clear','Private','Marked','Unmarked']);
+        const hasRealClear=oldUtils.some(u=>released.has(u.status));
+        const noPending=!oldUtils.some(u=>u.status==='Pending');
+        if(oldUtils.length>0&&hasRealClear&&noPending){
           return 'Clear';
         }
       }

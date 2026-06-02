@@ -635,9 +635,13 @@
 <div class="overlay" id="ov-detail">
   <div class="modal wide">
     <div class="modal-head">
-      <div>
-        <div class="mtitle" id="det-title"></div>
-        <div class="det-subtitle" id="det-sub"></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-sm" id="det-prev" onclick="navTicketDetail(-1)" title="Ticket anterior" style="padding:4px 10px;font-size:18px;line-height:1;background:var(--bg2);border-color:var(--border);cursor:pointer">&#9664;</button>
+        <div>
+          <div class="mtitle" id="det-title"></div>
+          <div class="det-subtitle" id="det-sub"></div>
+        </div>
+        <button class="btn btn-sm" id="det-next" onclick="navTicketDetail(1)" title="Ticket seguinte" style="padding:4px 10px;font-size:18px;line-height:1;background:var(--bg2);border-color:var(--border);cursor:pointer">&#9654;</button>
       </div>
       <div class="det-head-actions">
         <button class="btn btn-sm btn-draw hidden" id="det-draw-btn" data-action="go-draw-field">✏️ Desenhar</button>

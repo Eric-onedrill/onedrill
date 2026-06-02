@@ -1067,7 +1067,7 @@ function gotoContactsForCounty(county,state){
   toast('📞 Filtro: '+county+' County, '+state,'info');
 }
 function openModal(id){document.getElementById(id).classList.add('open');}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');if(id==='ov-detail')_detailNavList=[];}
 function toast(msg,type='success'){
   const bg={success:'#16803d',danger:'#dc2626',warn:'#b45309',info:'#1a6cf0'};
   const dot={success:'#86efac',danger:'#fca5a5',warn:'#fde68a',info:'#93c5fd'};
@@ -1457,9 +1457,51 @@ function goDrawField(tid){
 }
 
 /* ═══════════ 16. TICKET DETAIL ═══════════ */
+let _detailNavList=[];  // lista filtrada atual pra navegação ◀ ▶
+
+function _getFilteredListForNav(){
+  const ap=document.querySelector('.page.active')?.id;
+  if(ap==='pg-map')return mapFiltered();
+  // Aba Tickets: usa a mesma lista renderizada na tabela
+  if(ap==='pg-tickets'){
+    const sf=document.getElementById('tbl-status')?.value||'';
+    const pf=document.getElementById('tbl-proj')?.value||'';
+    const sr=(document.getElementById('tbl-search')?.value||'').toLowerCase();
+    const stf=document.getElementById('tbl-state')?.value||'';
+    const prf=document.getElementById('tbl-prime')?.value||'';
+    const utf=document.getElementById('tbl-util')?.value||'';
+    return filterTickets({status:sf,projectId:pf,search:sr,state:stf,prime:prf,utility:utf});
+  }
+  return tickets.filter(t=>!['Closed','Cancel'].includes(t.status));
+}
+
+function navTicketDetail(dir){
+  if(!_detailNavList.length)_detailNavList=_getFilteredListForNav();
+  const idx=_detailNavList.findIndex(t=>t.id===currentDetailId);
+  if(idx<0)return;
+  const next=idx+dir;
+  if(next<0||next>=_detailNavList.length)return;
+  openTicketDetail(_detailNavList[next].id);
+}
+// Teclas ← → pra navegar entre tickets quando modal aberto
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('ov-detail')?.classList.contains('open'))return;
+  if(document.activeElement?.tagName==='INPUT'||document.activeElement?.tagName==='TEXTAREA'||document.activeElement?.tagName==='SELECT')return;
+  if(e.key==='ArrowLeft'){e.preventDefault();navTicketDetail(-1);}
+  if(e.key==='ArrowRight'){e.preventDefault();navTicketDetail(1);}
+});
+
 function openTicketDetail(id){
   const t=tickets.find(x=>x.id===id);if(!t)return;
   currentDetailId=id;
+  // Atualiza lista de navegação se vazia
+  if(!_detailNavList.length)_detailNavList=_getFilteredListForNav();
+  // Atualiza estado dos botões ◀ ▶
+  const idx=_detailNavList.findIndex(x=>x.id===id);
+  const prevBtn=document.getElementById('det-prev');
+  const nextBtn=document.getElementById('det-next');
+  if(prevBtn)prevBtn.disabled=(idx<=0);
+  if(nextBtn)nextBtn.disabled=(idx<0||idx>=_detailNavList.length-1);
 
   const isStale=expireIsStale(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);

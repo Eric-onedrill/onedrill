@@ -2789,7 +2789,8 @@ function renderProjects(){
     return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="exportProjectReport('${p.id}')" style="background:#3b82f6;color:white;border-color:#3b82f6">📊 Relatório</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
-  const exportBar='<div style="grid-column:1/-1;margin-bottom:12px;padding:12px 14px;background:linear-gradient(90deg,#1e40af 0%,#3b82f6 100%);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:white"><div><div style="font-weight:700;font-size:14px">📋 Clear pra trabalhar</div><div style="font-size:11px;opacity:0.9">Todos os tickets Clear (próprio ou via carência ativa) — formato pronto pra equipe</div></div><button class="btn" onclick="exportClearReport()" style="background:white;color:#1e40af;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Excel</button></div>';
+  const filterTag=sf?` · filtrado por ${esc(sf)}`:'';
+  const exportBar=`<div style="grid-column:1/-1;margin-bottom:12px;padding:12px 14px;background:linear-gradient(90deg,#1e40af 0%,#3b82f6 100%);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:white"><div><div style="font-weight:700;font-size:14px">📋 Clear pra trabalhar${filterTag}</div><div style="font-size:11px;opacity:0.9">Tickets Clear (próprio ou via carência ativa) — respeita o filtro de estado acima</div></div><button class="btn" onclick="exportClearReport()" style="background:white;color:#1e40af;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Excel</button></div>`;
   g.innerHTML=exportBar+(active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>');
 }
 
@@ -3618,9 +3619,13 @@ function exportProjectReport(pid){
 // Exclui vencidos próprios e supersedidos. Footage = total − completed.
 function exportClearReport(){
   if(typeof XLSX==='undefined'){toast('XLSX não carregado','danger');return;}
+  // Respeita o filtro de estado da tela de Projetos (se selecionado)
+  const stateFilterEl=document.getElementById('proj-state-filter');
+  const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
   const now=new Date();
   const rows=[];
   for(const t of tickets){
+    if(stateFilter&&(t.state||'').toUpperCase()!==stateFilter)continue;
     if(isSuperseded(t))continue;
     // Próprio expire vencido → exclui (a menos que esteja em carência ativa)
     const renewed=isRenewed(t);
@@ -3717,8 +3722,10 @@ function exportClearReport(){
   XLSX.utils.book_append_sheet(wb,ws,'Tickets Clear');
   const ts=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+
            '_'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0');
-  XLSX.writeFile(wb,`OneDrill_Clear_pra_Trabalhar_${ts}.xlsx`);
-  toast(`${rows.length} tickets · ${totalFt.toLocaleString()} ft exportados`,'success');
+  const suffix=stateFilter?'_'+stateFilter:'';
+  XLSX.writeFile(wb,`OneDrill_Clear_pra_Trabalhar${suffix}_${ts}.xlsx`);
+  const filtTag=stateFilter?` (${stateFilter})`:'';
+  toast(`${rows.length} tickets · ${totalFt.toLocaleString()} ft exportados${filtTag}`,'success');
 }
 
 function showNoProjModal(){

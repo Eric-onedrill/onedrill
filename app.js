@@ -3656,7 +3656,7 @@ function exportClearReport(){
     const db=_eod(b.expire)||new Date(9999,11,31);
     return da-db;
   });
-  // Gera XLSX
+  // Gera XLSX com estilos (xlsx-js-style)
   const wb=XLSX.utils.book_new();
   const headers=['Estado','Projeto','Ticket','Footage','Clear até','Observação','Cliente','Empresa'];
   const data=[headers];
@@ -3665,11 +3665,55 @@ function exportClearReport(){
     data.push([r.state,r.project,r.ticket,r.footage,r.expire,r.obs,r.client,r.company]);
     totalFt+=r.footage;
   }
+  const totalRowIdx=data.length;
   data.push(['','','TOTAL',totalFt,'','','','']);
   const ws=XLSX.utils.aoa_to_sheet(data);
-  ws['!cols']=[{wch:8},{wch:38},{wch:16},{wch:10},{wch:12},{wch:38},{wch:28},{wch:12}];
-  if(data.length>1)ws['!autofilter']={ref:`A1:H${data.length-1}`};
+  ws['!cols']=[{wch:8},{wch:38},{wch:18},{wch:10},{wch:12},{wch:40},{wch:30},{wch:12}];
+  if(rows.length)ws['!autofilter']={ref:`A1:H${totalRowIdx}`};
   ws['!freeze']={xSplit:0,ySplit:1};
+
+  // Estilos (xlsx-js-style). Mesma paleta da versão Python.
+  const STATE_FILL={FL:'DDEEFF',IL:'FFF2CC',IN:'FFE0B2',WI:'DCEDC8'};
+  const border={style:'thin',color:{rgb:'CCCCCC'}};
+  const borderAll={top:border,bottom:border,left:border,right:border};
+  // Header (linha 1)
+  for(let c=0;c<headers.length;c++){
+    const ref=XLSX.utils.encode_cell({r:0,c});
+    if(!ws[ref])continue;
+    ws[ref].s={
+      font:{bold:true,color:{rgb:'FFFFFF'},sz:11},
+      fill:{patternType:'solid',fgColor:{rgb:'1F4E79'}},
+      alignment:{horizontal:'center',vertical:'center'},
+      border:borderAll
+    };
+  }
+  ws['!rows']=[{hpt:22}];
+  // Linhas de dados (1..totalRowIdx-1)
+  for(let r=1;r<totalRowIdx;r++){
+    const stateVal=(data[r][0]||'').toUpperCase();
+    const fillRgb=STATE_FILL[stateVal];
+    for(let c=0;c<headers.length;c++){
+      const ref=XLSX.utils.encode_cell({r,c});
+      if(!ws[ref])continue;
+      const s={border:borderAll};
+      if(fillRgb)s.fill={patternType:'solid',fgColor:{rgb:fillRgb}};
+      if(c===3){s.numFmt='#,##0';s.alignment={horizontal:'right'};}
+      else if(c===2||c===4)s.alignment={horizontal:'center'};
+      ws[ref].s=s;
+    }
+  }
+  // Linha TOTAL (negrito + fundo cinza)
+  for(let c=0;c<headers.length;c++){
+    const ref=XLSX.utils.encode_cell({r:totalRowIdx,c});
+    if(!ws[ref])continue;
+    ws[ref].s={
+      font:{bold:true,sz:11},
+      fill:{patternType:'solid',fgColor:{rgb:'E0E0E0'}},
+      border:{top:{style:'medium',color:{rgb:'606060'}},bottom:borderAll.bottom,left:borderAll.left,right:borderAll.right},
+      alignment:c===3?{horizontal:'right'}:{horizontal:'center'}
+    };
+    if(c===3)ws[ref].s.numFmt='#,##0';
+  }
   XLSX.utils.book_append_sheet(wb,ws,'Tickets Clear');
   const ts=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+
            '_'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0');

@@ -2789,7 +2789,8 @@ function renderProjects(){
     return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="exportProjectReport('${p.id}')" style="background:#3b82f6;color:white;border-color:#3b82f6">📊 Relatório</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
-  g.innerHTML=active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>';
+  const exportBar='<div style="grid-column:1/-1;margin-bottom:12px;padding:12px 14px;background:linear-gradient(90deg,#1e40af 0%,#3b82f6 100%);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:white"><div><div style="font-weight:700;font-size:14px">📋 Clear pra trabalhar</div><div style="font-size:11px;opacity:0.9">Todos os tickets Clear (próprio ou via carência ativa) — formato pronto pra equipe</div></div><button class="btn" onclick="exportClearReport()" style="background:white;color:#1e40af;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Excel</button></div>';
+  g.innerHTML=exportBar+(active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>');
 }
 
 function openProjectMap(pid){nav('map');setTimeout(()=>{document.getElementById('proj-filter').value=pid;onProjFilter();},200);}
@@ -3610,6 +3611,70 @@ function exportProjectReport(pid){
   }
   XLSX.writeFile(wb,'OneDrill_Relatorio_'+p.name.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast('Relatório exportado: '+p.name,'success');
+}
+
+// Exporta SÓ tickets Clear pra trabalhar (todos estados/projetos).
+// Replica a regra do relatorio_clear.py: status=Clear OU (carência ativa + status_old=Clear).
+// Exclui vencidos próprios e supersedidos. Footage = total − completed.
+function exportClearReport(){
+  if(typeof XLSX==='undefined'){toast('XLSX não carregado','danger');return;}
+  const now=new Date();
+  const rows=[];
+  for(const t of tickets){
+    if(isSuperseded(t))continue;
+    // Próprio expire vencido → exclui (a menos que esteja em carência ativa)
+    const renewed=isRenewed(t);
+    const grace=renewed&&isInRenewalGrace(t);
+    if(!grace){
+      const exp=t.expire;
+      if(exp&&exp!=='—'&&_eod(exp)<now)continue;
+    }
+    const statusOld=(t.statusOld||t.status_old||'').trim();
+    const locked=!!t.status_locked;
+    let expShow=t.expire,obs='',ok=false;
+    if(grace&&statusOld==='Clear'){
+      ok=true;
+      const oldNum=((t.oldTicket2||t.old_ticket2)||'').split('→')[0].trim();
+      expShow=t.expireOld||t.expire_old||t.expire;
+      obs=`carência do antigo ${oldNum}`+(locked?' (Clear manual)':'');
+    }else if(t.status==='Clear'){
+      ok=true;
+      obs=locked?'Clear manual 🔒':'';
+    }
+    if(!ok)continue;
+    const proj=projects.find(p=>p.id===t.projectId);
+    const projName=proj?proj.name:'(Sem projeto)';
+    const remFt=Math.max(0,(t.footage||0)-(t.completedFeet||0));
+    rows.push({state:t.state||'?',project:projName,ticket:t.ticket,footage:remFt,
+               expire:expShow||'—',obs,client:t.client||'',company:t.company||''});
+  }
+  // Ordena: estado → projeto → expire crescente
+  rows.sort((a,b)=>{
+    if(a.state!==b.state)return a.state.localeCompare(b.state);
+    if(a.project!==b.project)return a.project.localeCompare(b.project);
+    const da=_eod(a.expire)||new Date(9999,11,31);
+    const db=_eod(b.expire)||new Date(9999,11,31);
+    return da-db;
+  });
+  // Gera XLSX
+  const wb=XLSX.utils.book_new();
+  const headers=['Estado','Projeto','Ticket','Footage','Clear até','Observação','Cliente','Empresa'];
+  const data=[headers];
+  let totalFt=0;
+  for(const r of rows){
+    data.push([r.state,r.project,r.ticket,r.footage,r.expire,r.obs,r.client,r.company]);
+    totalFt+=r.footage;
+  }
+  data.push(['','','TOTAL',totalFt,'','','','']);
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  ws['!cols']=[{wch:8},{wch:38},{wch:16},{wch:10},{wch:12},{wch:38},{wch:28},{wch:12}];
+  if(data.length>1)ws['!autofilter']={ref:`A1:H${data.length-1}`};
+  ws['!freeze']={xSplit:0,ySplit:1};
+  XLSX.utils.book_append_sheet(wb,ws,'Tickets Clear');
+  const ts=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+
+           '_'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0');
+  XLSX.writeFile(wb,`OneDrill_Clear_pra_Trabalhar_${ts}.xlsx`);
+  toast(`${rows.length} tickets · ${totalFt.toLocaleString()} ft exportados`,'success');
 }
 
 function showNoProjModal(){

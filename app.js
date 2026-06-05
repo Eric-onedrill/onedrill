@@ -123,9 +123,14 @@ function rebuildSupersededSet(){
   for(const t of tickets){
     const chain=String(t.oldTicket2||'').trim();
     if(!chain)continue;
-    // Suporta cadeias: "OLD1 → OLD2 → OLD3" → adiciona cada num individualmente
+    // Suporta cadeias: "OLD1 → OLD2 → OLD3" → adiciona cada num individualmente.
+    // Anomalia conhecida (2026-06-05): renewTicket pode gravar o próprio número
+    // no chain (ex: X261480125 com oldTicket2="A261141153 → X261480125"). Nesse caso,
+    // sem o filtro abaixo, o próprio ticket seria marcado como supersedido — e o mapa
+    // pulava de desenhar o trajeto dele. Filtra: nunca incluir o ticket nele mesmo.
+    const self=String(t.ticket||'').trim();
     const parts=chain.split(/\s*→\s*/);
-    for(const p of parts){const num=p.trim();if(num)supersededSet.add(num);}
+    for(const p of parts){const num=p.trim();if(num&&num!==self)supersededSet.add(num);}
   }
 }
 function isSuperseded(t){

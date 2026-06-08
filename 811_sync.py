@@ -83,13 +83,14 @@ MANUTENÇÃO E TESTES
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse, shutil
+import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse, shutil, base64
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import requests
 from playwright.async_api import async_playwright
 import json as _json
+import html as _html
 
 # ── │ SECTION: DEBUG_MODE │ DEBUG MODE ────────────────────────────────────────
 DEBUG_MODE = os.environ.get("ONEDRILL_DEBUG", "").lower() in ("1", "true", "yes")
@@ -578,14 +579,14 @@ def classify(status_text, response_text=""):
 
     # ── INDIANA 811 — CLOSED CODES ──
     # 1:  Marked → Clear
-    # 1A: Marked with Exceptions, Do Not Excavate, High-Profile → PENDING (do not excavate!)
+    # 1A: Marked with Exceptions, Do Not Excavate, High-Profile → Clear (utility marcou)
     # 1B: Marked with Exceptions, High-Profile → Clear (MAY contact)
     # 1C: Work by Facility Owner → Clear
     # 2:  Clear — no underground facilities → Clear
     # 3A: Could Not Gain Access → PENDING (do not excavate until resolved)
     # 3B: Incorrect Address → PENDING (do not excavate until resolved)
     # 3D: Marking Instructions Unclear → PENDING (do not excavate until resolved)
-    # 3E: Excavation Already Performed or Canceled → Clear
+    # 3E: Excavation Already Performed or Canceled → PENDING (utility NÃO marcou)
     # 4:  Private Line → Clear (private locator needed)
     # 5A: Design Notice Documents Provided → Clear
     # 5B: Design Notice Marked → Clear
@@ -620,10 +621,15 @@ def classify(status_text, response_text=""):
     if "7:" in full and "damage" in full:
         return "Damage", False
 
+    # ── 1A: Marked with Exceptions — utility MARCOU, é Clear ──
+    # "Do Not Excavate, High-Profile" é restrição operacional (Watch & Protect),
+    # mas a utility respondeu e marcou → status é Clear.
+    if "1a" in full and ("marked with exceptions" in full or "high-profile" in full):
+        return "Clear", False
+
     # ── ALWAYS PENDING — "do not excavate/demolish" overrides everything ──
-    if "1a" in full and ("do not excavate" in full or "high-profile" in full):
-        return "Pending", False
-    if "do not excavate" in full and "3u" not in full:
+    # (1A já tratado acima — não cai aqui)
+    if "do not excavate" in full and "3u" not in full and "1a" not in full:
         return "Pending", False
     if "do not demolish" in full:
         return "Pending", False
@@ -644,7 +650,7 @@ def classify(status_text, response_text=""):
     if "3h" in full or "privately owned" in full or "private facility owner" in full:
         return "Clear", False
     if "3e" in full and ("already performed" in full or "canceled" in full):
-        return "Clear", False
+        return "Pending", False  # Utility NÃO marcou — escavação aconteceu antes do locator
     # IL/JULIE: Code 60 — Watch and Protect (W&P): utility has critical facility,
     # rep must be present during excavation. Clear, but needs W&P coordination.
     if "watch and protect" in full:
@@ -781,6 +787,65 @@ def is_in_renewal_grace(ticket, ref_date=None):
     if isinstance(today, datetime):
         today = today.date()
     return exp_dt.date() >= today, old_num
+
+
+def _get_relo_merged_responses(tnum, old_ticket_num, deduped_responses, state):
+    """Merge respostas do Relo-No-Show (novo) com herdadas do Standard (antigo).
+
+    WI-only: quando um Relo-No-Show é criado, ele contém APENAS as utilities que
+    não responderam ao Standard. As que já responderam ficam com risco no portal
+    e não aparecem no Relo. Pra avaliar auto-clear, precisamos combinar:
+      - Relo: respostas das utilities que faltaram (tem prioridade)
+      - Standard: respostas das utilities que já tinham respondido (herdadas)
+
+    Retorna lista combinada de responses, ou None se não aplicável.
+    """
+    if state != "WI":
+        return None
+    if not old_ticket_num:
+        return None
+
+    new_utils = {r["utility"] for r in deduped_responses}
+    if not new_utils:
+        return None
+
+    try:
+        old_resps = sb_get(
+            "ticket_811_responses",
+            f"&ticket_num=eq.{old_ticket_num}&state=eq.{state}"
+            "&select=utility_name,status,response_text"
+        )
+    except Exception as e:
+        log.debug(f"[{state}] {tnum}: Relo merge — erro ao buscar respostas do antigo: {e}")
+        return None
+
+    if not old_resps:
+        return None  # antigo sem respostas → fallback normal
+
+    old_utils = {r["utility_name"] for r in old_resps}
+    if len(new_utils) >= len(old_utils):
+        return None  # não é Relo parcial (mesmo tamanho ou maior) → lógica normal
+
+    # Merge: herda do antigo, sobrescreve com o novo
+    merged = {}
+    for r in old_resps:
+        merged[r["utility_name"]] = {
+            "utility": r["utility_name"],
+            "status": r["status"],
+            "response": r.get("response_text", ""),
+            "_inherited": True
+        }
+    for r in deduped_responses:
+        merged[r["utility"]] = r  # Relo sobrescreve
+
+    inherited_names = [k for k, v in merged.items() if v.get("_inherited")]
+    log.info(
+        f"[{state}] {tnum}: 🔀 RELO MERGE — {len(new_utils)} no Relo + "
+        f"{len(inherited_names)} herdadas do Standard ({old_ticket_num}) "
+        f"= {len(merged)} total"
+    )
+
+    return list(merged.values())
 
 
 def _is_valid_utility_name(name):
@@ -1732,6 +1797,10 @@ async def ensure_login(page, ctx, p, state):
         ok = await auto_login_silent(state)
         if not ok:
             log.warning(f"[{state}] auto_login_silent falhou, tentando manual...")
+            # FL/IN: avisa o Eric por email antes de abrir janela (o anti-bot trava o silent
+            # nesses portais, então a janela manual sempre vai aparecer aqui).
+            if state in ("FL", "IN"):
+                send_session_expired_alert(state)
             ok = await auto_login(state)
         if not ok:
             return None, None
@@ -1746,6 +1815,9 @@ async def ensure_login(page, ctx, p, state):
             await ctx.close()
             return None, None
         log.info(f"[{state}] Sessão renovada com sucesso: {page.url}")
+        # Login deu certo: zera a flag de "expirado" pra reabilitar o alerta na próxima expiração.
+        if state in ("FL", "IN"):
+            _clear_session_flag(state)
     return page, ctx
 
 
@@ -2376,6 +2448,90 @@ def check_locked_renewed_alert(state):
             log.warning(f"[LockedRenewed] Erro ao marcar {t.get('ticket')}: {e}")
 
 
+# ── │ SECTION: SESSION_ALERT │ Alerta de sessão expirada (FL/IN) ──────────────
+# Dedup: 1 email por estado a cada 24h, via flag local. Reseta quando login OK.
+
+_SESSION_FLAG_TTL = 24 * 60 * 60  # segundos
+
+
+def _session_flag_path(state):
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, f".session_expired_{state.upper()}.flag")
+
+
+def _clear_session_flag(state):
+    """Remove flag após login bem-sucedido. Idempotente."""
+    try:
+        p = _session_flag_path(state)
+        if os.path.exists(p):
+            os.remove(p)
+            log.info(f"[SessionExpired] {state}: flag limpa (sessão renovada)")
+    except Exception as e:
+        log.debug(f"[SessionExpired] {state}: erro ao limpar flag: {e}")
+
+
+def _touch_session_flag(state):
+    try:
+        with open(_session_flag_path(state), "w") as f:
+            f.write(datetime.now().isoformat())
+    except Exception as e:
+        log.warning(f"[SessionExpired] {state}: erro ao criar flag: {e}")
+
+
+def send_session_expired_alert(state):
+    """Email avisando que a sessão do portal {state} expirou — precisa login manual.
+    Dedup: não reenvia nas próximas 24h por estado. Retorna True se mandou."""
+    import smtplib
+    from email.mime.text import MIMEText
+
+    flag = _session_flag_path(state)
+    if os.path.exists(flag):
+        try:
+            age = datetime.now().timestamp() - os.path.getmtime(flag)
+            if age < _SESSION_FLAG_TTL:
+                log.info(f"[SessionExpired] {state}: já alertado há {int(age/3600)}h — skip (dedup)")
+                return False
+        except Exception:
+            pass
+
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_pass = os.getenv("GMAIL_PASS")
+    alert_to = os.getenv("ALERT_EMAIL")
+    if not all([gmail_user, gmail_pass, alert_to]):
+        log.info(f"[SessionExpired] {state}: email não configurado — pulado")
+        return False
+
+    portal_url = (PORTALS.get(state) or {}).get("url", "")
+    subject = f"[OneDrill] Sessão {state} expirada — precisa de login manual"
+    body = (
+        f"A sessão do portal 811 ({state}) expirou. O sync não consegue continuar sem que você logue manualmente.\n\n"
+        f"O que fazer:\n"
+        f"  1) Rode keepalive.bat (abre janela já preparada pra login no portal {state}).\n"
+        f"     OU abra o portal direto: {portal_url}\n"
+        f"  2) Faça login com a conta OneDrill.\n"
+        f"  3) Rode rodar_{state}.bat normalmente — o sync pega a sessão renovada automaticamente.\n\n"
+        f"Estado: {state}\n"
+        f"Data:   {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+        f"\nEste alerta não se repete nas próximas 24h pra esse estado.\n"
+    )
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = gmail_user
+    msg["To"] = alert_to
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(gmail_user, gmail_pass)
+            s.send_message(msg)
+        log.info(f"[SessionExpired] {state}: alerta enviado para {alert_to}")
+        _touch_session_flag(state)
+        return True
+    except Exception as e:
+        log.warning(f"[SessionExpired] {state}: erro ao enviar email: {e}")
+        return False
+
+
 # ── │ SECTION: SAVE │ SAVE TO SUPABASE ────────────────────────────────────────
 def save_to_supabase(state, results, tickets, grace_old_map=None):
     grace_old_map = grace_old_map or {}
@@ -2470,11 +2626,15 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
         # com a resposta real está no mesmo dataset. Basta não deixar RE-MARK sobrescrever.
         def _is_non_real(r):
             raw = (r.get("status_raw") or "").lower()
+            resp_text = (r.get("response") or "").lower()
+            combined = raw + " " + resp_text
             if raw.startswith("no response"):
-                return 2  # lowest priority
-            if "re-mark not needed" in raw or "remark not needed" in raw or raw == "21":
-                return 1  # ack de extensão — melhor que NR, pior que real
-            return 0      # real response (LATE FINAL RESPONSE = Pending via classify, date resolve no dedup)
+                return 3  # lowest priority
+            if "re-mark not needed" in combined or "remark not needed" in combined or raw == "21":
+                return 2  # ack de extensão — melhor que NR, pior que real
+            if "late final response" in combined or "late final" in combined or raw == "999":
+                return 1  # aviso de atraso — NÃO é resposta real, MARKED/CLEAR real sempre ganha
+            return 0      # real response
 
         latest_by_utility = {}
         for resp in data["responses"]:
@@ -2496,14 +2656,32 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                         log.debug(f"  [Dedup] {tnum}/{key}: mantém {existing.get('status_raw','')[:30]}, ignora {resp.get('status_raw','')[:30]}")
                         continue  # Ex é melhor (ex: REMARK > NR)
                 else:
-                    # Ambas reais: usa data se disponível
+                    # Ambas reais. Dois casos:
+                    #   (a) Datas diferentes → a utility atualizou status no tempo. Mais recente
+                    #       ganha (Bug 2026-06-04: antes "pior ganha" descartava MARKED novo em
+                    #       favor de Pending antigo. Ex: COMED LOCATE NOT COMPLETE 06/01 → MARKED
+                    #       06/02 era descartado, ticket ficava preso em Pending falso.).
+                    #   (b) Mesma data (ou sem data) → utility com múltiplos tipos (ELECTRIC + GAS)
+                    #       respondeu na mesma revisão. Pior status ganha (segurança: falso-Clear
+                    #       é perigoso; equipe pode cavar sem liberação).
                     existing_date = existing.get("responded_date") or ""
                     new_date = resp.get("responded_date") or ""
-                    if existing_date and new_date and new_date < existing_date:
-                        log.debug(f"  [Dedup] {tnum}/{key}: mantém {existing['status']} (data {existing_date} > {new_date})")
-                        continue  # Existente é mais recente
-                    log.debug(f"  [Dedup] {tnum}/{key}: {existing['status']}→{resp['status']} (data: {existing_date or 'N/A'}→{new_date or 'N/A'})")
-                    # Se datas não comparáveis: mantém a última (portal lista cronologicamente)
+                    if existing_date and new_date and existing_date != new_date:
+                        # (a) Datas diferentes — mais recente ganha
+                        if new_date < existing_date:
+                            log.debug(f"  [Dedup] {tnum}/{key}: mantém {existing['status']} (data {existing_date} > {new_date})")
+                            continue
+                        log.info(f"  [Dedup] {tnum}/{key}: {existing['status']}→{resp['status']} (atualização mais recente {existing_date}→{new_date})")
+                    else:
+                        # (b) Mesma data ou sem data — pior status ganha (multi-tipo)
+                        STATUS_PRIORITY = {"Damage": 0, "Pending": 1, "Clear": 2}
+                        ex_prio = STATUS_PRIORITY.get(existing.get("status", ""), 1)
+                        new_prio = STATUS_PRIORITY.get(resp.get("status", ""), 1)
+                        if ex_prio < new_prio:
+                            log.info(f"  [Dedup] {tnum}/{key}: mantém {existing['status']} (pior status ganha — ignora {resp['status']})")
+                            continue
+                        if new_prio < ex_prio:
+                            log.info(f"  [Dedup] {tnum}/{key}: {existing['status']}→{resp['status']} (pior status ganha — utility multi-tipo?)")
             latest_by_utility[key] = resp
         deduped_responses = list(latest_by_utility.values())
 
@@ -2551,7 +2729,13 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
             all_records.append(record)
 
         if deduped_responses:
-            statuses = [r["status"] for r in deduped_responses]
+            # ── WI Relo-No-Show: merge com utilities herdadas do Standard ──
+            _old_chain = (t.get("old_ticket2") or "").strip()
+            _old_num = _old_chain.split(" → ")[0].strip() if _old_chain else ""
+            relo_merged = _get_relo_merged_responses(tnum, _old_num, deduped_responses, state)
+            eval_responses = relo_merged if relo_merged is not None else deduped_responses
+
+            statuses = [r["status"] for r in eval_responses]
             none_pending = not any(s == "Pending" for s in statuses)
             all_responded = all(s in ("Clear", "Pending", "Cancel") for s in statuses)
             # WI: todas as utilities (excluindo "Not Participating") foram "Closed by DHL"
@@ -2562,12 +2746,16 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                        + (r.get("comment", "") or "") + " "
                        + (r.get("status_raw", "") or "")).lower()
                 return "not participating" in txt or "not service provider" in txt
-            relevant_statuses = [r["status"] for r in deduped_responses if not _is_not_part(r)]
+            relevant_statuses = [r["status"] for r in eval_responses if not _is_not_part(r)]
             all_cancel = bool(relevant_statuses) and all(s == "Cancel" for s in relevant_statuses)
             ticket_locked = t.get("status_locked", False)
 
             for resp in deduped_responses:
                 log.info(f"  [{state}] {tnum} | {resp['utility']}: {resp['status']} ({resp.get('response', '')[:60]})")
+            if relo_merged is not None:
+                inherited = [r for r in relo_merged if r.get("_inherited")]
+                for r in inherited:
+                    log.info(f"  [{state}] {tnum} | {r['utility']}: {r['status']} (herdado do Standard)")
 
             # ── SEGURANÇA: cruzar com banco para detectar Pending que o scrape perdeu ──
             # Se o scrape retornou tudo Clear, verifica se o banco tem Pending
@@ -2657,13 +2845,23 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                     real_old_clear = False
                     if old_ticket_num:
                         try:
-                            old_resps = sb_get("ticket_811_responses", f"&ticket_num=eq.{_qv(old_ticket_num)}&select=status")
+                            old_resps = sb_get("ticket_811_responses", f"&ticket_num=eq.{_qv(old_ticket_num)}&select=status,response_text")
                             if old_resps and len(old_resps) > 0:
-                                has_pending = any(r.get("status") == "Pending" for r in old_resps)
-                                if not has_pending:
+                                # Cancel (Closed by DHL) = utility NUNCA respondeu → NÃO é Clear.
+                                # Not Participating = utility sem rede na área → seguro, ignorar.
+                                # TODAS as utilities relevantes devem estar em status liberador.
+                                released = {"Clear", "Private", "Marked", "Unmarked"}
+                                def _is_not_part(r):
+                                    return "not participating" in ((r.get("response_text") or "") + " " + (r.get("status") or "")).lower()
+                                relevant = [r for r in old_resps if not _is_not_part(r)]
+                                all_relevant_clear = len(relevant) > 0 and all(r.get("status") in released for r in relevant)
+                                if all_relevant_clear:
                                     real_old_clear = True
                                     if old_status != "Clear":
                                         log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO — status_old={old_status or 'Open'} mas utilities REAIS do antigo ({old_ticket_num}) estão todas Clear")
+                                else:
+                                    not_clear = [r.get("status") for r in relevant if r.get("status") not in released]
+                                    log.info(f"[{state}] {tnum}: 🔄 RENOVAÇÃO — antigo NÃO é Clear real ({len(not_clear)} utilities não-liberadas: {not_clear[:5]})")
                         except Exception as e:
                             log.debug(f"[{state}] {tnum}: Erro ao checar utilities do antigo: {e}")
 
@@ -2680,21 +2878,31 @@ def save_to_supabase(state, results, tickets, grace_old_map=None):
                             ticket_patches.append(patch)
                         continue
 
-            # ── AUTO-CANCEL: ticket inteiro vira Cancel quando todas utilities são Cancel ──
-            # Cenário típico WI: ultrapassou 10 working days e DHL fechou admin todas as
-            # utility responses. Ticket está legalmente invalidado (Wis. Stat. §182.0175),
-            # precisa ser renovado pra prosseguir com escavação.
-            if all_cancel and t.get("status") != "Cancel":
-                cancel_ts = int(datetime.now().timestamp() * 1000)
-                cancel_label = datetime.now().strftime('%m/%d/%Y')
+            # ── AUTO-RESOLVE: ticket inteiro com todas utilities em Cancel ──
+            # WI: "Closed by DHL após 10 working days" — utilities não respondeu no prazo legal,
+            # mas o sistema (Diggers) admin-fechou, liberando o ticket pra trabalhar com
+            # cautela. Vira CLEAR com lembrete "verificar marcações em campo".
+            # Outros estados (FL/IN/IL): all_cancel = ticket realmente cancelado → Cancel.
+            if all_cancel and t.get("status") not in ("Cancel", "Clear"):
+                now_ts = int(datetime.now().timestamp() * 1000)
+                now_label = datetime.now().strftime('%m/%d/%Y')
                 hist = t.get("history") or []
-                cancel_note = f"[AUTO 811] Cancelado em {cancel_label} — ticket invalidado (Closed by DHL após 10 working days)"
-                hist.append({"ts": cancel_ts, "action": cancel_note, "color": "#6d28d9"})
-                new_notes = append_auto_note(patch.get("notes") or t.get("notes"), cancel_note)
-                patch.update({"status": "Cancel", "notes": new_notes, "history": hist})
-                needs_patch = True
-                log.info(f"[{state}] {tnum}: AUTO-CANCEL — todas utilities Closed by DHL (ticket invalidado)")
-                summary.canceled += 1
+                if state == "WI":
+                    note = f"[AUTO 811] Clear em {now_label} — todas utilities Closed by DHL (10 working days). ⚠ VERIFICAR MARCAÇÕES EM CAMPO antes de escavar."
+                    hist.append({"ts": now_ts, "action": note, "color": "#f59e0b"})
+                    new_notes = append_auto_note(patch.get("notes") or t.get("notes"), note)
+                    patch.update({"status": "Clear", "notes": new_notes, "history": hist})
+                    needs_patch = True
+                    log.info(f"[{state}] {tnum}: AUTO-CLEAR (DHL closed) — todas utilities Closed by DHL, marcado Clear com lembrete de verificação em campo")
+                    summary.cleared += 1
+                else:
+                    cancel_note = f"[AUTO 811] Cancelado em {now_label} — ticket invalidado (Closed by DHL após 10 working days)"
+                    hist.append({"ts": now_ts, "action": cancel_note, "color": "#6d28d9"})
+                    new_notes = append_auto_note(patch.get("notes") or t.get("notes"), cancel_note)
+                    patch.update({"status": "Cancel", "notes": new_notes, "history": hist})
+                    needs_patch = True
+                    log.info(f"[{state}] {tnum}: AUTO-CANCEL — todas utilities Closed by DHL (ticket invalidado)")
+                    summary.canceled += 1
 
             # ── WI: MIX CLEAR + CANCEL → TICKET CLEAR ──
             # Cenário WI: algumas utilities responderam (Marked/Clear) e outras
@@ -3214,7 +3422,6 @@ async def import_new_tickets(state, triggered_by="manual"):
         ticket_data = {
             "ticket": t["tnum_ext"], "company": "One Drill", "state": t["state_code"],
             "location": f"{t['city']}, {t['township']}".strip(", "), "address": t["street"],
-            "work_type": work_type_final,
             "status": "Open", "expire": t["expire_str"], "footage": 0,
             "client": t["client_811"], "prime": t["prime_811"], "tipo": work_type_final,
             "job": t["job_id"] or "", "notes": f"[811 Location] {t['location']}" if t["location"] else "",
@@ -4217,7 +4424,35 @@ async def _il_open_search_screen(page):
     O painel inferior do mapa tem: Home Search Places LatLong Grids Layers.
     Distinguir pelo contexto (left-of Log out / right-of Test).
     """
-    # Enumera TODOS os elementos com texto/value "Search" visíveis no DOM,
+    # Tenta primeiro o botão específico do menu top (id fixo)
+    btn_direct = page.locator('#btnTicketSearch')
+    try:
+        if await btn_direct.count() and await btn_direct.is_visible():
+            await btn_direct.click()
+            log.info("[IL] Search menu: click direto em #btnTicketSearch")
+            await page.wait_for_timeout(4000)
+            await wait_stable(page)
+            body_parts = []
+            try:
+                body_parts.append(await page.locator("body").inner_text())
+            except Exception:
+                pass
+            for fr in page.frames:
+                if fr == page.main_frame:
+                    continue
+                try:
+                    body_parts.append(await fr.locator("body").inner_text())
+                except Exception:
+                    continue
+            body_all = "\n".join(body_parts).lower()
+            if ("search for street" in body_all or "search for place" in body_all
+                    or "search for county" in body_all or "tickets for county" in body_all):
+                return True
+            log.info("[IL] #btnTicketSearch clicou mas search form não apareceu, tentando scan")
+    except Exception:
+        pass
+
+    # Fallback: Enumera TODOS os elementos com texto/value "Search" visíveis no DOM,
     # com bounding box. Filtra o do TOP (menor Y) — esse é o do menu Inquire|New|Recent|Test|Search|Log out.
     candidates = await page.evaluate("""() => {
         const out = [];
@@ -4967,6 +5202,18 @@ async def _il_pdf_go_back(page):
                 return True
     except Exception as e:
         log.warning(f"[IL] PDF: re-search falhou: {e}")
+
+    # Fallback: navega direto pro JULIE TE (session cookies persistem)
+    log.info("[IL] PDF: fallback — navegando direto pra JULIE TE...")
+    try:
+        await page.goto(JULIE_TICKETENTRY_URL, wait_until="domcontentloaded")
+        await page.wait_for_timeout(5000)
+        await wait_stable(page)
+        if await _il_open_search_screen(page):
+            if await _il_search_county(page, IL_SEARCH_COUNTY):
+                return True
+    except Exception as e:
+        log.warning(f"[IL] PDF: fallback JULIE TE falhou: {e}")
     return False
 
 
@@ -7317,24 +7564,15 @@ async def import_wi(triggered_by="manual"):
             await browser.close()
             return 0
 
-        # ── FASE 3: Filtrar tickets novos (skip Relo-No-Show) ──
+        # ── FASE 3: Filtrar tickets novos (importa TODOS os tipos, incluindo Relo-No-Show) ──
         new_tickets_to_scrape = []
-        relo_skipped = 0
         for item in search_results:
             tnum = item["ticket"]
             if tnum in existing_nums:
                 continue
             if tnum in canceled_set:
                 continue
-            # Filtrar Relo-No-Show se ticket_type veio do ExtJS Store
-            grid_type = item.get("ticket_type", "").strip()
-            if grid_type and "relo" in grid_type.lower():
-                relo_skipped += 1
-                log.info(f"[WI] {tnum}: tipo '{grid_type}' → skip (Relo-No-Show)")
-                continue
             new_tickets_to_scrape.append(tnum)
-        if relo_skipped:
-            log.info(f"[WI] {relo_skipped} tickets Relo-No-Show filtrados")
 
         log.info(f"[WI] Search retornou {len(search_results)} tickets, "
                  f"{len(new_tickets_to_scrape)} novos para importar")
@@ -8335,25 +8573,43 @@ def _load_overrides():
             log.warning(f"[Overrides] Erro ao ler local_overrides.json: {e} — usando fallback hardcoded")
     return [
         {
-            "name": "Frontier Terre Haute",
-            "location_match": "terre haute",
+            "name": "Frontier Indiana",
+            "state_match": "IN",
             "utility_match": "frontier",
             "force_status": "Clear",
-            "reason": "Override local: Frontier sempre Clear em Terre Haute (validado em campo)",
+            "reason": "Override local: Frontier sempre Clear em todo o Indiana (validado em campo, Eric 2026-06-05)",
         },
     ]
 
 LOCAL_OVERRIDES = _load_overrides()
 
 
+def _match_override(ovr, location_lower, state_upper):
+    """True se a regra casa com location/state do ticket.
+    location_match: substring match (case-insensitive). state_match: igualdade exata.
+    Regra DEVE ter pelo menos um dos dois — sem nenhum matcher = invalida (skip).
+    Se ambos presentes, AMBOS devem casar (AND)."""
+    loc_m = (ovr.get("location_match") or "").lower()
+    st_m = (ovr.get("state_match") or "").upper()
+    if not loc_m and not st_m:
+        return False  # regra invalida — sem matcher
+    if loc_m and loc_m not in location_lower:
+        return False
+    if st_m and st_m != state_upper:
+        return False
+    return True
+
+
 def _apply_local_overrides(ticket, deduped_responses):
-    """Aplica LOCAL_OVERRIDES no array de responses (in-place)."""
-    location = (ticket.get("location") or "").lower()
-    if not location:
-        return 0
+    """Aplica LOCAL_OVERRIDES no array de responses (in-place).
+    Cada regra exige location_match e/ou state_match (pelo menos um).
+    state_match exige igualdade EXATA do estado (ex: 'IN' so casa state='IN'),
+    blindando contra falsos positivos entre estados."""
+    location_lower = (ticket.get("location") or "").lower()
+    state_upper = (ticket.get("state") or "").upper()
     altered = 0
     for ovr in LOCAL_OVERRIDES:
-        if ovr["location_match"].lower() not in location:
+        if not _match_override(ovr, location_lower, state_upper):
             continue
         for resp in deduped_responses:
             uname = (resp.get("utility") or "").lower()
@@ -8363,7 +8619,7 @@ def _apply_local_overrides(ticket, deduped_responses):
             if old_status == ovr["force_status"]:
                 continue
             log.info(
-                f"  [OVERRIDE] {ticket.get('ticket')} - "
+                f"  [OVERRIDE] {ticket.get('ticket')} [{ticket.get('state')}] - "
                 f"{resp.get('utility')}: {old_status} -> {ovr['force_status']} ({ovr['name']})"
             )
             resp["status"] = ovr["force_status"]
@@ -8389,7 +8645,13 @@ def apply_overrides_now(target_state=None):
     if target_state:
         log.info(f"  Estado: {target_state}")
     for ovr in LOCAL_OVERRIDES:
-        log.info(f"  - {ovr['name']}: '{ovr['location_match']}' + '{ovr['utility_match']}' = {ovr['force_status']}")
+        parts = []
+        if ovr.get('location_match'):
+            parts.append(f"loc='{ovr['location_match']}'")
+        if ovr.get('state_match'):
+            parts.append(f"state='{ovr['state_match']}'")
+        parts.append(f"util='{ovr.get('utility_match','?')}'")
+        log.info(f"  - {ovr['name']}: {' + '.join(parts)} = {ovr.get('force_status','?')}")
     log.info("=" * 55)
 
     query = "&status=in.(Open,Damage,Clear)&order=ticket&select=id,ticket,location,state,status,history,notes,old_ticket2"
@@ -8405,18 +8667,19 @@ def apply_overrides_now(target_state=None):
     candidates = []
     for _t in tickets:
         _loc = (_t.get("location") or "").lower()
+        _st = (_t.get("state") or "").upper()
         for _ovr in LOCAL_OVERRIDES:
-            if _ovr["location_match"].lower() in _loc:
+            if _match_override(_ovr, _loc, _st):
                 _renew = _t.get("old_ticket2")
                 _ri = f" (renovou {_renew})" if _renew else ""
-                candidates.append(f"  [{_t.get('state','?')}] {_t['ticket']} status={_t.get('status')}{_ri}")
+                candidates.append(f"  [{_t.get('state','?')}] {_t['ticket']} status={_t.get('status')}{_ri} <- {_ovr['name']}")
                 break
     if candidates:
         log.info(f"Tickets candidatos a override ({len(candidates)}):")
         for c in candidates:
             log.info(c)
     else:
-        log.info("Nenhum ticket bateu location_match")
+        log.info("Nenhum ticket bateu nenhum override")
         return
 
     total_updated = 0
@@ -8425,10 +8688,9 @@ def apply_overrides_now(target_state=None):
 
     for t in tickets:
         location = (t.get("location") or "").lower()
-        if not location:
-            continue
+        state_upper = (t.get("state") or "").upper()
 
-        matched_overrides = [o for o in LOCAL_OVERRIDES if o["location_match"].lower() in location]
+        matched_overrides = [o for o in LOCAL_OVERRIDES if _match_override(o, location, state_upper)]
         if not matched_overrides:
             continue
 
@@ -8840,7 +9102,8 @@ def scan_emails_for_responses(commit=False, state_filter=None, days_back=7):
 
     for msg_id in ids:
         try:
-            status, msg_data = imap.fetch(msg_id, "(RFC822)")
+            # PEEK em vez de RFC822: lê o corpo SEM marcar o email como lido (\Seen).
+            status, msg_data = imap.fetch(msg_id, "(BODY.PEEK[])")
             if status != "OK" or not msg_data or not msg_data[0]:
                 continue
 
@@ -8951,6 +9214,75 @@ def scan_emails_for_responses(commit=False, state_filter=None, days_back=7):
     log.info(f"    Skipped (ticket no banco):{skipped_no_ticket}")
     log.info(f"    Skipped (sem match):      {skipped_no_match}")
     log.info(f"    Erros:                    {errors}")
+    log.info("=" * 55)
+
+
+def scan_emails_debug(days_back=3):
+    """Lista TODOS emails do Gmail (subject, remetente, preview) SEM aplicar filtros.
+    Diagnostico pra entender o formato dos emails que chegam e ajustar o parser do
+    scan_emails_for_responses (que hoje identifica 0 emails)."""
+    import imaplib
+    import email as email_mod
+
+    GMAIL_USER = os.getenv("GMAIL_USER")
+    GMAIL_PASS = os.getenv("GMAIL_PASS")
+    if not GMAIL_USER or not GMAIL_PASS:
+        log.error("[EmailDebug] GMAIL_USER/GMAIL_PASS nao definidos no .env")
+        return
+
+    log.info("=" * 55)
+    log.info(f"  EMAIL DEBUG — listando emails dos ultimos {days_back} dias")
+    log.info("=" * 55)
+
+    try:
+        imap = imaplib.IMAP4_SSL("imap.gmail.com")
+        imap.login(GMAIL_USER, GMAIL_PASS)
+        imap.select("INBOX")
+    except Exception as e:
+        log.error(f"[EmailDebug] Erro IMAP login: {e}")
+        return
+
+    since_date = (datetime.now() - timedelta(days=days_back)).strftime("%d-%b-%Y")
+    status, msg_ids = imap.search(None, f'(SINCE {since_date})')
+    if status != "OK" or not msg_ids[0]:
+        log.info("[EmailDebug] Nenhum email no periodo")
+        try:
+            imap.logout()
+        except Exception:
+            pass
+        return
+
+    ids = msg_ids[0].split()
+    log.info(f"[EmailDebug] {len(ids)} emails encontrados\n")
+
+    for i, msg_id in enumerate(ids, 1):
+        try:
+            # PEEK em vez de RFC822: lê o corpo SEM marcar o email como lido (\Seen).
+            status, msg_data = imap.fetch(msg_id, "(BODY.PEEK[])")
+            if status != "OK" or not msg_data or not msg_data[0]:
+                continue
+            raw = msg_data[0][1]
+            msg = email_mod.message_from_bytes(raw)
+            subject = _decode_email_header(msg.get("Subject", ""))
+            sender = _decode_email_header(msg.get("From", ""))
+            date_hdr = msg.get("Date", "")
+            body = _extract_email_body(msg) or ""
+            preview = " ".join(body[:300].split())  # colapsa whitespace pra 1 linha
+            log.info(f"[{i:3d}] FROM:    {sender[:80]}")
+            log.info(f"      SUBJECT: {subject[:120]}")
+            log.info(f"      DATE:    {date_hdr}")
+            log.info(f"      BODY:    {preview}")
+            log.info("")
+        except Exception as e:
+            log.warning(f"  Erro processando email #{i}: {e}")
+
+    try:
+        imap.logout()
+    except Exception:
+        pass
+
+    log.info("=" * 55)
+    log.info(f"[EmailDebug] LISTAGEM CONCLUIDA — {len(ids)} emails")
     log.info("=" * 55)
 
 
@@ -9195,7 +9527,8 @@ def scan_emails_wi(commit=False, days_back=14):
 
     for msg_id in ids:
         try:
-            status, msg_data = imap.fetch(msg_id, "(RFC822)")
+            # PEEK em vez de RFC822: lê o corpo SEM marcar o email como lido (\Seen).
+            status, msg_data = imap.fetch(msg_id, "(BODY.PEEK[])")
             if status != "OK" or not msg_data or not msg_data[0]:
                 continue
 
@@ -9494,18 +9827,40 @@ def _pdf_query_number(t):
     return tnum_new, False
 
 
+# CDP Page.printToPDF params — replica o Chrome "Save as PDF" dialog.
+# Margins 0.5in em todos os lados (Chrome "Save as PDF" default).
+_CDP_PDF_PARAMS = {
+    "printBackground": True,
+    "paperWidth": 8.5,
+    "paperHeight": 11,
+    "marginTop": 0.5,
+    "marginBottom": 0.5,
+    "marginLeft": 0.5,
+    "marginRight": 0.5,
+}
+
+# CSS injetado antes do PDF — compensa diff de font metrics CDP vs Chrome dialog:
+#  - break-inside: avoid → impede quebra de página no meio de row da tabela SA
+#  - letter-spacing: 0.03em → ajusta wrapping pra igualar paginação do Chrome
+#    (CDP headless rende ~3% mais estreito que Chrome dialog nas mesmas fonts)
+_PRINT_FIX_CSS = (
+    "tr { break-inside: avoid !important; page-break-inside: avoid !important; } "
+    "* { letter-spacing: 0.03em !important; }"
+)
+
+
 async def save_ticket_pdfs(state="FL", force=False):
-    """Salva PDF de tickets Clear, Damage e Completed via headless page.pdf().
+    """Salva PDF de tickets Clear, Damage e Completed via Print Text nativo do portal.
 
     Headless — pode usar o PC normalmente enquanto roda.
     Estrutura: pdfs/{STATE}/{PRIME}/{PROJECT}/{ticket}.pdf (ou subpasta de renovação).
     Damage duplicado em Damage/{STATE}/{PRIME}/{PROJECT}/{ticket}.pdf.
 
-    Fluxo por ticket:
-      1. Dashboard → Filtrar ticket → Abrir
-      2. Aba Text → captura innerHTML (corpo do ticket)
-      3. Aba Service Areas → captura innerHTML (tabela de respostas das utilities)
-      4. Combina ambos em HTML → page.pdf() (PDF com texto + responses)
+    Fluxo por ticket (idêntico ao que o usuário faz manualmente):
+      1. Dashboard → Filtrar ticket
+      2. Menu 3 pontos (more_vert) → bloquear window.print()
+      3. Clicar "Print Text" → Angular renderiza print component
+      4. CDP Page.printToPDF com margins 0.5in → PDF idêntico ao "Save as PDF" do Chrome
     """
 
     all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Clear,Damage,Completed)&order=ticket")
@@ -9599,89 +9954,83 @@ async def save_ticket_pdfs(state="FL", force=False):
                 # 1. Filtrar no dashboard
                 await filter_ticket(page, query_tnum)
 
-                # 2. Clicar no ticket
-                ticket_link = page.get_by_text(query_tnum, exact=True)
-                if not await ticket_link.count():
-                    log.warning(f"  {tnum} (busca {query_tnum}): não encontrado no dashboard")
+                # 2. Clicar no menu 3 pontos (more_vert) do ticket
+                menu_btn = page.locator('button:has(mat-icon:text("more_vert"))')
+                if not await menu_btn.count():
+                    menu_btn = page.locator('mat-icon:text("more_vert")')
+                if not await menu_btn.count():
+                    log.warning(f"  {tnum} (busca {query_tnum}): menu 3 pontos não encontrado")
                     errors += 1
                     continue
-                await ticket_link.first.click()
-                await wait_stable(page)
+                await menu_btn.first.click()
+                await page.wait_for_timeout(800)
 
-                # 3. Capturar aba "Text" (ticket body)
-                text_tab = page.locator('[role="tab"]:has-text("Text")').first
-                if await text_tab.count():
-                    await click_and_wait(page, text_tab, "tab")
+                # 3. Bloquear window.print() ANTES de clicar Print Text
+                #    O portal chama window.print() imediatamente após renderizar o
+                #    print component — bloquear impede que o dialog abra e resete a página
+                await page.evaluate("""() => {
+                    window.__printCalled = false;
+                    window.print = function() {
+                        window.__printCalled = true;
+                        console.log('BLOCKED window.print()');
+                    };
+                }""")
 
-                # 4. Esperar conteúdo carregar
-                for _ in range(15):
-                    body = await page.locator("body").inner_text()
-                    if len(body) > 500 and ("Ticket" in body or "NOTICE" in body):
-                        break
+                # 4. Clicar "Print Text" no menu
+                print_text_item = page.locator(
+                    '[role="menuitem"]:has-text("Print Text"), '
+                    'button:has-text("Print Text")'
+                )
+                if not await print_text_item.count():
+                    log.warning(f"  {tnum}: 'Print Text' não encontrado no menu")
+                    await page.keyboard.press("Escape")
+                    errors += 1
+                    continue
+                await print_text_item.first.click()
+
+                # 5. Esperar window.print() ser bloqueado (confirma render do componente)
+                rendered = False
+                for _i in range(30):
                     await page.wait_for_timeout(500)
-                await page.wait_for_timeout(1000)
+                    if await page.evaluate("() => window.__printCalled"):
+                        rendered = True
+                        break
 
-                text_html = await page.evaluate('''() => {
-                    let el = document.querySelector('mat-tab-body.mat-mdc-tab-body-active .mat-mdc-tab-body-content');
-                    if (!el) el = document.querySelector('mat-tab-body.mat-tab-body-active .mat-tab-body-content');
-                    return el ? el.innerHTML : '';
-                }''')
+                if not rendered:
+                    log.warning(f"  {tnum}: Print component não renderizou (timeout 15s)")
+                    await back_to_dashboard(page, state)
+                    errors += 1
+                    continue
 
-                # 5. Capturar aba "Service Areas" (respostas das utilities)
-                sa_tab = page.locator('[role="tab"]:has-text("Service Areas")').first
-                sa_html = ""
-                if await sa_tab.count():
-                    await click_and_wait(page, sa_tab, "tab")
-                    await page.wait_for_timeout(1000)
-                    for _ in range(10):
-                        sa_body = await page.locator("body").inner_text()
-                        if any(k in sa_body for k in ["Marked", "No Conflict", "Clear", "Unmarked", "Underground"]):
-                            break
-                        await page.wait_for_timeout(500)
-                    sa_html = await page.evaluate('''() => {
-                        let el = document.querySelector('mat-tab-body.mat-mdc-tab-body-active .mat-mdc-tab-body-content');
-                        if (!el) el = document.querySelector('mat-tab-body.mat-tab-body-active .mat-tab-body-content');
-                        return el ? el.innerHTML : '';
-                    }''')
-                    log.info(f"  {tnum}: Text={len(text_html)}ch + ServiceAreas={len(sa_html)}ch")
+                # 6. Tempo extra pro conteúdo carregar completamente (SA table, responses)
+                await page.wait_for_timeout(3000)
 
-                # 6. Montar HTML combinado (Text + Service Areas) e gerar PDF
-                combined = (
-                    '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
-                    '* { box-sizing: border-box; margin: 0; padding: 0; }'
-                    "body { font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.4; color: #333; }"
-                    '.text-section { padding: 10px; white-space: pre-wrap; }'
-                    '.text-section pre { white-space: pre-wrap; font-family: inherit; font-size: inherit; }'
-                    '.responses-section { page-break-before: always; padding: 10px; }'
-                    'table { width: 100%; border-collapse: collapse; font-size: 10px; font-family: Arial, sans-serif; }'
-                    'th { background: #f0f0f0; font-weight: bold; border-bottom: 2px solid #999; padding: 6px 8px; text-align: left; }'
-                    'td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }'
-                    'mat-icon, button, mat-paginator, .mat-mdc-paginator, .mat-column-actions { display: none; }'
-                    'a { color: #333; text-decoration: none; }'
-                    '</style></head><body>'
-                    f'<div class="text-section">{text_html}</div>'
-                    + (f'<div class="responses-section">{sa_html}</div>' if sa_html else '')
-                    + '</body></html>'
+                # 7. Injeta CSS fix antes do PDF:
+                #    - break-inside: avoid em tr → não quebra row no meio
+                #    - letter-spacing: 0.03em → compensa font metrics CDP vs Chrome
+                await page.evaluate(
+                    "(css) => { var s = document.createElement('style');"
+                    " s.textContent = css; document.head.appendChild(s); }",
+                    _PRINT_FIX_CSS
                 )
+                await page.wait_for_timeout(300)
 
-                pdf_page = await ctx.new_page()
-                await pdf_page.set_content(combined, wait_until="domcontentloaded")
-                await pdf_page.wait_for_timeout(500)
-                await pdf_page.emulate_media(media="screen")
-                await pdf_page.pdf(
-                    path=full_path,
-                    format="Letter",
-                    print_background=True,
-                    margin={"top": "0.4in", "bottom": "0.4in",
-                            "left": "0.4in", "right": "0.4in"},
-                )
-                await pdf_page.close()
-                log.info(f"  {tnum}: PDF combinado (Text+ServiceAreas) → {full_path}")
+                # 8. CDP Page.printToPDF — margins 0.5in (Chrome "Save as PDF" defaults).
+                #    CDP direto + CSS fix produz ~85KB, mesma paginação do Chrome dialog.
+                cdp = await ctx.new_cdp_session(page)
+                try:
+                    cdp_result = await cdp.send('Page.printToPDF', _CDP_PDF_PARAMS)
+                    final_pdf = base64.b64decode(cdp_result.get('data', ''))
+                finally:
+                    await cdp.detach()
 
-                # 10. Verificar se salvou
+                with open(full_path, "wb") as f:
+                    f.write(final_pdf)
+
+                # 9. Verificar se salvou
                 if os.path.exists(full_path) and os.path.getsize(full_path) > 10000:
                     file_size = os.path.getsize(full_path)
-                    log.info(f"  ✅ {tnum}: PDF salvo ({round(file_size/1024)}KB)")
+                    log.info(f"  ✅ {tnum}: PDF Print Text salvo ({round(file_size/1024)}KB)")
 
                     # Duplica pra pasta Damage se aplicável
                     if paths['damage_path']:
@@ -9699,8 +10048,6 @@ async def save_ticket_pdfs(state="FL", force=False):
                         "size_kb": round(file_size / 1024, 1)
                     }
                     if used_old:
-                        # Pra ticket renovado em grace, gravar ambos os números no metadata
-                        # pra busca futura achar o PDF tanto pelo número antigo quanto pelo novo
                         att["old_ticket"] = query_tnum
                         att["new_ticket"] = tnum
                     attachments.append(att)
@@ -9719,7 +10066,7 @@ async def save_ticket_pdfs(state="FL", force=False):
                     log.warning(f"  ⚠ {tnum}: PDF não salvo ou pequeno ({sz}B)")
                     errors += 1
 
-                # Volta ao dashboard
+                # 10. Volta ao dashboard pro próximo ticket
                 await back_to_dashboard(page, state)
 
             except Exception as e:
@@ -10043,7 +10390,7 @@ def run_self_tests():
     _assert("Clear: 1C Work by Owner", "Clear", classify("Current", "1C: Work Being Done by Facility Owner")[0])
     _assert("Clear: 2 Clear", "Clear", classify("Current", "2: Clear - No underground facilities in the proposed excavation")[0])
     _assert("Clear: 2E Marked Exceptions", "Clear", classify("Current", "2E: Marked with Exceptions - Marked within confines")[0])
-    _assert("Clear: 3E Already Performed", "Clear", classify("Current", "3E: Unmarked - Excavation Already Performed or Canceled")[0])
+    _assert("Pending: 3E Already Performed", "Pending", classify("Current", "3E: Unmarked - Excavation Already Performed or Canceled")[0])
     _assert("Clear: 3U Not service", "Clear", classify("Positive Response", "3U: Unmarked - Not service provider for this location")[0])
     _assert("Clear: 3H Private", "Clear", classify("Current", "3H: Unmarked - Privately owned facilities on property")[0])
     _assert("Clear: 4 Clear No Facilities", "Clear", classify("Current", "4: Clear No Facilities")[0])
@@ -10052,10 +10399,11 @@ def run_self_tests():
     _assert("Clear: 5A Documents", "Clear", classify("Current", "5A: Design Notice - Documents Provided")[0])
     _assert("Clear: 5B Design Marked", "Clear", classify("Current", "5B: Design Notice - Marked")[0])
     _assert("Clear: 6C Joint Meet Complete", "Clear", classify("Current", "6C: Joint Meet Complete")[0])
+    _assert("Clear: 1A Marked with Exceptions", "Clear", classify("Current", "1A: Marked with Exceptions - Do Not Excavate, High-Profile Utility")[0])
+    _assert("Clear: 1A High-Profile variant", "Clear", classify("Current", "1A - Marked with Exceptions - Do Not Excavate, High-Profile Utility - Do not excavate")[0])
     _assert("Clear: status=Clear", "Clear", classify("Clear", "")[0])
     _assert("Clear: no facilit", "Clear", classify("Current", "No facilities in area")[0])
     # PENDING codes
-    _assert("Pending: 1A Do Not Excavate", "Pending", classify("Current", "1A: Marked with Exceptions - Do Not Excavate, High-Profile Utility")[0])
     _assert("Pending: 3A No Access", "Pending", classify("Current", "3A: Unmarked - Could Not Gain Access to Property")[0])
     _assert("Pending: 3B Incorrect Address", "Pending", classify("Current", "3B: Unmarked - Incorrect Address Information")[0])
     _assert("Pending: 3C Marking Delay", "Pending", classify("Current", "3C: Unmarked - Marking Delay - Do not excavate until resolved")[0])
@@ -11358,6 +11706,7 @@ if __name__ == "__main__":
     parser.add_argument("--fix-dates",  action="store_true", help="Corrigir datas de clear usando data real da última resposta 811")
     parser.add_argument("--fix-clear-ts", action="store_true", help="Fix 2026-05-14: ajusta ts dos AUTO 811 Clear pra synced_at")
     parser.add_argument("--scan-email", action="store_true", help="Varre Gmail buscando status change de utilities (dry run por default)")
+    parser.add_argument("--scan-email-debug", action="store_true", help="Lista subject/sender/body de TODOS emails (sem filtros) — pra entender o formato e ajustar o parser do --scan-email")
     parser.add_argument("--apply-overrides", action="store_true", help="Aplica LOCAL_OVERRIDES + auto-clear")
     parser.add_argument("--undo-fake-overrides", action="store_true", help="Remove entries (override local) com ts=hoje (cleanup do bug RE-CONFIRMA)")
     parser.add_argument("--debug-history", type=str, help="Mostra historico completo de um ticket. Ex: --debug-history 26031001348")
@@ -11484,6 +11833,8 @@ if __name__ == "__main__":
                 state_filter=args.state,
                 days_back=getattr(args, 'days_back', 7)
             )
+        elif getattr(args, 'scan_email_debug', False):
+            scan_emails_debug(days_back=getattr(args, 'days_back', 7))
         elif args.all:
             asyncio.run(sync_all())
         elif args.imp_all:

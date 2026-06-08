@@ -1876,9 +1876,12 @@ async function renewTicket(){
 }
 // ── EDIT/UNDO RENEWAL ──
 // Permite editar manualmente os campos da renovação (oldTicket2, statusOld, expireOld)
-// ou desfazer a renovação inteira (limpa os 3 campos -> ticket deixa de ser renovado).
-// Útil quando o auto-sync inferiu renovação errada ou quando o operador quer ajustar
-// a data de vencimento do ticket antigo (afeta cálculo de grace period).
+// ou DESFAZER a renovação. Desfazer RESTAURA o ticket antigo:
+//   - Se o antigo já existe como registro próprio (renovação detectada via sync): só limpa a
+//     relação e ele reaparece (deixa de ser superseded).
+//   - Se o antigo sumiu porque a renovação RENOMEOU o mesmo registro (renewTicket): reverte o
+//     número de volta pro antigo e restaura status/expire antigos. O número novo deixa de existir.
+// Útil quando o auto-sync inferiu renovação errada ou o operador renovou por engano.
 async function editRenewal(){
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
   if(!isRenewed(t)){toast('Esse ticket não tem renovação registrada.','warn');return;}
@@ -1893,27 +1896,56 @@ async function editRenewal(){
     '  Expira Antigo: '+(curExpire||'(vazio)')+'\n\n'+
     'O que fazer?\n'+
     '  1 = Editar dados da renovação (campos individuais)\n'+
-    '  2 = DESFAZER renovação (limpa os 3 campos — o ticket antigo deixa de aparecer como superseded)\n'+
+    '  2 = DESFAZER renovação (volta pro ticket antigo — restaura número, status e vencimento)\n'+
     '  (cancelar pra sair sem mudar)',
     '1'
   );
   if(!action)return;
   const choice=action.trim();
   if(choice==='2'){
-    if(!confirm('DESFAZER renovação?\n\nVai limpar:\n  Ticket Antigo: '+curOld+'\n  Status Antigo: '+curStatus+'\n  Expira Antigo: '+curExpire+'\n\nO ticket '+t.ticket+' deixa de aparecer como renovação. Não cria/apaga outros tickets — só limpa essa relação.\n\nContinuar?'))return;
-    t.oldTicket2='';t.statusOld='';t.expireOld='';
-    t.history=t.history||[];
-    t.history.push({ts:Date.now(),action:'[RENOVAÇÃO DESFEITA] limpou: antigo='+curOld+' / status='+curStatus+' / expira='+curExpire,color:'#dc2626'});
+    // Predecessor imediato (1º da chain) = pra onde o ticket volta; resto = níveis mais antigos.
+    const oldNum=curOld.split('→')[0].trim();
+    const restChain=curOld.split('→').slice(1).map(s=>s.trim()).filter(Boolean).join(' → ');
+    if(!oldNum){toast('Não há número de ticket antigo registrado pra restaurar.','warn');return;}
+    // O antigo já existe como registro próprio? (renovação via sync deixou o antigo oculto/superseded)
+    const oldExists=tickets.some(x=>String(x.ticket||'').trim()===oldNum&&x.id!==t.id);
+    // Backups pra rollback em caso de erro no save
+    const _bk={ticket:t.ticket,status:t.status,expire:t.expire,locked:t.status_locked,old:curOld,sOld:curStatus,eOld:curExpire};
+
+    if(oldExists){
+      // Antigo existe oculto — limpar a relação faz ele reaparecer (rebuildSupersededSet).
+      if(!confirm('DESFAZER renovação?\n\nO ticket antigo '+oldNum+' JÁ existe na base (estava oculto como substituído).\nVou limpar a relação de renovação do '+t.ticket+' — o antigo volta a aparecer.\n\nContinuar?'))return;
+      t.oldTicket2=restChain;t.statusOld='';t.expireOld='';
+      t.history=t.history||[];
+      t.history.push({ts:Date.now(),action:'[RENOVAÇÃO DESFEITA] relação limpa — antigo '+oldNum+' reexibido'+(restChain?' / chain restante: '+restChain:''),color:'#dc2626'});
+    }else{
+      // Antigo NÃO existe (a renovação RENOMEOU este registro). Reverte: volta a ser o antigo.
+      if(!confirm('DESFAZER renovação (voltar pro ticket antigo)?\n\n'+
+        'Este ticket vai VOLTAR a ser:\n'+
+        '  Número:  '+t.ticket+'  →  '+oldNum+'\n'+
+        '  Status:  '+(curStatus||'(mantém atual)')+'\n'+
+        '  Expira:  '+(curExpire||'(mantém atual)')+'\n\n'+
+        'O número '+t.ticket+' deixa de existir.'+(restChain?'\n(Continua como renovação de '+restChain+'.)':'')+'\n\n'+
+        'Obs.: respostas de utilities do número novo podem ficar órfãs — o sync 811 reorganiza.\n\nContinuar?'))return;
+      t.ticket=oldNum;
+      if(curStatus)t.status=curStatus;   // restaura status antigo (se foi registrado na renovação)
+      if(curExpire)t.expire=curExpire;   // restaura vencimento antigo (se foi registrado)
+      t.status_locked=false;             // lock antigo não foi preservado — sync/operador reajusta
+      t.oldTicket2=restChain;t.statusOld='';t.expireOld='';
+      t.history=t.history||[];
+      t.history.push({ts:Date.now(),action:'[RENOVAÇÃO DESFEITA] '+_bk.ticket+' → '+oldNum+' (ticket antigo restaurado)'+(restChain?' / chain restante: '+restChain:''),color:'#dc2626'});
+    }
+
     const ok=await saveTicketToDb(t);
     if(ok){
-      toast('Renovação desfeita.','success');
-      // Rebuilds set de superseded — o ticket antigo deixa de ser superseded se nada mais aponta pra ele
+      toast(oldExists?('Renovação desfeita — '+oldNum+' voltou a aparecer.'):('Renovação desfeita — ticket voltou a ser '+oldNum+'.'),'success');
       rebuildSupersededSet();
       closeModal('ov-detail');syncAll();
       setTimeout(()=>openTicketDetail(t.id),300);
     }else{
-      // Rollback
-      t.oldTicket2=curOld;t.statusOld=curStatus;t.expireOld=curExpire;t.history.pop();
+      // Rollback completo
+      t.ticket=_bk.ticket;t.status=_bk.status;t.expire=_bk.expire;t.status_locked=_bk.locked;
+      t.oldTicket2=_bk.old;t.statusOld=_bk.sOld;t.expireOld=_bk.eOld;t.history.pop();
       toast('Erro ao salvar. Tente Refresh (⟳) e novamente.','danger');
     }
     return;

@@ -4706,7 +4706,12 @@ function renderClearedStats(fTickets){
   var cToday=[],c24=[],c7=[],c30=[],byU7={};
   var seenToday={},seen24={},seen7={},seen30={};
   for(var i=0;i<ft2.length;i++){
-    var t=ft2[i];if(t.status!=='Clear')continue;
+    var t=ft2[i];
+    // Aceita Clear direto OU renovado em carência ativa com status_old=Clear
+    // (o ticket renovado mantém o history do antigo, então o clear original ainda vale durante a graça)
+    var isClearDirect=t.status==='Clear';
+    var isClearInGrace=isRenewed(t)&&isInRenewalGrace(t)&&(t.status_old==='Clear');
+    if(!isClearDirect&&!isClearInGrace)continue;
     var cd=getTicketClearDate(t);if(!cd)continue;
     var tk=t.ticket;
     if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}

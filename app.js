@@ -94,7 +94,7 @@ let _clearedExpand=null;
 // Qual dia do bar chart expandiu (formato YYYY-MM-DD) | null.
 // Exclusivo com _clearedExpand — só um dos dois fica aberto por vez.
 let _clearedExpandDay=null;
-let utilContacts=[],editingContactId=null;
+let utilContacts=[],editingContactId=null,_hasContactEmailCol=false;
 // Fase 3 do filtro county: cobertura utility × county (auto-derivada pelo Python)
 let utilCoverage=[];
 // County pré-selecionado quando usuário abre a aba Contatos vindo de um ticket específico
@@ -519,6 +519,10 @@ async function initSupabase(){
     const{error:cfErr}=await sb.from('tickets').select('completed_feet').limit(1);
     _hasCompletedFeetCol=!cfErr;
     if(!_hasCompletedFeetCol)console.warn('[Init] Coluna completed_feet não existe no banco. Baixa parcial desativada até rodar o ALTER TABLE.');
+    // Detecta se coluna email existe em utility_contacts (evita erro 42703 nos saves de contato)
+    const{error:emErr}=await sb.from('utility_contacts').select('email').limit(1);
+    _hasContactEmailCol=!emErr;
+    if(!_hasContactEmailCol)console.warn('[Init] Coluna email não existe em utility_contacts. Campo email só salva após rodar: ALTER TABLE utility_contacts ADD COLUMN email text;');
     rebuildSupersededSet();
     return true;
   }catch(e){console.error('Supabase error:',e);return false;}
@@ -824,6 +828,7 @@ function renderContacts(){
         if(c.phone_main)phones.push('<span class="cc-tag cc-tag-main">Principal</span> <a href="tel:'+esc(c.phone_main)+'">'+esc(c.phone_main)+'</a>');
         if(c.phone_alt)phones.push('<span class="cc-tag cc-tag-alt">Alt.</span> <a href="tel:'+esc(c.phone_alt)+'">'+esc(c.phone_alt)+'</a>');
         if(c.phone_emergency)phones.push('<span class="cc-tag cc-tag-emerg">Emerg.</span> <a href="tel:'+esc(c.phone_emergency)+'">'+esc(c.phone_emergency)+'</a>');
+        if(c.email)phones.push('<span class="cc-tag">📧</span> <a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>');
         return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--border)">'
           +(name?'<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:120px">'+name+'</span>':'')
           +'<div class="cc-phones" style="margin:0;gap:10px">'+phones.join(' ')+'</div>'
@@ -849,9 +854,10 @@ function openContactModal(id){
       document.getElementById('ct-phone2').value=c.phone_alt||'';
       document.getElementById('ct-phone3').value=c.phone_emergency||'';
       document.getElementById('ct-notes').value=c.notes||'';
+      document.getElementById('ct-email').value=c.email||'';
     }
   }else{
-    ['ct-utility','ct-name','ct-ticket','ct-phone1','ct-phone2','ct-phone3','ct-notes'].forEach(id=>document.getElementById(id).value='');
+    ['ct-utility','ct-name','ct-ticket','ct-phone1','ct-phone2','ct-phone3','ct-notes','ct-email'].forEach(id=>document.getElementById(id).value='');
     document.getElementById('ct-state').value='FL';
   }
   openModal('ov-contact');
@@ -872,6 +878,7 @@ async function saveContact(){
     phone_emergency:document.getElementById('ct-phone3').value.trim(),
     notes:document.getElementById('ct-notes').value.trim()
   };
+  if(_hasContactEmailCol)data.email=document.getElementById('ct-email').value.trim();
   try{
     if(editingContactId){
       const{error}=await sb.from('utility_contacts').update(data).eq('id',editingContactId);

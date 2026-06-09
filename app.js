@@ -3846,7 +3846,7 @@ function exportFiltered(){
   const wb=XLSX.utils.book_new();
   const _doneFtExp=f.reduce((s,t)=>s+(t.completedFeet||0),0);
   const tData=[
-    ['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','Expira','Tipo','Endereço','Job #','Pending','Utilities Pendentes','Empresa','Old Ticket #','Status Old','Expire Old','Pending (Old)','Utilities Pendentes (Old)','Respostas (Old)'],
+    ['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','A realizar','Expira','Tipo','Endereço','Job #','Pending','Utilities Pendentes','Empresa','Old Ticket #','Status Old','Expire Old','Pending (Old)','Utilities Pendentes (Old)','Respostas (Old)'],
     ...f.map(t=>{
       const pends=getTicketPendingUtils(String(t.ticket).trim());
       const pendNames=pends.map(p=>p.utility_name).join(', ');
@@ -3860,12 +3860,19 @@ function exportFiltered(){
         const oldAll=getTicketUtils(oldNum);
         oldAllResps=oldAll.map(u=>u.utility_name+' ('+u.status+')').join(', ');
       }
-      return [t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,t.expire,t.tipo,t.address,t.job,t.pending,pendNames,t.company,t.oldTicket2||'',t.statusOld||'',t.expireOld||'',oldPendCount,oldPendNames,oldAllResps];
+      return [t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,Math.max(0,(t.footage||0)-(t.completedFeet||0)),t.expire,t.tipo,t.address,t.job,t.pending,pendNames,t.company,t.oldTicket2||'',t.statusOld||'',t.expireOld||'',oldPendCount,oldPendNames,oldAllResps];
     }),
-    ['','','','','','','TOTAL:',totalFt,_doneFtExp,'','','','','','','','','','','','','']
+    ['','','','','','','TOTAL:',totalFt,_doneFtExp,Math.max(0,totalFt-_doneFtExp),'','','','','','','','','','','','','']
   ];
   const ws=XLSX.utils.aoa_to_sheet(tData);
-  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:12},{wch:24},{wch:30},{wch:10},{wch:8},{wch:30},{wch:20},{wch:16},{wch:10},{wch:12},{wch:10},{wch:30},{wch:40}];
+  ws['!cols']=[{wch:14},{wch:20},{wch:16},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:11},{wch:12},{wch:24},{wch:30},{wch:10},{wch:8},{wch:30},{wch:20},{wch:16},{wch:10},{wch:12},{wch:10},{wch:30},{wch:40}];
+  // Tarja amarela na coluna "A realizar" (col 9): header, dados e total
+  for(let r=0;r<tData.length;r++){
+    const ref=XLSX.utils.encode_cell({r,c:9});
+    if(!ws[ref])ws[ref]={t:'s',v:''};
+    ws[ref].s={fill:{patternType:'solid',fgColor:{rgb:'FFEB9C'}},font:{bold:r===0||r===tData.length-1},alignment:{horizontal:r===0?'center':'right'}};
+    if(r>0)ws[ref].s.numFmt='#,##0';
+  }
   XLSX.utils.book_append_sheet(wb,ws,'Tickets');
   XLSX.writeFile(wb,'OneDrill_Filtrado_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast('Excel filtrado: '+f.length+' tickets · '+totalFt.toLocaleString()+' ft','success');

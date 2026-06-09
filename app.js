@@ -4714,7 +4714,9 @@ function renderClearedStats(fTickets){
     if(!isClearDirect&&!isClearInGrace)continue;
     var cd=getTicketClearDate(t);if(!cd)continue;
     var tk=t.ticket;
-    if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
+    // Renovados em carência ativa ficam visíveis em "Hoje" durante toda a graça
+    // (estão liberados pra trabalhar HOJE, mesmo que o Clear original tenha sido dias atrás)
+    if((cd>=todayCutoff||isClearInGrace)&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
     if(cd>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
     if(cd>=day7&&!seen7[tk]){c7.push(t);seen7[tk]=1;}
     if(cd>=day30&&!seen30[tk]){c30.push(t);seen30[tk]=1;}

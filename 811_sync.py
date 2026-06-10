@@ -693,10 +693,13 @@ def classify(status_text, response_text=""):
         return "Pending", False
 
     # ── GENERIC BLOCKED PATTERNS ──
+    # WI / Diggers Hotline manda "Not Marked - Delay - Delay" quando utility
+    # pediu prazo SEM ter marcado ainda. Tem que ficar antes do match de "marked"
+    # genérico (que pegaria "not marked" como substring → Clear errado).
     BLOCKED = [
-        "no response", "no access", "unmarked", "unmark", "marking delay",
-        "incorrect address", "unclear instruction", "ongoing job",
-        "scheduled marking", "late ticket"
+        "no response", "no access", "unmarked", "unmark", "not marked",
+        "marking delay", "incorrect address", "unclear instruction",
+        "ongoing job", "scheduled marking", "late ticket",
     ]
     for b in BLOCKED:
         if b in full:
@@ -715,7 +718,9 @@ def classify(status_text, response_text=""):
         if c in full:
             return "Clear", False
 
-    if "marked" in full:
+    # Guard: "marked" sozinho como substring pode pegar "not marked"/"unmarked"/
+    # "remarked". O BLOCKED acima já filtra esses; mantém guard defensivo aqui também.
+    if "marked" in full and "not marked" not in full and "unmarked" not in full and "remarked" not in full:
         return "Clear", False
     if "clear" in full and "unclear" not in full:
         return "Clear", False

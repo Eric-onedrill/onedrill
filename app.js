@@ -4720,18 +4720,10 @@ function renderClearedStats(fTickets){
   var cToday=[],c24=[],c7=[],c30=[],byU7={};
   var seenToday={},seen24={},seen7={},seen30={};
   for(var i=0;i<ft2.length;i++){
-    var t=ft2[i];
-    // Aceita Clear direto OU renovado em carência ativa com statusOld=Clear
-    // (o ticket renovado mantém o history do antigo, então o clear original ainda vale durante a graça)
-    var isClearDirect=t.status==='Clear';
-    var sOld=t.statusOld||t.status_old||'';
-    var isClearInGrace=isRenewed(t)&&isInRenewalGrace(t)&&(sOld==='Clear');
-    if(!isClearDirect&&!isClearInGrace)continue;
+    var t=ft2[i];if(t.status!=='Clear')continue;
     var cd=getTicketClearDate(t);if(!cd)continue;
     var tk=t.ticket;
-    // Renovados em carência ativa ficam visíveis em "Hoje" durante toda a graça
-    // (estão liberados pra trabalhar HOJE, mesmo que o Clear original tenha sido dias atrás)
-    if((cd>=todayCutoff||isClearInGrace)&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
+    if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
     if(cd>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
     if(cd>=day7&&!seen7[tk]){c7.push(t);seen7[tk]=1;}
     if(cd>=day30&&!seen30[tk]){c30.push(t);seen30[tk]=1;}

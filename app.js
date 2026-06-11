@@ -3812,6 +3812,20 @@ function categorizePending(u){
   return{acao:false,label:'Aguardando'};
 }
 
+/** Formata responded_at (ISO ou MM/DD/YYYY) sem drift de fuso — parse direto dos componentes. */
+function _fmtRespDate(v){
+  if(!v)return'';
+  const s=String(v).trim();
+  if(!s||s==='—')return'';
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if(m)return`${m[2]}/${m[3]}/${m[1]} ${m[4]}:${m[5]}`;
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return`${m[2]}/${m[3]}/${m[1]}`;
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2}))?/);
+  if(m)return m[4]?`${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`:`${m[1]}/${m[2]}/${m[3]}`;
+  return s;
+}
+
 /** Coleta tickets em aberto (effectiveStatus=Open) com suas utilities pendentes.
  *  stateFilter: '' = todos, ou 'FL'/'IL'/'IN'/'WI'. */
 function _collectPendingRows(stateFilter){
@@ -3823,7 +3837,7 @@ function _collectPendingRows(stateFilter){
     const pend=getTicketPendingUtils(String(t.ticket||'').trim(),t);
     const utils=pend.map(u=>{
       const cat=categorizePending(u);
-      return{name:u.utility_name||'?',resp:(u.response_text||'').trim(),acao:cat.acao,label:cat.label};
+      return{name:u.utility_name||'?',resp:(u.response_text||'').trim(),at:_fmtRespDate(u.responded_at),acao:cat.acao,label:cat.label};
     });
     // ação primeiro, depois alfabético
     utils.sort((a,b)=>((b.acao?1:0)-(a.acao?1:0))||a.name.localeCompare(b.name));
@@ -3893,7 +3907,8 @@ async function openPendingReport(){
       const chips=r.utils.length?r.utils.map(u=>{
         const bg=u.acao?'#fef2f2':'#f3f4f6',bd=u.acao?'#fca5a5':'#d1d5db',fg=u.acao?'#b91c1c':'#4b5563';
         const respTxt=u.resp?' — '+esc(u.resp):'';
-        return`<div style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:6px;padding:3px 8px;font-size:11px;margin:2px 4px 2px 0">${u.acao?'📞':'⏳'} <b>${esc(u.name)}</b>: ${esc(u.label)}${respTxt}</div>`;
+        const atTxt=u.at?` <span style="opacity:.7">· 📅 ${esc(u.at)}</span>`:'';
+        return`<div style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:6px;padding:3px 8px;font-size:11px;margin:2px 4px 2px 0">${u.acao?'📞':'⏳'} <b>${esc(u.name)}</b>: ${esc(u.label)}${respTxt}${atTxt}</div>`;
       }).join(''):'<span style="font-size:11px;color:var(--muted)">— sem dados de utilities (rode o sync)</span>';
       const flag=r.actionCount>0?`<span style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">${r.actionCount} p/ ligar</span>`:'';
       html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0${r.actionCount>0?';border-left:4px solid #dc2626':''}">`
@@ -3911,19 +3926,19 @@ function exportPendingReport(){
   const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
   const rows=_collectPendingRows(stateFilter);
   const wb=XLSX.utils.book_new();
-  const headers=['Estado','Projeto','Ticket','Expira','Footage','Utility','Resposta','Pendência','Ação?'];
+  const headers=['Estado','Projeto','Ticket','Expira','Footage','Utility','Resposta','Respondido em','Pendência','Ação?'];
   const data=[headers];
   let nAcao=0;
   for(const r of rows){
-    if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','Aguardando sync','']);continue;}
+    if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','','Aguardando sync','']);continue;}
     for(const u of r.utils){
-      data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.label,u.acao?'LIGAR':'']);
+      data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.at||'—',u.label,u.acao?'LIGAR':'']);
       if(u.acao)nAcao++;
     }
   }
   const ws=XLSX.utils.aoa_to_sheet(data);
-  ws['!cols']=[{wch:8},{wch:34},{wch:16},{wch:12},{wch:9},{wch:30},{wch:34},{wch:30},{wch:8}];
-  if(rows.length)ws['!autofilter']={ref:`A1:I${data.length}`};
+  ws['!cols']=[{wch:8},{wch:34},{wch:16},{wch:12},{wch:9},{wch:30},{wch:34},{wch:18},{wch:30},{wch:8}];
+  if(rows.length)ws['!autofilter']={ref:`A1:J${data.length}`};
   ws['!freeze']={xSplit:0,ySplit:1};
   const STATE_FILL={FL:'DDEEFF',IL:'FFF2CC',IN:'FFE0B2',WI:'DCEDC8'};
   const border={style:'thin',color:{rgb:'CCCCCC'}};
@@ -3934,15 +3949,15 @@ function exportPendingReport(){
   }
   ws['!rows']=[{hpt:22}];
   for(let r=1;r<data.length;r++){
-    const acao=data[r][8]==='LIGAR';
+    const acao=data[r][9]==='LIGAR';
     const fillRgb=STATE_FILL[(data[r][0]||'').toUpperCase()];
     for(let c=0;c<headers.length;c++){
       const ref=XLSX.utils.encode_cell({r,c});if(!ws[ref])continue;
       const s={border:borderAll};
       if(fillRgb)s.fill={patternType:'solid',fgColor:{rgb:fillRgb}};
       if(c===4){s.numFmt='#,##0';s.alignment={horizontal:'right'};}
-      else if(c===2||c===3)s.alignment={horizontal:'center'};
-      if(acao&&(c===7||c===8)){s.font={bold:true,color:{rgb:'B91C1C'}};s.fill={patternType:'solid',fgColor:{rgb:'FEE2E2'}};if(c===8)s.alignment={horizontal:'center'};}
+      else if(c===2||c===3||c===7)s.alignment={horizontal:'center'};
+      if(acao&&(c===8||c===9)){s.font={bold:true,color:{rgb:'B91C1C'}};s.fill={patternType:'solid',fgColor:{rgb:'FEE2E2'}};if(c===9)s.alignment={horizontal:'center'};}
       ws[ref].s=s;
     }
   }

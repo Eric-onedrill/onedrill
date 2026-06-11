@@ -2829,7 +2829,7 @@ function renderProjects(){
   };
 
   const filterTag=sf?` · filtrado por ${esc(sf)}`:'';
-  const exportBar=`<div style="grid-column:1/-1;margin-bottom:12px;padding:12px 14px;background:linear-gradient(90deg,#1e40af 0%,#3b82f6 100%);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:white"><div><div style="font-weight:700;font-size:14px">📋 Clear pra trabalhar${filterTag}</div><div style="font-size:11px;opacity:0.9">Tickets Clear (próprio ou via carência ativa) — respeita o filtro de estado acima</div></div><button class="btn" onclick="exportClearReport()" style="background:white;color:#1e40af;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Excel</button></div>`;
+  const exportBar=`<div style="grid-column:1/-1;margin-bottom:12px;padding:12px 14px;background:linear-gradient(90deg,#1e40af 0%,#3b82f6 100%);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:white"><div><div style="font-weight:700;font-size:14px">📋 Clear pra trabalhar${filterTag}</div><div style="font-size:11px;opacity:0.9">Clear (próprio/carência) e Pendências em aberto — respeitam o filtro de estado acima</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="openPendingReport()" style="background:rgba(255,255,255,0.18);color:white;border:1px solid rgba(255,255,255,0.55);padding:8px 16px;font-weight:700;border-radius:6px">📞 Pendências</button><button class="btn" onclick="exportClearReport()" style="background:white;color:#1e40af;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Clear</button></div></div>`;
   g.innerHTML=exportBar+(active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>');
 }
 
@@ -3765,6 +3765,194 @@ function exportClearReport(){
   XLSX.writeFile(wb,`OneDrill_Clear_pra_Trabalhar${suffix}_${ts}.xlsx`);
   const filtTag=stateFilter?` (${stateFilter})`:'';
   toast(`${rows.length} tickets · ${totalFt.toLocaleString()} ft exportados${filtTag}`,'success');
+}
+
+// ═══════════ RELATÓRIO DE PENDÊNCIAS (tickets em aberto + utilities faltando) ═══════════
+/** Classifica uma resposta Pending de utility:
+ *  - acao=true  → utility RESPONDEU algo que bloqueia (3E, Not Marked, sem acesso, etc.) → precisa LIGAR/ir atrás
+ *  - acao=false → só aguardando (No Response, agendado, tardio) → esperar
+ *  Espelha a lógica do classify() do 811_sync.py, focado nos sub-tipos de Pending. */
+function categorizePending(u){
+  const raw=(u.response_text||'').trim();
+  const txt=(raw+' '+(u.status||'')).toLowerCase();
+  // Frases que exigem AÇÃO (keyword-first — evita falso positivo de código em endereço)
+  const KW=[
+    ['already performed','3E — escavação já feita/cancelada'],
+    ['could not gain access','Sem acesso ao local'],
+    ['no access','Sem acesso ao local'],
+    ['incorrect address','Endereço incorreto'],
+    ['unclear','Instruções pouco claras'],
+    ['partially marked','Parcialmente marcado'],
+    ['extraordinary','Circunstâncias extraordinárias'],
+    ['active facilities','Facilidades ativas (NÃO escavar)'],
+    ['joint meet','Joint meet agendado'],
+    ['do not excavate','NÃO ESCAVAR'],
+    ['do not demolish','NÃO DEMOLIR'],
+    ['working with excavator','Em andamento c/ escavador'],
+    ['line untonable','Linha não detectável'],
+    ['ongoing','Trabalho em andamento'],
+    ['marking delay','Atraso na marcação'],
+    ['not marked','Não marcado'],
+    ['unmarked','Não marcado'],
+    ['re-mark needed','Precisa remarcar'],
+    ['remark needed','Precisa remarcar'],
+  ];
+  for(let i=0;i<KW.length;i++){if(txt.indexOf(KW[i][0])>=0)return{acao:true,label:KW[i][1]};}
+  // Códigos isolados (3A/3B/3C/3D/3E/3F/3G/3T/6A/6B) com fronteira pra não pegar "Apt 3A" etc.
+  const m=raw.toLowerCase().match(/(?:^|[^0-9a-z])([367][abcdefgt])(?:[^0-9a-z]|$)/);
+  const code=m?m[1]:'';
+  const CODE_LBL={'3a':'3A — sem acesso','3b':'3B — endereço incorreto','3c':'3C — atraso na marcação','3d':'3D — instruções pouco claras','3e':'3E — escavação já feita/cancelada','3f':'3F — linha não detectável','3g':'3G — parcialmente marcado','3t':'3T — circ. extraordinárias','6a':'6A — facilidades ativas','6b':'6B — joint meet'};
+  if(code&&CODE_LBL[code])return{acao:true,label:CODE_LBL[code]};
+  // Aguardando (sem ação imediata)
+  if(txt.indexOf('no response')>=0)return{acao:false,label:'Sem resposta ainda'};
+  if(txt.indexOf('scheduled marking')>=0)return{acao:false,label:'Marcação agendada'};
+  if(txt.indexOf('re-mark not needed')>=0||txt.indexOf('remark not needed')>=0)return{acao:false,label:'Re-mark not needed (ack)'};
+  if(txt.indexOf('late')>=0)return{acao:false,label:'Resposta tardia'};
+  if(!raw)return{acao:false,label:'Sem resposta ainda'};
+  return{acao:false,label:'Aguardando'};
+}
+
+/** Coleta tickets em aberto (effectiveStatus=Open) com suas utilities pendentes.
+ *  stateFilter: '' = todos, ou 'FL'/'IL'/'IN'/'WI'. */
+function _collectPendingRows(stateFilter){
+  const out=[];
+  for(const t of tickets){
+    if(stateFilter&&(t.state||'').toUpperCase()!==stateFilter)continue;
+    if(isSuperseded(t))continue;
+    if(effectiveStatus(t)!=='Open')continue;   // só os efetivamente EM ABERTO
+    const pend=getTicketPendingUtils(String(t.ticket||'').trim(),t);
+    const utils=pend.map(u=>{
+      const cat=categorizePending(u);
+      return{name:u.utility_name||'?',resp:(u.response_text||'').trim(),acao:cat.acao,label:cat.label};
+    });
+    // ação primeiro, depois alfabético
+    utils.sort((a,b)=>((b.acao?1:0)-(a.acao?1:0))||a.name.localeCompare(b.name));
+    const proj=projects.find(p=>p.id===t.projectId);
+    out.push({
+      state:t.state||'?',
+      project:proj?proj.name:'(Sem projeto)',
+      ticket:t.ticket,
+      location:cleanLoc(t.location)||'',
+      expire:t.expire||'—',
+      footage:Math.max(0,(t.footage||0)-(t.completedFeet||0)),
+      client:t.client||'',
+      utils,
+      actionCount:utils.filter(u=>u.acao).length,
+      pendCount:utils.length
+    });
+  }
+  // tickets que precisam de ação primeiro, depois estado/projeto/expira
+  out.sort((a,b)=>{
+    const aa=a.actionCount>0,bb=b.actionCount>0;
+    if(aa!==bb)return(bb?1:0)-(aa?1:0);
+    if(a.state!==b.state)return a.state.localeCompare(b.state);
+    if(a.project!==b.project)return a.project.localeCompare(b.project);
+    return(a.expire||'').localeCompare(b.expire||'');
+  });
+  return out;
+}
+
+function _prStat(n,lbl,color){
+  return`<div style="text-align:center;padding:8px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;min-width:90px"><div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${color}">${n}</div><div style="font-size:10px;color:var(--muted)">${lbl}</div></div>`;
+}
+
+async function openPendingReport(){
+  if(!utilCacheLoaded){try{await loadUtilCache();}catch(e){}}
+  const stateFilterEl=document.getElementById('proj-state-filter');
+  const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
+  const rows=_collectPendingRows(stateFilter);
+  const totalTickets=rows.length;
+  const actionTickets=rows.filter(r=>r.actionCount>0).length;
+  const filtTag=stateFilter?' · '+stateFilter:'';
+
+  let ov=document.getElementById('ov-pending-report');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ov-pending-report';ov.className='overlay';
+    ov.innerHTML='<div class="modal" style="max-width:920px"><div class="modal-header"><h3 id="pr-title"></h3><button class="modal-close" onclick="closeModal(\'ov-pending-report\')">×</button></div><div id="pr-body" style="padding:16px;max-height:72vh;overflow-y:auto"></div></div>';
+    document.body.appendChild(ov);
+  }
+  document.getElementById('pr-title').textContent='📞 Pendências — tickets em aberto'+filtTag;
+
+  let html='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
+    +_prStat(totalTickets,'em aberto','var(--text)')
+    +_prStat(actionTickets,'precisam ligar','#dc2626')
+    +_prStat(totalTickets-actionTickets,'só aguardando','#6b7280')
+    +'<button class="btn" onclick="exportPendingReport()" style="margin-left:auto;background:#7c2d12;color:white;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Excel</button>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">🔴 <b>precisa ligar</b>: utility respondeu algo que bloqueia (3E, Not Marked, sem acesso…). ⏳ <b>aguardando</b>: ainda sem resposta.</div>';
+
+  if(!rows.length){
+    html+='<div style="color:var(--muted);font-size:13px;text-align:center;padding:30px">Nenhum ticket em aberto'+(stateFilter?' em '+stateFilter:'')+'. 🎉</div>';
+  }else{
+    let curState='',curProj='';
+    for(const r of rows){
+      if(r.state!==curState){curState=r.state;curProj='';
+        html+=`<div style="margin-top:14px;font-weight:700;font-size:13px;color:var(--text);border-bottom:2px solid var(--border);padding-bottom:4px">${esc(r.state)}</div>`;}
+      if(r.project!==curProj){curProj=r.project;
+        html+=`<div style="margin-top:8px;font-size:12px;font-weight:600;color:var(--muted)">📁 ${esc(r.project)}</div>`;}
+      const chips=r.utils.length?r.utils.map(u=>{
+        const bg=u.acao?'#fef2f2':'#f3f4f6',bd=u.acao?'#fca5a5':'#d1d5db',fg=u.acao?'#b91c1c':'#4b5563';
+        const respTxt=u.resp?' — '+esc(u.resp):'';
+        return`<div style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:6px;padding:3px 8px;font-size:11px;margin:2px 4px 2px 0">${u.acao?'📞':'⏳'} <b>${esc(u.name)}</b>: ${esc(u.label)}${respTxt}</div>`;
+      }).join(''):'<span style="font-size:11px;color:var(--muted)">— sem dados de utilities (rode o sync)</span>';
+      const flag=r.actionCount>0?`<span style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">${r.actionCount} p/ ligar</span>`:'';
+      html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0${r.actionCount>0?';border-left:4px solid #dc2626':''}">`
+        +`<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><div><span style="font-family:var(--mono);font-weight:700;font-size:13px;cursor:pointer;color:var(--accent)" onclick="(function(){var x=tickets.find(t=>String(t.ticket).trim()==='${esc(String(r.ticket).trim())}');if(x){closeModal('ov-pending-report');openTicketDetail(x.id);}})()">${esc(r.ticket)}</span> ${flag} <span style="font-size:11px;color:var(--muted)">${esc(r.location)}</span></div><div style="font-size:11px;color:var(--muted)">expira ${esc(r.expire)} · ${r.footage.toLocaleString()} ft</div></div>`
+        +`<div style="margin-top:6px">${chips}</div></div>`;
+    }
+  }
+  document.getElementById('pr-body').innerHTML=html;
+  openModal('ov-pending-report');
+}
+
+function exportPendingReport(){
+  if(typeof XLSX==='undefined'){toast('XLSX não carregado','danger');return;}
+  const stateFilterEl=document.getElementById('proj-state-filter');
+  const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
+  const rows=_collectPendingRows(stateFilter);
+  const wb=XLSX.utils.book_new();
+  const headers=['Estado','Projeto','Ticket','Expira','Footage','Utility','Resposta','Pendência','Ação?'];
+  const data=[headers];
+  let nAcao=0;
+  for(const r of rows){
+    if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','Aguardando sync','']);continue;}
+    for(const u of r.utils){
+      data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.label,u.acao?'LIGAR':'']);
+      if(u.acao)nAcao++;
+    }
+  }
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  ws['!cols']=[{wch:8},{wch:34},{wch:16},{wch:12},{wch:9},{wch:30},{wch:34},{wch:30},{wch:8}];
+  if(rows.length)ws['!autofilter']={ref:`A1:I${data.length}`};
+  ws['!freeze']={xSplit:0,ySplit:1};
+  const STATE_FILL={FL:'DDEEFF',IL:'FFF2CC',IN:'FFE0B2',WI:'DCEDC8'};
+  const border={style:'thin',color:{rgb:'CCCCCC'}};
+  const borderAll={top:border,bottom:border,left:border,right:border};
+  for(let c=0;c<headers.length;c++){
+    const ref=XLSX.utils.encode_cell({r:0,c});if(!ws[ref])continue;
+    ws[ref].s={font:{bold:true,color:{rgb:'FFFFFF'},sz:11},fill:{patternType:'solid',fgColor:{rgb:'7C2D12'}},alignment:{horizontal:'center',vertical:'center'},border:borderAll};
+  }
+  ws['!rows']=[{hpt:22}];
+  for(let r=1;r<data.length;r++){
+    const acao=data[r][8]==='LIGAR';
+    const fillRgb=STATE_FILL[(data[r][0]||'').toUpperCase()];
+    for(let c=0;c<headers.length;c++){
+      const ref=XLSX.utils.encode_cell({r,c});if(!ws[ref])continue;
+      const s={border:borderAll};
+      if(fillRgb)s.fill={patternType:'solid',fgColor:{rgb:fillRgb}};
+      if(c===4){s.numFmt='#,##0';s.alignment={horizontal:'right'};}
+      else if(c===2||c===3)s.alignment={horizontal:'center'};
+      if(acao&&(c===7||c===8)){s.font={bold:true,color:{rgb:'B91C1C'}};s.fill={patternType:'solid',fgColor:{rgb:'FEE2E2'}};if(c===8)s.alignment={horizontal:'center'};}
+      ws[ref].s=s;
+    }
+  }
+  XLSX.utils.book_append_sheet(wb,ws,'Pendencias');
+  const now=new Date();
+  const ts=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+
+           '_'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0');
+  const suffix=stateFilter?'_'+stateFilter:'';
+  XLSX.writeFile(wb,`OneDrill_Pendencias${suffix}_${ts}.xlsx`);
+  toast(`${rows.length} tickets em aberto · ${nAcao} utilities p/ ligar`,'success');
 }
 
 function showNoProjModal(){

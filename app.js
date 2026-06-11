@@ -686,8 +686,16 @@ async function deleteSecondNotice(ticketNum,ts){
   if(ok){toast('2nd notice removido','success');renderSecondNotices(t);}
   else{t.history=bk;toast('Erro ao remover.','danger');}
 }
-function renderSecondNotices(t){
+async function renderSecondNotices(t){
   const el=document.getElementById('det-2nd-notices');if(!el)return;
+  // Busca o history fresco do banco — 2nd notices podem ter sido inseridos em massa
+  // ou pelo sync, sem estar no array `tickets` em memória (igual renderUtils faz).
+  try{
+    if(typeof t.id==='number'&&t.id>0){
+      const{data}=await sb.from('tickets').select('history').eq('id',t.id).maybeSingle();
+      if(data&&Array.isArray(data.history)){t.history=data.history;if(typeof renderHistory==='function')renderHistory(t);}
+    }
+  }catch(e){}
   const list=getSecondNotices(t).sort((a,b)=>(b.ts||0)-(a.ts||0));
   let h='';
   if(!list.length){

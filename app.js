@@ -3861,10 +3861,9 @@ function exportClearReport(){
 }
 
 // ═══════════ RELATÓRIO DE PENDÊNCIAS (tickets em aberto + utilities faltando) ═══════════
-/** Classifica uma resposta Pending de utility:
- *  - acao=true  → utility RESPONDEU algo que bloqueia (3E, Not Marked, sem acesso, etc.) → precisa LIGAR/ir atrás
- *  - acao=false → só aguardando (No Response, agendado, tardio) → esperar
- *  Espelha a lógica do classify() do 811_sync.py, focado nos sub-tipos de Pending. */
+/** Classifica uma resposta Pending de utility. O LABEL descreve o motivo da pendência.
+ *  Regra do Eric (2026-06): TODA pendência (tudo que não é Clear) precisa de follow-up
+ *  → acao=true ("pra LIGAR"). Não mexe no classify() do status — só na ação do relatório. */
 function categorizePending(u){
   const raw=(u.response_text||'').trim();
   const txt=(raw+' '+(u.status||'')).toLowerCase();
@@ -3896,13 +3895,13 @@ function categorizePending(u){
   const code=m?m[1]:'';
   const CODE_LBL={'3a':'3A — sem acesso','3b':'3B — endereço incorreto','3c':'3C — atraso na marcação','3d':'3D — instruções pouco claras','3e':'3E — escavação já feita/cancelada','3f':'3F — linha não detectável','3g':'3G — parcialmente marcado','3t':'3T — circ. extraordinárias','6a':'6A — facilidades ativas','6b':'6B — joint meet'};
   if(code&&CODE_LBL[code])return{acao:true,label:CODE_LBL[code]};
-  // Aguardando (sem ação imediata)
-  if(txt.indexOf('no response')>=0)return{acao:false,label:'Sem resposta ainda'};
-  if(txt.indexOf('scheduled marking')>=0)return{acao:false,label:'Marcação agendada'};
-  if(txt.indexOf('re-mark not needed')>=0||txt.indexOf('remark not needed')>=0)return{acao:false,label:'Re-mark not needed (ack)'};
-  if(txt.indexOf('late')>=0)return{acao:false,label:'Resposta tardia'};
-  if(!raw)return{acao:false,label:'Sem resposta ainda'};
-  return{acao:false,label:'Aguardando'};
+  // Eric: tudo que não é Clear é pendência pra LIGAR (acao=true). Label = só o motivo.
+  if(txt.indexOf('no response')>=0)return{acao:true,label:'Sem resposta ainda'};
+  if(txt.indexOf('scheduled marking')>=0)return{acao:true,label:'Marcação agendada'};
+  if(txt.indexOf('re-mark not needed')>=0||txt.indexOf('remark not needed')>=0)return{acao:true,label:'Re-mark not needed (ack)'};
+  if(txt.indexOf('late')>=0)return{acao:true,label:'Resposta tardia'};
+  if(!raw)return{acao:true,label:'Sem resposta ainda'};
+  return{acao:true,label:'Pendente'};
 }
 
 /** Formata responded_at (ISO ou MM/DD/YYYY) sem drift de fuso — parse direto dos componentes. */
@@ -3980,13 +3979,13 @@ async function openPendingReport(){
   }
   document.getElementById('pr-title').textContent='📞 Pendências — tickets em aberto'+filtTag;
 
+  const totalPend=rows.reduce((s,r)=>s+r.pendCount,0);
   let html='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
-    +_prStat(totalTickets,'em aberto','var(--text)')
-    +_prStat(actionTickets,'precisam ligar','#dc2626')
-    +_prStat(totalTickets-actionTickets,'só aguardando','#6b7280')
+    +_prStat(totalTickets,'tickets em aberto','var(--text)')
+    +_prStat(totalPend,'utilities p/ ligar','#dc2626')
     +'<button class="btn" onclick="exportPendingReport()" style="margin-left:auto;background:#7c2d12;color:white;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Excel</button>'
     +'</div>'
-    +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">🔴 <b>precisa ligar</b>: utility respondeu algo que bloqueia (3E, Not Marked, sem acesso…). ⏳ <b>aguardando</b>: ainda sem resposta.</div>';
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">🔴 Toda utility que <b>não está Clear</b> é pendência <b>pra ligar</b>. O rótulo indica o motivo (sem resposta, tardia, não marcado, sem acesso…).</div>';
 
   if(!rows.length){
     html+='<div style="color:var(--muted);font-size:13px;text-align:center;padding:30px">Nenhum ticket em aberto'+(stateFilter?' em '+stateFilter:'')+'. 🎉</div>';

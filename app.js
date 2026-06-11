@@ -1315,7 +1315,7 @@ async function renderMap(){
   clusterGroup=L.markerClusterGroup({maxClusterRadius:40,spiderfyOnMaxZoom:true,showCoverageOnHover:false,disableClusteringAtZoom:17});
 
   for(const t of mapFiltered()){
-    const c=scol(effectiveStatus(t)),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const c=effColor(t),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
     const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
     if(coords){
       const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});
@@ -1351,7 +1351,7 @@ async function renderMap(){
 
 function showPanel(t){
   const es=effectiveStatus(t);
-  const c=scol(es);
+  const c=effColor(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const isStale=expireIsStale(t);
   const proj=projects.find(p=>p.id===t.projectId);
@@ -1368,7 +1368,8 @@ function showPanel(t){
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentPanelId);return false;" title="Clique para editar">${fmtProgress(t)} ✏</span></div>`+miniProgressBar(t)
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
-    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(effStatusLabel(t))}${inGrace?' 🔄':''}</span></div>`
+    +(_isNoShowReleased(t)?`<div style="background:#fff3e0;border:1px solid #fed7aa;border-radius:var(--r);padding:6px 9px;margin:4px 0;font-size:10px;color:#b45309;font-weight:600">🟠 Liberado por no-show — necessário localizar a fibra em campo</div>`:'')
     +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
     +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?(isExp==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
@@ -1460,8 +1461,8 @@ function renderList(){
   document.getElementById('tcount').textContent=`${f.length} ticket${f.length!==1?'s':''}`;
   document.getElementById('tlist').innerHTML=f.length?f.map(t=>{
     const es=effectiveStatus(t);const inGrace=isRenewed(t)&&isInRenewalGrace(t);
-    return`<div class="tcard s-${es.toLowerCase()}" data-id="${t.id}" onclick="focusT(${t.id})">`
-    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
+    return`<div class="tcard s-${effStatusCls(t)}" data-id="${t.id}" onclick="focusT(${t.id})">`
+    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${effStatusCls(t)}">${esc(effStatusLabel(t))}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
     +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${fmtProgress(t)}</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
     +miniProgressBar(t)
@@ -1616,7 +1617,7 @@ function openTicketDetail(id){
   const isStale=expireIsStale(t);
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   const es=effectiveStatus(t);
-  const c=scol(es);
+  const c=effColor(t);
   // FIX 2026-05-13: isExpired dispara banner + popup fullscreen
   // pra QUALQUER ticket vencido (exceto Closed/Cancel).
   // Antes: so Open/Damage. Eric reportou que ticket Clear vencido
@@ -1663,8 +1664,9 @@ function openTicketDetail(id){
     +'<div style="font-size:11px;color:#6b21a8;margin-top:4px">Este ticket tem utilities com instalações privadas (3H). Contrate um locator privado antes de escavar.</div>'
     +'</div>':'';
 
-  document.getElementById('det-info').innerHTML=expiredBanner+staleBanner+graceBannerDet+wpBanner+pvtBanner
-    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(es)}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
+  const nsBanner=_isNoShowReleased(t)?'<div style="background:#fff3e0;border:2px solid #fed7aa;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:13px;font-weight:700;color:#d97706">🟠 LIBERADO POR NO-SHOW</div><div style="font-size:11px;color:#b45309;margin-top:4px">Fibra atingiu o 4º no-show e o resto está Clear. Status efetivo <strong>Clear</strong> — mas é necessário <strong>localizar a fibra em campo</strong> antes de escavar.</div></div>':'';
+  document.getElementById('det-info').innerHTML=expiredBanner+staleBanner+graceBannerDet+wpBanner+pvtBanner+nsBanner
+    +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(effStatusLabel(t))}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Local</span><span class="mp-val">${esc(t.location)}, ${esc(t.state)}</span></div>`
@@ -2172,6 +2174,28 @@ function newTicketFullyCleared(t){
  *
  *   4. Status travado manualmente → respeita sempre (override absoluto)
  */
+// Liberação automática por no-show de FIBRA (Eric): se TODAS as pendências do ticket
+// são utilities de FIBRA que chegaram ao 4º no-show (3 falhas reais: 2nd/3rd/4th) e
+// todo o resto está Clear → o ticket é liberado. effectiveStatus vira 'Clear'; a COR
+// é laranja (via _isNoShowReleased nos pontos de render) com a nota "localizar fibra".
+function _isNoShowReleased(t){
+  if(!utilCacheLoaded||!t||t.status_locked)return false;
+  if((t.status||'')!=='Open')return false;      // só tickets em aberto
+  const utils=getTicketUtils(t.ticket);
+  if(!utils.length)return false;
+  const released=new Set(['Clear','Private','Marked','Unmarked']);
+  let fiberExhausted=false;
+  for(const u of utils){
+    if(released.has(u.status))continue;          // utility já liberada
+    if(isFiberUtility(u.utility_name)&&countSecondNotices(t,u.utility_name)>=4){fiberExhausted=true;continue;}
+    return false;                                // pendência que NÃO é fibra no 4º no-show → bloqueia
+  }
+  return fiberExhausted;                          // libera só se ≥1 fibra esgotada e nada mais bloqueia
+}
+// Cor / classe de badge / label do status considerando a liberação por no-show (laranja).
+function effColor(t){return _isNoShowReleased(t)?'#d97706':scol(effectiveStatus(t));}
+function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(effectiveStatus(t)||'').toLowerCase();}
+function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':effectiveStatus(t);}
 function effectiveStatus(t){
   // Status travado manualmente = sempre respeitar
   if(t.status_locked)return t.status;
@@ -2211,6 +2235,7 @@ function effectiveStatus(t){
     // Regra 1: antigo não-Clear → mostra status real do novo (sem proteção de carência)
     return t.status;
   }
+  if(_isNoShowReleased(t))return 'Clear';
   return t.status;
 }
 
@@ -2494,7 +2519,7 @@ function renderMiniMap(t){
     try{
       miniMap=L.map('mini-map',{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false});
       L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:21}).addTo(miniMap);
-      const c=scol(effectiveStatus(t));
+      const c=effColor(t);
       if(hasPath){
         const ln=L.polyline(t.fieldPath,{color:c,weight:4,opacity:0.9}).addTo(miniMap);
         miniMap.fitBounds(ln.getBounds(),{padding:[14,14]});
@@ -3322,8 +3347,8 @@ function renderSharedList(){
   document.getElementById('shared-count').textContent=`${f.length} ticket${f.length!==1?'s':''}`;
   document.getElementById('shared-list').innerHTML=f.length?f.map(t=>{
     const es=effectiveStatus(t);const inGrace=isRenewed(t)&&isInRenewalGrace(t);
-    return`<div class="tcard s-${es.toLowerCase()}" data-id="${t.id}" onclick="shFocusTicket(${t.id})">`
-    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${es.toLowerCase()}">${esc(es)}${inGrace?' 🔄':''}</span></div>`
+    return`<div class="tcard s-${effStatusCls(t)}" data-id="${t.id}" onclick="shFocusTicket(${t.id})">`
+    +`<div class="tcard-top"><span class="tcard-num">${esc(t.ticket)}${isRenewed(t)?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}</span><span class="sbadge b-${effStatusCls(t)}">${esc(effStatusLabel(t))}${inGrace?' 🔄':''}</span></div>`
     +`<div class="tcard-client">${esc(t.client)}${t.prime?' · '+esc(t.prime):''}</div>`
     +`<div class="tcard-meta"><span>${esc(t.location)}, ${esc(t.state)}</span><span>${fmtProgress(t)}</span>${t.tipo?`<span>${esc(t.tipo)}</span>`:''}</div>`
     +miniProgressBar(t)
@@ -3358,7 +3383,7 @@ function renderSharedMap(){
   clearSharedMapLayers();
   const f=sharedFiltered();
   for(const t of f){
-    const c=scol(effectiveStatus(t)),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const c=effColor(t),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
     const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
     if(coords){
       const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});
@@ -4711,7 +4736,7 @@ function toggleInfoPanel(){
       const last=t.history?.[t.history.length-1];
       h+='<div class="notif-item" onclick="openTicketDetail('+t.id+');toggleInfoPanel()">'
         +'<span style="font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</span> '
-        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span>'
+        +'<span class="sbadge b-'+effStatusCls(t)+'" style="font-size:9px">'+esc(effStatusLabel(t))+'</span>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+esc(last?.action||'—')+'</div></div>';
     }
     h+='<div class="notif-section" style="margin-top:12px">ℹ️ Sistema</div><div style="font-size:12px;color:var(--text2);padding:6px 10px;line-height:1.8">🔵 Dados: Supabase<br>🟢 Sync: Automática<br>🗺 Mapa: Google Hybrid</div>';
@@ -5395,7 +5420,7 @@ function renderWatchAndProtectAlert(fTickets){
       return'<div style="background:white;border:1px solid #fca5a5;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
         +'<div style="display:flex;justify-content:space-between;align-items:center">'
         +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
-        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span></div>'
+        +'<span class="sbadge b-'+effStatusCls(t)+'" style="font-size:9px">'+esc(effStatusLabel(t))+'</span></div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
         +'<div style="font-size:9px;color:#dc2626;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
         +'</div>';
@@ -5432,7 +5457,7 @@ function renderPrivateLocatorAlert(fTickets){
       return'<div style="background:white;border:1px solid #d8b4fe;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
         +'<div style="display:flex;justify-content:space-between;align-items:center">'
         +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
-        +'<span class="sbadge b-'+effectiveStatus(t).toLowerCase()+'" style="font-size:9px">'+esc(effectiveStatus(t))+'</span></div>'
+        +'<span class="sbadge b-'+effStatusCls(t)+'" style="font-size:9px">'+esc(effStatusLabel(t))+'</span></div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
         +'<div style="font-size:9px;color:#7c3aed;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
         +'</div>';

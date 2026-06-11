@@ -3909,17 +3909,16 @@ function categorizePending(u){
   return{acao:true,label:'Pendente'};
 }
 
-/** Formata responded_at (ISO ou MM/DD/YYYY) sem drift de fuso — parse direto dos componentes. */
+/** Formata responded_at em formato americano MÊS/DIA/ANO (só a data, sem hora).
+ *  Parse direto dos componentes — sem drift de fuso (não usa new Date()). */
 function _fmtRespDate(v){
   if(!v)return'';
   const s=String(v).trim();
   if(!s||s==='—')return'';
-  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
-  if(m)return`${m[2]}/${m[3]}/${m[1]} ${m[4]}:${m[5]}`;
-  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);          // ISO 2026-06-11... -> 06/11/2026
   if(m)return`${m[2]}/${m[3]}/${m[1]}`;
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2}))?/);
-  if(m)return m[4]?`${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`:`${m[1]}/${m[2]}/${m[3]}`;
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);         // já em barras (US) -> mantém mês/dia/ano
+  if(m)return`${m[1]}/${m[2]}/${m[3]}`;
   return s;
 }
 

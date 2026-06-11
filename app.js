@@ -3947,6 +3947,29 @@ function _fmtRespDate(v){
   return s;
 }
 
+// Acha contatos (telefone/email) cadastrados que casam com a utility pendente.
+// Match por token significativo do nome (DUKE, FRONTIER, KNOLOGY, UNITI, ZAYO, WATER...) + mesmo estado.
+const _CONTACT_STOP=new Set(['ENERGY','POWER','ELECTRIC','FIBER','FIBRE','COMMUNICATIONS','COMMUNICATION','BROADBAND','GROUP','UTILITIES','UTILITY','COUNTY','COMM','FORMERLY','COMPANY','SERVICES','NETWORKS','NETWORK','LIGHTWAVE','SYSTEMS','TELECOM','CABLE','LOCATOR','LOCATORS','THE','AND','LLC','INC','DBA']);
+function _utilTokens(s){
+  return (s||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>=3&&!_CONTACT_STOP.has(w));
+}
+function _utilContactsFor(utilityName, state){
+  const ut=_utilTokens(utilityName);
+  if(!ut.length)return[];
+  const st=(state||'').toUpperCase();
+  const seen=new Set(), out=[];
+  for(const c of utilContacts){
+    const cSt=(c.state||'').toUpperCase();
+    if(st&&cSt&&cSt!==st)continue;            // estado diferente → ignora (contato sem estado entra)
+    if(!_utilTokens(c.utility_name).some(t=>ut.includes(t)))continue;  // sem token em comum
+    for(const ph of [c.phone_main,c.phone_alt,c.phone_emergency].map(x=>(x||'').trim()).filter(Boolean)){
+      const key=ph.replace(/\D/g,'').slice(-10);
+      if(key&&!seen.has(key)){seen.add(key);out.push({name:c.contact_name||c.utility_name,phone:ph,email:(c.email||'').trim()});}
+    }
+  }
+  return out;
+}
+
 /** Coleta tickets em aberto (effectiveStatus=Open) com suas utilities pendentes.
  *  stateFilter: '' = todos, ou 'FL'/'IL'/'IN'/'WI'. */
 function _collectPendingRows(stateFilter){
@@ -3958,7 +3981,7 @@ function _collectPendingRows(stateFilter){
     const pend=getTicketPendingUtils(String(t.ticket||'').trim(),t);
     const utils=pend.map(u=>{
       const cat=categorizePending(u);
-      return{name:u.utility_name||'?',resp:(u.response_text||'').trim(),at:_fmtRespDate(u.responded_at),acao:cat.acao,label:cat.label};
+      return{name:u.utility_name||'?',resp:(u.response_text||'').trim(),at:_fmtRespDate(u.responded_at),acao:cat.acao,label:cat.label,contacts:_utilContactsFor(u.utility_name||'',t.state)};
     });
     // ação primeiro, depois alfabético
     utils.sort((a,b)=>((b.acao?1:0)-(a.acao?1:0))||a.name.localeCompare(b.name));
@@ -3993,6 +4016,7 @@ function _prStat(n,lbl,color){
 
 async function openPendingReport(){
   if(!utilCacheLoaded){try{await loadUtilCache();}catch(e){}}
+  if(!utilContacts||!utilContacts.length){try{await loadContacts();}catch(e){}}
   const stateFilterEl=document.getElementById('proj-state-filter');
   const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
   const rows=_collectPendingRows(stateFilter);
@@ -4029,7 +4053,12 @@ async function openPendingReport(){
         const bg=u.acao?'#fef2f2':'#f3f4f6',bd=u.acao?'#fca5a5':'#d1d5db',fg=u.acao?'#b91c1c':'#4b5563';
         const respTxt=u.resp?' — '+esc(u.resp):'';
         const atTxt=u.at?` <span style="opacity:.7">· 📅 ${esc(u.at)}</span>`:'';
-        return`<div style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:6px;padding:3px 8px;font-size:11px;margin:2px 4px 2px 0">${u.acao?'📞':'⏳'} <b>${esc(u.name)}</b>: ${esc(u.label)}${respTxt}${atTxt}</div>`;
+        const telTxt=(u.contacts&&u.contacts.length)
+          ? u.contacts.map(ct=>'<a href="tel:'+esc(ct.phone)+'" style="color:#1d4ed8;font-weight:600;text-decoration:none">☎ '+esc(ct.phone)+'</a>'+(ct.email?' <span style="color:#6b7280">✉ '+esc(ct.email)+'</span>':'')+(ct.name?' <span style="opacity:.55">('+esc(ct.name)+')</span>':'')).join(' &nbsp; ')
+          : '<span style="opacity:.5;font-style:italic">sem telefone cadastrado</span>';
+        return`<div style="background:${bg};border:1px solid ${bd};border-radius:6px;padding:5px 8px;font-size:11px;margin:3px 0">`
+          +`<div>${u.acao?'📞':'⏳'} <b style="color:${fg}">${esc(u.name)}</b>: ${esc(u.label)}${respTxt}${atTxt}</div>`
+          +`<div style="margin-top:3px">${telTxt}</div></div>`;
       }).join(''):'<span style="font-size:11px;color:var(--muted)">— sem dados de utilities (rode o sync)</span>';
       const flag=r.actionCount>0?`<span style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px">${r.actionCount} p/ ligar</span>`:'';
       html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0${r.actionCount>0?';border-left:4px solid #dc2626':''}">`
@@ -4047,19 +4076,21 @@ function exportPendingReport(){
   const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
   const rows=_collectPendingRows(stateFilter);
   const wb=XLSX.utils.book_new();
-  const headers=['Estado','Projeto','Ticket','Expira','Footage','Utility','Resposta','Respondido em','Pendência','Ação?'];
+  const headers=['Estado','Projeto','Ticket','Expira','Footage','Utility','Resposta','Respondido em','Pendência','Ação?','Telefone(s)','Email'];
   const data=[headers];
   let nAcao=0;
   for(const r of rows){
-    if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','','Aguardando sync','']);continue;}
+    if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','','Aguardando sync','','','']);continue;}
     for(const u of r.utils){
-      data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.at||'—',u.label,u.acao?'LIGAR':'']);
+      const tels=(u.contacts||[]).map(c=>c.phone).join(' / ');
+      const mails=(u.contacts||[]).map(c=>c.email).filter(Boolean).join(' / ');
+      data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.at||'—',u.label,u.acao?'LIGAR':'',tels,mails]);
       if(u.acao)nAcao++;
     }
   }
   const ws=XLSX.utils.aoa_to_sheet(data);
-  ws['!cols']=[{wch:8},{wch:34},{wch:16},{wch:12},{wch:9},{wch:30},{wch:34},{wch:18},{wch:30},{wch:8}];
-  if(rows.length)ws['!autofilter']={ref:`A1:J${data.length}`};
+  ws['!cols']=[{wch:8},{wch:34},{wch:16},{wch:12},{wch:9},{wch:30},{wch:34},{wch:18},{wch:30},{wch:8},{wch:32},{wch:24}];
+  if(rows.length)ws['!autofilter']={ref:`A1:L${data.length}`};
   ws['!freeze']={xSplit:0,ySplit:1};
   const STATE_FILL={FL:'DDEEFF',IL:'FFF2CC',IN:'FFE0B2',WI:'DCEDC8'};
   const border={style:'thin',color:{rgb:'CCCCCC'}};

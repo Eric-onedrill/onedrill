@@ -637,23 +637,14 @@ function isFiberUtility(name,utilityType){
   return false;
 }
 
-// 2nd notices (no-show solicitado). Tabela second_notices; robusto se ainda não existe.
-let secondNotices=[],_secondNoticesTried=false,_hasSecondNoticesTable=false;
-async function loadSecondNotices(){
-  _secondNoticesTried=true;
-  try{
-    const{data,error}=await sb.from('second_notices').select('*').order('requested_at',{ascending:false});
-    if(error){_hasSecondNoticesTable=false;secondNotices=[];return;}
-    _hasSecondNoticesTable=true;secondNotices=data||[];
-  }catch(e){_hasSecondNoticesTable=false;secondNotices=[];}
+// 2nd notices (no-show solicitado). Guardados no history do ticket (entrada com campo `sn`),
+// SEM tabela nova — funciona direto, sem rodar SQL no Supabase.
+function getSecondNotices(t){
+  return ((t&&t.history)||[]).filter(h=>h&&h.sn).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,source:h.sn.src||'manual'}));
 }
-function getSecondNotices(ticketNum){
-  const k=String(ticketNum||'').trim();
-  return secondNotices.filter(n=>String(n.ticket_num||'').trim()===k);
-}
-function countSecondNotices(ticketNum,utilityName){
-  const k=String(ticketNum||'').trim(),u=(utilityName||'').toUpperCase();
-  return secondNotices.filter(n=>String(n.ticket_num||'').trim()===k&&(n.utility_name||'').toUpperCase()===u).length;
+function countSecondNotices(t,utilityName){
+  const u=(utilityName||'').toUpperCase();
+  return getSecondNotices(t).filter(n=>(n.utility||'').toUpperCase()===u).length;
 }
 function _snDateToIso(s){
   s=(s||'').trim();
@@ -663,8 +654,8 @@ function _snDateToIso(s){
   return null;
 }
 async function addSecondNotice(ticketNum){
-  if(!_hasSecondNoticesTable){toast('Tabela second_notices não existe ainda — rode o CREATE TABLE no Supabase.','danger');return;}
   const t=tickets.find(x=>String(x.ticket).trim()===String(ticketNum).trim());
+  if(!t){toast('Ticket não encontrado.','danger');return;}
   const uniq=[...new Set(getTicketUtils(ticketNum).map(u=>u.utility_name).filter(Boolean))];
   const listaTxt=uniq.length?uniq.map((u,i)=>(i+1)+') '+u+(isFiberUtility(u)?' [fibra]':'')).join('\n'):'(sem utilities no cache — digite o nome)';
   const pick=prompt('Registrar 2nd NOTICE pra qual utility?\n\n'+listaTxt+'\n\nDigite o NÚMERO da lista ou o nome:','');
@@ -675,46 +666,42 @@ async function addSecondNotice(ticketNum){
   if(!util){toast('Utility vazia.','warn');return;}
   const dateRaw=prompt('Data da solicitação (MM/DD/YYYY):',new Date().toLocaleDateString('en-US'));
   if(dateRaw===null)return;
-  const iso=_snDateToIso(dateRaw);
-  const row={ticket_num:String(ticketNum).trim(),utility_name:util,state:(t&&t.state)||'',source:'manual',created_by:currentUserEmail||''};
-  if(iso)row.requested_at=iso;
-  try{
-    const{error}=await sb.from('second_notices').insert(row);
-    if(error)throw error;
-    await loadSecondNotices();
-    toast('2nd notice registrado: '+util,'success');
-    const tt=tickets.find(x=>x.id===currentDetailId);if(tt)renderSecondNotices(tt);
-  }catch(e){toast('Erro ao registrar: '+(e.message||e),'danger');}
+  const iso=_snDateToIso(dateRaw)||new Date().toISOString().slice(0,10);
+  const label=iso.split('-').reverse().join('/');
+  t.history=t.history||[];
+  t.history.push({ts:Date.now(),action:'[2ND NOTICE] '+util+' (solicitado '+label+')',color:'#db2777',sn:{u:util,d:iso,src:'manual'}});
+  const ok=await saveTicketToDb(t);
+  if(ok){toast('2nd notice registrado: '+util,'success');renderSecondNotices(t);}
+  else{t.history.pop();toast('Erro ao salvar. Tente Refresh (⟳).','danger');}
 }
-async function deleteSecondNotice(id){
+async function deleteSecondNotice(ticketNum,ts){
+  const t=tickets.find(x=>String(x.ticket).trim()===String(ticketNum).trim());
+  if(!t)return;
   if(!confirm('Remover este 2nd notice?'))return;
-  try{
-    const{error}=await sb.from('second_notices').delete().eq('id',id);
-    if(error)throw error;
-    await loadSecondNotices();
-    const tt=tickets.find(x=>x.id===currentDetailId);if(tt)renderSecondNotices(tt);
-    toast('2nd notice removido','success');
-  }catch(e){toast('Erro: '+(e.message||e),'danger');}
+  const bk=t.history||[];
+  const filtered=bk.filter(h=>!(h&&h.sn&&h.ts===ts));
+  if(filtered.length===bk.length)return;
+  t.history=filtered;
+  const ok=await saveTicketToDb(t);
+  if(ok){toast('2nd notice removido','success');renderSecondNotices(t);}
+  else{t.history=bk;toast('Erro ao remover.','danger');}
 }
-async function renderSecondNotices(t){
+function renderSecondNotices(t){
   const el=document.getElementById('det-2nd-notices');if(!el)return;
-  if(!_secondNoticesTried)await loadSecondNotices();
-  const list=getSecondNotices(t.ticket);
+  const list=getSecondNotices(t).sort((a,b)=>(b.ts||0)-(a.ts||0));
   let h='';
-  if(!_hasSecondNoticesTable){
-    h='<div style="font-size:11px;color:var(--muted)">Indisponível — rode o CREATE TABLE second_notices no Supabase pra ativar.</div>';
-  }else if(!list.length){
+  if(!list.length){
     h='<div style="font-size:11px;color:var(--muted)">Nenhum 2nd notice registrado.</div>';
   }else{
     h=list.map(n=>{
-      const d=n.requested_at?new Date(n.requested_at).toLocaleDateString('pt-BR'):'—';
-      const fiber=isFiberUtility(n.utility_name)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
+      const d=n.date?n.date.split('-').reverse().join('/'):(n.ts?new Date(n.ts).toLocaleDateString('pt-BR'):'—');
+      const fiber=isFiberUtility(n.utility)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
       const src=n.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
-      const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice('+n.id+')">×</button>':'';
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span>'+esc(n.utility_name)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
+      const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice(\''+esc(String(t.ticket))+'\','+n.ts+')">×</button>':'';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span>'+esc(n.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
     }).join('');
   }
-  if(isAdmin&&_hasSecondNoticesTable)h+='<button class="btn btn-sm" style="margin-top:6px;font-size:11px" onclick="addSecondNotice(\''+esc(String(t.ticket))+'\')">+ Registrar 2nd notice</button>';
+  if(isAdmin)h+='<button class="btn btn-sm" style="margin-top:6px;font-size:11px" onclick="addSecondNotice(\''+esc(String(t.ticket))+'\')">+ Registrar 2nd notice</button>';
   el.innerHTML=h;
 }
 /**

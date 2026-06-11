@@ -69,7 +69,7 @@ function _eod(dateStr){
 
 /** Cor do status */
 function scol(s){
-  const m={open:'#dc2626',clear:'#16a34a',damage:'#d97706',closed:'#1a1a18',cancel:'#6d28d9'};
+  const m={open:'#dc2626',clear:'#16a34a',damage:'#db2777',closed:'#1a1a18',cancel:'#6d28d9'};
   return m[(s||'').toLowerCase()]||'#9a9888';
 }
 function tipoDash(t){return(t||'').toLowerCase().includes('main')?null:'6,4';}
@@ -5668,7 +5668,7 @@ function renderTimeline(){
     const barStart=Math.max(0,barEnd-8);// Approximate 8% width per ticket
     const barW=Math.max(2,barEnd-barStart);
 
-    const bc=isExp?'#dc2626':es==='Clear'?'#16a34a':es==='Damage'?'#d97706':'#2563eb';
+    const bc=isExp?'#dc2626':es==='Clear'?'#16a34a':es==='Damage'?'#db2777':'#2563eb';
     const bgc=isExp?'#fef2f2':es==='Clear'?'#f0fdf4':es==='Damage'?'#fffbeb':'#eff6ff';
 
     h+='<div style="display:flex;align-items:center;height:26px;border-bottom:1px solid var(--border)" onclick="openTicketDetail('+tk.id+')" title="'+esc(tk.ticket)+' — '+esc(es)+' — vence '+esc(tk.expire||'?')+'" class="tl-row">';

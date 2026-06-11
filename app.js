@@ -619,6 +619,104 @@ function getTicketUtils(ticketNum){
   const key=String(ticketNum||'').trim();
   return utilCache[key]||[];
 }
+
+/* ═══════════ 8b. FIBRA + 2ND NOTICE (No-Show) ═══════════ */
+// Utilities de FIBRA (telecom/cabo). A liberação automática por no-show SÓ vale
+// pra estas — nunca água, gás, elétrico ou sewer. Lista mantida aqui + override
+// pelo campo utility_type quando preenchido no banco.
+const FIBER_NAMES=['COMCAST','XFINITY','AT&T','ATT','FRONTIER','UNITI','TIME WARNER','SPECTRUM','CHARTER','METRO FIBERNET','METRONET','MIDWEST FIBER','LUMEN','CENTURYLINK','ZAYO','WINDSTREAM','CROWN CASTLE','LEVEL 3','VERIZON','SEGRA','EVERSTREAM','WIDEOPENWEST','WOW'];
+const FIBER_KEYWORDS=['FIBER','FIBRE','FIBERNET','TELECOM','CABLE','BROADBAND','COMMUNICATION'];
+const NONFIBER_TYPES=['water','gas','electric','sewer','agua','água','eletrico','elétrico','esgoto'];
+function isFiberUtility(name,utilityType){
+  const ut=(utilityType||'').toLowerCase().trim();
+  if(['fiber','fibra','telecom','comm','cable'].includes(ut))return true;
+  if(NONFIBER_TYPES.includes(ut))return false;
+  const n=(name||'').toUpperCase();
+  if(FIBER_NAMES.some(f=>n.includes(f)))return true;
+  if(FIBER_KEYWORDS.some(k=>n.includes(k)))return true;
+  return false;
+}
+
+// 2nd notices (no-show solicitado). Tabela second_notices; robusto se ainda não existe.
+let secondNotices=[],_secondNoticesTried=false,_hasSecondNoticesTable=false;
+async function loadSecondNotices(){
+  _secondNoticesTried=true;
+  try{
+    const{data,error}=await sb.from('second_notices').select('*').order('requested_at',{ascending:false});
+    if(error){_hasSecondNoticesTable=false;secondNotices=[];return;}
+    _hasSecondNoticesTable=true;secondNotices=data||[];
+  }catch(e){_hasSecondNoticesTable=false;secondNotices=[];}
+}
+function getSecondNotices(ticketNum){
+  const k=String(ticketNum||'').trim();
+  return secondNotices.filter(n=>String(n.ticket_num||'').trim()===k);
+}
+function countSecondNotices(ticketNum,utilityName){
+  const k=String(ticketNum||'').trim(),u=(utilityName||'').toUpperCase();
+  return secondNotices.filter(n=>String(n.ticket_num||'').trim()===k&&(n.utility_name||'').toUpperCase()===u).length;
+}
+function _snDateToIso(s){
+  s=(s||'').trim();
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m)return m[3]+'-'+m[1].padStart(2,'0')+'-'+m[2].padStart(2,'0');
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+  return null;
+}
+async function addSecondNotice(ticketNum){
+  if(!_hasSecondNoticesTable){toast('Tabela second_notices não existe ainda — rode o CREATE TABLE no Supabase.','danger');return;}
+  const t=tickets.find(x=>String(x.ticket).trim()===String(ticketNum).trim());
+  const uniq=[...new Set(getTicketUtils(ticketNum).map(u=>u.utility_name).filter(Boolean))];
+  const listaTxt=uniq.length?uniq.map((u,i)=>(i+1)+') '+u+(isFiberUtility(u)?' [fibra]':'')).join('\n'):'(sem utilities no cache — digite o nome)';
+  const pick=prompt('Registrar 2nd NOTICE pra qual utility?\n\n'+listaTxt+'\n\nDigite o NÚMERO da lista ou o nome:','');
+  if(pick===null)return;
+  let util=pick.trim();
+  const asNum=parseInt(util,10);
+  if(!isNaN(asNum)&&uniq[asNum-1])util=uniq[asNum-1];
+  if(!util){toast('Utility vazia.','warn');return;}
+  const dateRaw=prompt('Data da solicitação (MM/DD/YYYY):',new Date().toLocaleDateString('en-US'));
+  if(dateRaw===null)return;
+  const iso=_snDateToIso(dateRaw);
+  const row={ticket_num:String(ticketNum).trim(),utility_name:util,state:(t&&t.state)||'',source:'manual',created_by:currentUserEmail||''};
+  if(iso)row.requested_at=iso;
+  try{
+    const{error}=await sb.from('second_notices').insert(row);
+    if(error)throw error;
+    await loadSecondNotices();
+    toast('2nd notice registrado: '+util,'success');
+    const tt=tickets.find(x=>x.id===currentDetailId);if(tt)renderSecondNotices(tt);
+  }catch(e){toast('Erro ao registrar: '+(e.message||e),'danger');}
+}
+async function deleteSecondNotice(id){
+  if(!confirm('Remover este 2nd notice?'))return;
+  try{
+    const{error}=await sb.from('second_notices').delete().eq('id',id);
+    if(error)throw error;
+    await loadSecondNotices();
+    const tt=tickets.find(x=>x.id===currentDetailId);if(tt)renderSecondNotices(tt);
+    toast('2nd notice removido','success');
+  }catch(e){toast('Erro: '+(e.message||e),'danger');}
+}
+async function renderSecondNotices(t){
+  const el=document.getElementById('det-2nd-notices');if(!el)return;
+  if(!_secondNoticesTried)await loadSecondNotices();
+  const list=getSecondNotices(t.ticket);
+  let h='';
+  if(!_hasSecondNoticesTable){
+    h='<div style="font-size:11px;color:var(--muted)">Indisponível — rode o CREATE TABLE second_notices no Supabase pra ativar.</div>';
+  }else if(!list.length){
+    h='<div style="font-size:11px;color:var(--muted)">Nenhum 2nd notice registrado.</div>';
+  }else{
+    h=list.map(n=>{
+      const d=n.requested_at?new Date(n.requested_at).toLocaleDateString('pt-BR'):'—';
+      const fiber=isFiberUtility(n.utility_name)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
+      const src=n.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
+      const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice('+n.id+')">×</button>':'';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span>'+esc(n.utility_name)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
+    }).join('');
+  }
+  if(isAdmin&&_hasSecondNoticesTable)h+='<button class="btn btn-sm" style="margin-top:6px;font-size:11px" onclick="addSecondNotice(\''+esc(String(t.ticket))+'\')">+ Registrar 2nd notice</button>';
+  el.innerHTML=h;
+}
 /**
  * WI Relo-No-Show: merge utilities do Relo (novo) com herdadas do Standard (antigo).
  * Retorna array combinada ou null se não aplicável.
@@ -1673,7 +1771,7 @@ function openTicketDetail(id){
     const erb=document.getElementById('det-edit-renewal-btn');if(erb)erb.classList.add('hidden');
     document.getElementById('field-status-section').style.display='none';
   }
-  renderHistory(t);renderMiniMap(t);renderUtils(t);openModal('ov-detail');
+  renderHistory(t);renderMiniMap(t);renderUtils(t);renderSecondNotices(t);openModal('ov-detail');
 }
 
 // ── EXPIRED TICKET FULLSCREEN ALERT ──

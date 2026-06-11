@@ -637,14 +637,17 @@ function isFiberUtility(name,utilityType){
   return false;
 }
 
-// 2nd notices (no-show solicitado). Guardados no history do ticket (entrada com campo `sn`),
-// SEM tabela nova — funciona direto, sem rodar SQL no Supabase.
+// No-shows (2nd/3rd/4th notice). Guardados no history do ticket (entrada `sn`),
+// SEM tabela nova. sn={u:utility, d:dataISO, n:ordinal(2,3,4...), src}.
+function _ordEn(n){n=parseInt(n,10)||2;if(n===1)return'1st';if(n===2)return'2nd';if(n===3)return'3rd';return n+'th';}
 function getSecondNotices(t){
-  return ((t&&t.history)||[]).filter(h=>h&&h.sn).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,source:h.sn.src||'manual'}));
+  return ((t&&t.history)||[]).filter(h=>h&&h.sn).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,n:parseInt(h.sn.n,10)||2,source:h.sn.src||'manual'}));
 }
 function countSecondNotices(t,utilityName){
+  // Contagem de no-shows da utility = MAIOR ordinal registrado (2nd=2, 3rd=3...).
   const u=(utilityName||'').toUpperCase();
-  return getSecondNotices(t).filter(n=>(n.utility||'').toUpperCase()===u).length;
+  const list=getSecondNotices(t).filter(n=>(n.utility||'').toUpperCase()===u);
+  return list.length?Math.max(...list.map(x=>x.n)):0;
 }
 function _snDateToIso(s){
   s=(s||'').trim();
@@ -658,20 +661,22 @@ async function addSecondNotice(ticketNum){
   if(!t){toast('Ticket não encontrado.','danger');return;}
   const uniq=[...new Set(getTicketUtils(ticketNum).map(u=>u.utility_name).filter(Boolean))];
   const listaTxt=uniq.length?uniq.map((u,i)=>(i+1)+') '+u+(isFiberUtility(u)?' [fibra]':'')).join('\n'):'(sem utilities no cache — digite o nome)';
-  const pick=prompt('Registrar 2nd NOTICE pra qual utility?\n\n'+listaTxt+'\n\nDigite o NÚMERO da lista ou o nome:','');
+  const pick=prompt('Registrar NO-SHOW pra qual utility?\n\n'+listaTxt+'\n\nDigite o NÚMERO da lista ou o nome:','');
   if(pick===null)return;
   let util=pick.trim();
   const asNum=parseInt(util,10);
   if(!isNaN(asNum)&&uniq[asNum-1])util=uniq[asNum-1];
   if(!util){toast('Utility vazia.','warn');return;}
-  const dateRaw=prompt('Data da solicitação (MM/DD/YYYY):',new Date().toLocaleDateString('en-US'));
+  const existing=getSecondNotices(t).filter(x=>(x.utility||'').toUpperCase()===util.toUpperCase());
+  const n=existing.length?Math.max(...existing.map(x=>x.n))+1:2;
+  const dateRaw=prompt('Data do '+_ordEn(n)+' no-show (MM/DD/YYYY):',new Date().toLocaleDateString('en-US'));
   if(dateRaw===null)return;
   const iso=_snDateToIso(dateRaw)||new Date().toISOString().slice(0,10);
   const label=iso.split('-').reverse().join('/');
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'[2ND NOTICE] '+util+' (solicitado '+label+')',color:'#db2777',sn:{u:util,d:iso,src:'manual'}});
+  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')',color:'#db2777',sn:{u:util,d:iso,n:n,src:'manual'}});
   const ok=await saveTicketToDb(t);
-  if(ok){toast('2nd notice registrado: '+util,'success');renderSecondNotices(t);}
+  if(ok){toast(_ordEn(n)+' no-show registrado: '+util,'success');renderSecondNotices(t);}
   else{t.history.pop();toast('Erro ao salvar. Tente Refresh (⟳).','danger');}
 }
 async function deleteSecondNotice(ticketNum,ts){
@@ -696,20 +701,20 @@ async function renderSecondNotices(t){
       if(data&&Array.isArray(data.history)){t.history=data.history;if(typeof renderHistory==='function')renderHistory(t);}
     }
   }catch(e){}
-  const list=getSecondNotices(t).sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const list=getSecondNotices(t).sort((a,b)=>(a.utility||'').localeCompare(b.utility||'')||(a.n-b.n));
   let h='';
   if(!list.length){
-    h='<div style="font-size:11px;color:var(--muted)">Nenhum 2nd notice registrado.</div>';
+    h='<div style="font-size:11px;color:var(--muted)">Nenhum no-show registrado.</div>';
   }else{
-    h=list.map(n=>{
-      const d=n.date?n.date.split('-').reverse().join('/'):(n.ts?new Date(n.ts).toLocaleDateString('pt-BR'):'—');
-      const fiber=isFiberUtility(n.utility)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
-      const src=n.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
-      const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice(\''+esc(String(t.ticket))+'\','+n.ts+')">×</button>':'';
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span>'+esc(n.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
+    h=list.map(x=>{
+      const d=x.date?x.date.split('-').reverse().join('/'):(x.ts?new Date(x.ts).toLocaleDateString('pt-BR'):'—');
+      const fiber=isFiberUtility(x.utility)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
+      const src=x.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
+      const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice(\''+esc(String(t.ticket))+'\','+x.ts+')">×</button>':'';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span><b style="color:#db2777">'+_ordEn(x.n)+'</b> '+esc(x.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
     }).join('');
   }
-  if(isAdmin)h+='<button class="btn btn-sm" style="margin-top:6px;font-size:11px" onclick="addSecondNotice(\''+esc(String(t.ticket))+'\')">+ Registrar 2nd notice</button>';
+  if(isAdmin)h+='<button class="btn btn-sm" style="margin-top:6px;font-size:11px" onclick="addSecondNotice(\''+esc(String(t.ticket))+'\')">+ Registrar no-show</button>';
   el.innerHTML=h;
 }
 /**

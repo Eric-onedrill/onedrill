@@ -1675,6 +1675,7 @@ body {
 /* Status badges */
 .b-open   { background: var(--red-bg);    color: var(--red); }
 .b-clear  { background: var(--green-bg);  color: var(--green); }
+.b-noshow { background: #fff3e0;  color: #d97706; }
 .b-damage { background: var(--pink-bg);  color: var(--pink); }
 .b-closed { background: #f5f5f3;          color: #888; }
 .b-cancel { background: var(--purple-bg); color: var(--purple); }
@@ -1984,6 +1985,7 @@ body {
 .ftog.on-open   { background: var(--red-bg);    color: var(--red);    border-color: var(--red-border); }
 .ftog.on-damage { background: var(--pink-bg);  color: var(--pink);  border-color: var(--pink-border); }
 .ftog.on-clear  { background: var(--green-bg);  color: var(--green);  border-color: var(--green-border); }
+.ftog.on-noshow { background: #fff3e0;  color: #d97706;  border-color: #fed7aa; }
 .ftog.on-closed { background: #f5f5f3;          color: #888;          border-color: var(--border2); }
 .ftog.on-cancel { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
 
@@ -2034,6 +2036,7 @@ body {
 
 .tcard.s-open::before   { background: var(--red); }
 .tcard.s-clear::before  { background: var(--green); }
+.tcard.s-noshow::before { background: #d97706; }
 .tcard.s-damage::before { background: var(--pink); }
 .tcard.s-closed::before { background: #ccc; }
 .tcard.s-cancel::before { background: var(--purple); }
@@ -2450,6 +2453,7 @@ tbody td {
 
 .tc-open   { color: var(--red);    font-weight: 600; }
 .tc-clear  { color: var(--green);  font-weight: 600; }
+.tc-noshow { color: #d97706;  font-weight: 600; }
 .tc-damage { color: var(--pink);  font-weight: 600; }
 .tc-closed { color: var(--muted); }
 .tc-cancel { color: var(--purple); font-weight: 600; }

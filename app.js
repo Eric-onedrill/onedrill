@@ -4054,7 +4054,7 @@ async function openPendingReport(){
         const respTxt=u.resp?' — '+esc(u.resp):'';
         const atTxt=u.at?` <span style="opacity:.7">· 📅 ${esc(u.at)}</span>`:'';
         const telTxt=(u.contacts&&u.contacts.length)
-          ? u.contacts.map(ct=>'<a href="tel:'+esc(ct.phone)+'" style="color:#1d4ed8;font-weight:600;text-decoration:none">☎ '+esc(ct.phone)+'</a>'+(ct.email?' <span style="color:#6b7280">✉ '+esc(ct.email)+'</span>':'')+(ct.name?' <span style="opacity:.55">('+esc(ct.name)+')</span>':'')).join(' &nbsp; ')
+          ? u.contacts.map(ct=>'<div style="margin-top:2px">'+(ct.name?'<b>'+esc(ct.name)+'</b> — ':'')+'<a href="tel:'+esc(ct.phone)+'" style="color:#1d4ed8;font-weight:600;text-decoration:none">☎ '+esc(ct.phone)+'</a>'+(ct.email?' <span style="color:#6b7280">✉ '+esc(ct.email)+'</span>':'')+'</div>').join('')
           : '<span style="opacity:.5;font-style:italic">sem telefone cadastrado</span>';
         return`<div style="background:${bg};border:1px solid ${bd};border-radius:6px;padding:5px 8px;font-size:11px;margin:3px 0">`
           +`<div>${u.acao?'📞':'⏳'} <b style="color:${fg}">${esc(u.name)}</b>: ${esc(u.label)}${respTxt}${atTxt}</div>`
@@ -4082,7 +4082,7 @@ function exportPendingReport(){
   for(const r of rows){
     if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','','Aguardando sync','','','']);continue;}
     for(const u of r.utils){
-      const tels=(u.contacts||[]).map(c=>c.phone).join(' / ');
+      const tels=(u.contacts||[]).map(c=>(c.name?c.name+': ':'')+c.phone).join('  |  ');
       const mails=(u.contacts||[]).map(c=>c.email).filter(Boolean).join(' / ');
       data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.at||'—',u.label,u.acao?'LIGAR':'',tels,mails]);
       if(u.acao)nAcao++;

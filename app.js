@@ -95,6 +95,11 @@ let _clearedExpand=null;
 // Exclusivo com _clearedExpand — só um dos dois fica aberto por vez.
 let _clearedExpandDay=null;
 let utilContacts=[],editingContactId=null,_hasContactEmailCol=false;
+// Email do contato sem coluna no banco (Eric não roda DDL): guardado embutido no campo notes ("✉ email@x").
+const _EMAIL_RE=/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+function _emailFromNotes(notes){const m=(notes||'').match(_EMAIL_RE);return m?m[0]:'';}
+function _contactEmail(c){return(((c&&c.email)||'').trim())||_emailFromNotes(c&&c.notes);}
+function _notesClean(notes){return(notes||'').replace(_EMAIL_RE,'').replace(/✉/g,'').replace(/\s*[·|]\s*$/,'').replace(/^\s*[·|]\s*/,'').replace(/\s{2,}/g,' ').trim();}
 // Fase 3 do filtro county: cobertura utility × county (auto-derivada pelo Python)
 let utilCoverage=[];
 // County pré-selecionado quando usuário abre a aba Contatos vindo de um ticket específico
@@ -926,14 +931,15 @@ function renderContacts(){
         if(c.phone_main)phones.push('<span class="cc-tag cc-tag-main">Principal</span> <a href="tel:'+esc(c.phone_main)+'">'+esc(c.phone_main)+'</a>');
         if(c.phone_alt)phones.push('<span class="cc-tag cc-tag-alt">Alt.</span> <a href="tel:'+esc(c.phone_alt)+'">'+esc(c.phone_alt)+'</a>');
         if(c.phone_emergency)phones.push('<span class="cc-tag cc-tag-emerg">Emerg.</span> <a href="tel:'+esc(c.phone_emergency)+'">'+esc(c.phone_emergency)+'</a>');
-        if(c.email)phones.push('<span class="cc-tag">📧</span> <a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>');
+        const _em=_contactEmail(c);
+        if(_em)phones.push('<span class="cc-tag">📧</span> <a href="mailto:'+esc(_em)+'">'+esc(_em)+'</a>');
         return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--border)">'
           +(name?'<span style="font-size:12px;font-weight:600;color:var(--text2);min-width:120px">'+name+'</span>':'')
           +'<div class="cc-phones" style="margin:0;gap:10px">'+phones.join(' ')+'</div>'
           +(isAdmin?'<div style="display:flex;gap:4px;margin-left:8px"><button class="btn btn-sm" onclick="openContactModal('+c.id+')" style="font-size:10px;padding:2px 6px">✏</button><button class="btn btn-sm btn-danger" onclick="deleteContact('+c.id+')" style="font-size:10px;padding:2px 6px">×</button></div>':'')
           +'</div>';
       }).join('')
-      +(contacts.some(x=>x.notes)?'<div class="cc-meta" style="margin-top:6px">'+esc(contacts[0].notes)+'</div>':'')
+      +(_notesClean(contacts[0].notes)?'<div class="cc-meta" style="margin-top:6px">'+esc(_notesClean(contacts[0].notes))+'</div>':'')
       +'</div>';
   }).join('');
 }
@@ -951,8 +957,8 @@ function openContactModal(id){
       document.getElementById('ct-phone1').value=c.phone_main||'';
       document.getElementById('ct-phone2').value=c.phone_alt||'';
       document.getElementById('ct-phone3').value=c.phone_emergency||'';
-      document.getElementById('ct-notes').value=c.notes||'';
-      document.getElementById('ct-email').value=c.email||'';
+      document.getElementById('ct-notes').value=_notesClean(c.notes);
+      document.getElementById('ct-email').value=_contactEmail(c);
     }
   }else{
     ['ct-utility','ct-name','ct-ticket','ct-phone1','ct-phone2','ct-phone3','ct-notes','ct-email'].forEach(id=>document.getElementById(id).value='');
@@ -966,6 +972,8 @@ function openContactModal(id){
 async function saveContact(){
   const name=document.getElementById('ct-utility').value.trim();
   if(!name){toast('Preencha o nome da utility.','danger');return;}
+  const _email=document.getElementById('ct-email').value.trim();
+  const _notes=_notesClean(document.getElementById('ct-notes').value.trim());
   const data={
     utility_name:name,
     contact_name:document.getElementById('ct-name').value.trim(),
@@ -974,9 +982,14 @@ async function saveContact(){
     phone_main:document.getElementById('ct-phone1').value.trim(),
     phone_alt:document.getElementById('ct-phone2').value.trim(),
     phone_emergency:document.getElementById('ct-phone3').value.trim(),
-    notes:document.getElementById('ct-notes').value.trim()
+    notes:_notes
   };
-  if(_hasContactEmailCol)data.email=document.getElementById('ct-email').value.trim();
+  if(_hasContactEmailCol){
+    data.email=_email;
+  }else if(_email){
+    // Sem coluna email no banco: embute no notes ("✉ email") pra não perder o dado nem precisar de DDL.
+    data.notes=_notes?_notes+' · ✉ '+_email:'✉ '+_email;
+  }
   try{
     if(editingContactId){
       const{error}=await sb.from('utility_contacts').update(data).eq('id',editingContactId);
@@ -1002,8 +1015,8 @@ function exportContacts(){
   if(!utilContacts.length){toast('Nenhum contato.','warn');return;}
   const wb=XLSX.utils.book_new();
   const data=[
-    ['Utility','Nome Contato','Estado','Tel. Principal','Tel. Alternativo','Tel. Emergência','Ticket Ref','Notas'],
-    ...utilContacts.map(c=>[c.utility_name,c.contact_name||'',c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',c.ticket_ref||'',c.notes||''])
+    ['Utility','Nome Contato','Estado','Tel. Principal','Tel. Alternativo','Tel. Emergência','Email','Ticket Ref','Notas'],
+    ...utilContacts.map(c=>[c.utility_name,c.contact_name||'',c.state,c.phone_main||'',c.phone_alt||'',c.phone_emergency||'',_contactEmail(c),c.ticket_ref||'',_notesClean(c.notes)])
   ];
   const ws=XLSX.utils.aoa_to_sheet(data);
   XLSX.utils.book_append_sheet(wb,ws,'Contatos');
@@ -3964,7 +3977,7 @@ function _utilContactsFor(utilityName, state){
     if(!_utilTokens(c.utility_name).some(t=>ut.includes(t)))continue;  // sem token em comum
     for(const ph of [c.phone_main,c.phone_alt,c.phone_emergency].map(x=>(x||'').trim()).filter(Boolean)){
       const key=ph.replace(/\D/g,'').slice(-10);
-      if(key&&!seen.has(key)){seen.add(key);out.push({name:c.contact_name||c.utility_name,phone:ph,email:(c.email||'').trim()});}
+      if(key&&!seen.has(key)){seen.add(key);out.push({name:c.contact_name||c.utility_name,phone:ph,email:_contactEmail(c)});}
     }
   }
   return out;
@@ -4083,7 +4096,7 @@ function exportPendingReport(){
     if(!r.utils.length){data.push([r.state,r.project,r.ticket,r.expire,r.footage,'—','sem dados','','Aguardando sync','','','']);continue;}
     for(const u of r.utils){
       const tels=(u.contacts||[]).map(c=>(c.name?c.name+': ':'')+c.phone).join('  |  ');
-      const mails=(u.contacts||[]).map(c=>c.email).filter(Boolean).join(' / ');
+      const mails=[...new Set((u.contacts||[]).map(c=>c.email).filter(Boolean))].join(' / ');
       data.push([r.state,r.project,r.ticket,r.expire,r.footage,u.name,u.resp||'—',u.at||'—',u.label,u.acao?'LIGAR':'',tels,mails]);
       if(u.acao)nAcao++;
     }

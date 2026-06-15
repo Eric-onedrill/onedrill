@@ -648,16 +648,20 @@ function isFiberUtility(name,utilityType){
 // número ATUAL — então renovação NÃO herda no-show do antigo (e a regra laranja recalcula
 // junto quando o antigo expira/renova). Entrada legada sem `tk` = tratada como do atual.
 function _ordEn(n){n=parseInt(n,10)||2;if(n===1)return'1st';if(n===2)return'2nd';if(n===3)return'3rd';return n+'th';}
-function getSecondNotices(t){
+function getSecondNotices(t, onlyTk){
   const cur=String((t&&t.ticket)||'').trim();
   // Em CARÊNCIA (renovação), o ticket ainda opera sob o número ANTIGO — então mostra
   // e conta os no-shows do antigo até a carência expirar; depois, só os do número atual.
+  // onlyTk: se passado, devolve SÓ os no-shows daquele número (usado pra exibir o grupo
+  // "ticket antigo" separado do "ticket atual" no painel e pra inserir em cada um).
   const inGrace=!!(t&&isRenewed(t)&&isInRenewalGrace(t));
   const oldNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
+  const want=(onlyTk!==undefined&&onlyTk!==null)?String(onlyTk).trim():null;
   const raw=((t&&t.history)||[]).filter(h=>{
     if(!h||!h.sn)return false;
     const tk=String(h.sn.tk||'').trim();
-    return !tk||tk===cur||(oldNum&&tk===oldNum);   // atual + (carência) antigo + legado sem tk
+    if(want!==null)return tk===want||(!tk&&want===cur);   // grupo de UM número (legado sem tk = atual)
+    return !tk||tk===cur||(oldNum&&tk===oldNum);          // visão padrão: atual + (carência) antigo
   }).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,source:h.sn.src||'manual',n:parseInt(h.sn.n,10)||0}));
   // Recalcula o ordinal por utility pela ordem de data (1º registro = "2nd notice" = n2).
   // Corrige rótulos herdados (o n salvo podia ter contado no-shows de outro número de ticket).
@@ -684,27 +688,31 @@ function _snDateToIso(s){
   if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
   return null;
 }
-async function addSecondNotice(ticketNum){
+async function addSecondNotice(ticketNum, targetTk){
   const t=tickets.find(x=>String(x.ticket).trim()===String(ticketNum).trim());
   if(!t){toast('Ticket não encontrado.','danger');return;}
-  const uniq=[...new Set(getTicketUtils(ticketNum).map(u=>u.utility_name).filter(Boolean))];
+  // target = número AO QUAL o no-show será atribuído (sn.tk). Pode ser o ATUAL ou,
+  // num ticket renovado, o número ANTIGO — assim dá pra registrar no-show em ambos.
+  const target=String(targetTk||t.ticket).trim();
+  const isOld=target!==String(t.ticket).trim();
+  const uniq=[...new Set(getTicketUtils(target).map(u=>u.utility_name).filter(Boolean))];
   const listaTxt=uniq.length?uniq.map((u,i)=>(i+1)+') '+u+(isFiberUtility(u)?' [fibra]':'')).join('\n'):'(sem utilities no cache — digite o nome)';
-  const pick=prompt('Registrar NO-SHOW pra qual utility?\n\n'+listaTxt+'\n\nDigite o NÚMERO da lista ou o nome:','');
+  const pick=prompt('Registrar NO-SHOW pra qual utility?\n(ticket '+target+(isOld?' — ANTIGO':' — atual')+')\n\n'+listaTxt+'\n\nDigite o NÚMERO da lista ou o nome:','');
   if(pick===null)return;
   let util=pick.trim();
   const asNum=parseInt(util,10);
   if(!isNaN(asNum)&&uniq[asNum-1])util=uniq[asNum-1];
   if(!util){toast('Utility vazia.','warn');return;}
-  const existing=getSecondNotices(t).filter(x=>(x.utility||'').toUpperCase()===util.toUpperCase());
+  const existing=getSecondNotices(t,target).filter(x=>(x.utility||'').toUpperCase()===util.toUpperCase());
   const n=existing.length?Math.max(...existing.map(x=>x.n))+1:2;
   const dateRaw=prompt('Data do '+_ordEn(n)+' no-show (MM/DD/YYYY):',new Date().toLocaleDateString('en-US'));
   if(dateRaw===null)return;
   const iso=_snDateToIso(dateRaw)||new Date().toISOString().slice(0,10);
   const label=iso.split('-').reverse().join('/');
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')',color:'#db2777',sn:{u:util,d:iso,n:n,src:'manual',tk:String(t.ticket).trim()}});
+  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')'+(isOld?' [ticket '+target+']':''),color:'#db2777',sn:{u:util,d:iso,n:n,src:'manual',tk:target}});
   const ok=await saveTicketToDb(t);
-  if(ok){toast(_ordEn(n)+' no-show registrado: '+util,'success');renderSecondNotices(t);}
+  if(ok){toast(_ordEn(n)+' no-show registrado: '+util+(isOld?' (ticket antigo '+target+')':''),'success');renderSecondNotices(t);}
   else{t.history.pop();toast('Erro ao salvar. Tente Refresh (⟳).','danger');}
 }
 async function deleteSecondNotice(ticketNum,ts){
@@ -729,20 +737,32 @@ async function renderSecondNotices(t){
       if(data&&Array.isArray(data.history)){t.history=data.history;if(typeof renderHistory==='function')renderHistory(t);}
     }
   }catch(e){}
-  const list=getSecondNotices(t).sort((a,b)=>(a.utility||'').localeCompare(b.utility||'')||(a.n-b.n));
+  const cur=String(t.ticket||'').trim();
+  const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+  const graceOld=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
+  // Grupos: ticket ATUAL + (se renovado) cada número ANTIGO da chain — cada um com sua
+  // lista e seu botão. Assim dá pra ver/registrar no-show no antigo E no novo (o antigo
+  // some da regra laranja, mas continua gerenciável aqui).
+  const chain=isRenewed(t)?((t.oldTicket2||t.old_ticket2)||'').split(' → ').map(s=>s.trim()).filter(Boolean):[];
+  const groups=[{tk:cur,old:false}];
+  chain.forEach(o=>{if(o&&o!==cur&&!groups.some(g=>g.tk===o))groups.push({tk:o,old:true});});
+  const renderRow=(x)=>{
+    const d=x.date?x.date.split('-').reverse().join('/'):(x.ts?new Date(x.ts).toLocaleDateString('pt-BR'):'—');
+    const fiber=isFiberUtility(x.utility)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
+    const src=x.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
+    const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice(\''+esc(cur)+'\','+x.ts+')">×</button>':'';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span><b style="color:#db2777">'+_ordEn(x.n)+'</b> '+esc(x.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
+  };
   let h='';
-  if(!list.length){
-    h='<div style="font-size:11px;color:var(--muted)">Nenhum no-show registrado.</div>';
-  }else{
-    h=list.map(x=>{
-      const d=x.date?x.date.split('-').reverse().join('/'):(x.ts?new Date(x.ts).toLocaleDateString('pt-BR'):'—');
-      const fiber=isFiberUtility(x.utility)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
-      const src=x.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
-      const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice(\''+esc(String(t.ticket))+'\','+x.ts+')">×</button>':'';
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span><b style="color:#db2777">'+_ordEn(x.n)+'</b> '+esc(x.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
-    }).join('');
-  }
-  if(isAdmin)h+='<button class="btn btn-sm" style="margin-top:6px;font-size:11px" onclick="addSecondNotice(\''+esc(String(t.ticket))+'\')">+ Registrar no-show</button>';
+  groups.forEach(g=>{
+    const list=getSecondNotices(t,g.tk).sort((a,b)=>(a.utility||'').localeCompare(b.utility||'')||(a.n-b.n));
+    if(groups.length>1){
+      const tag=g.old?(g.tk===graceOld?' · conta (carência)':' · não conta hoje'):'';
+      h+='<div style="margin-top:'+(h?'10':'0')+'px;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:'+(g.old?'#7c3aed':'var(--text2)')+'">'+(g.old?'🔄 Ticket antigo '+esc(g.tk):'Ticket atual '+esc(g.tk))+tag+'</div>';
+    }
+    h+=list.length?list.map(renderRow).join(''):'<div style="font-size:11px;color:var(--muted);padding:2px 0">Nenhum no-show registrado.</div>';
+    if(isAdmin)h+='<button class="btn btn-sm" style="margin-top:5px;font-size:11px" onclick="addSecondNotice(\''+esc(cur)+'\',\''+esc(g.tk)+'\')">+ Registrar no-show'+(groups.length>1?(g.old?' (antigo)':' (atual)'):'')+'</button>';
+  });
   el.innerHTML=h;
 }
 /**

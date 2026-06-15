@@ -666,7 +666,9 @@ function getSecondNotices(t){
   return raw;
 }
 function countSecondNotices(t,utilityName){
-  // Contagem de no-shows da utility = MAIOR ordinal registrado (2nd=2, 3rd=3...).
+  // Retorna o MAIOR ordinal (2-based) dos no-shows DESTE ticket pra essa utility:
+  // 1 no-show→2, 2→3, 3→4. NÃO é a contagem (é qtd+1). A regra laranja usa >=4,
+  // ou seja exige 3 no-shows reais. Se mudar o recompute pra 1-based, ajustar o limiar.
   const u=(utilityName||'').toUpperCase();
   const list=getSecondNotices(t).filter(n=>(n.utility||'').toUpperCase()===u);
   return list.length?Math.max(...list.map(x=>x.n)):0;
@@ -1841,7 +1843,13 @@ function showExpiredAlert(t,kind){
 
 function renderHistory(t){
   document.getElementById('det-hist').innerHTML=t.history?.length
-    ?[...t.history].reverse().map(h=>`<div class="hist-item"><div class="hist-dot" style="background:${h.color||'#9a9888'}"></div><div style="flex:1"><div style="color:var(--text2);font-size:12px">${esc(h.action)}</div><div class="hist-time">${fmtDt(h.ts)}</div></div></div>`).join('')
+    ?[...t.history].reverse().map(h=>{
+        // No-show feito sob OUTRO número (ticket renovado): marca discreta pra não confundir
+        // com o número atual — o painel de 2nd notices já não conta esses.
+        const _oldTk=(h&&h.sn&&String(h.sn.tk||'').trim()&&String(h.sn.tk).trim()!==String(t.ticket||'').trim())?String(h.sn.tk).trim():'';
+        const _mark=_oldTk?` <span style="font-size:9px;color:var(--muted)">· nº antigo ${esc(_oldTk)}</span>`:'';
+        return `<div class="hist-item"><div class="hist-dot" style="background:${h.color||'#9a9888'}"></div><div style="flex:1"><div style="color:var(--text2);font-size:12px">${esc(h.action)}${_mark}</div><div class="hist-time">${fmtDt(h.ts)}</div></div></div>`;
+      }).join('')
     :'<div style="color:var(--muted);font-size:12px">Sem histórico</div>';
 }
 

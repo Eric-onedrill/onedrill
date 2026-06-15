@@ -650,10 +650,14 @@ function isFiberUtility(name,utilityType){
 function _ordEn(n){n=parseInt(n,10)||2;if(n===1)return'1st';if(n===2)return'2nd';if(n===3)return'3rd';return n+'th';}
 function getSecondNotices(t){
   const cur=String((t&&t.ticket)||'').trim();
+  // Em CARÊNCIA (renovação), o ticket ainda opera sob o número ANTIGO — então mostra
+  // e conta os no-shows do antigo até a carência expirar; depois, só os do número atual.
+  const inGrace=!!(t&&isRenewed(t)&&isInRenewalGrace(t));
+  const oldNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
   const raw=((t&&t.history)||[]).filter(h=>{
     if(!h||!h.sn)return false;
     const tk=String(h.sn.tk||'').trim();
-    return !tk||tk===cur;                       // só no-shows DESTE número (legado sem tk = atual)
+    return !tk||tk===cur||(oldNum&&tk===oldNum);   // atual + (carência) antigo + legado sem tk
   }).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,source:h.sn.src||'manual',n:parseInt(h.sn.n,10)||0}));
   // Recalcula o ordinal por utility pela ordem de data (1º registro = "2nd notice" = n2).
   // Corrige rótulos herdados (o n salvo podia ter contado no-shows de outro número de ticket).

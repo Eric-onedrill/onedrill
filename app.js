@@ -643,10 +643,27 @@ function isFiberUtility(name,utilityType){
 }
 
 // No-shows (2nd/3rd/4th notice). Guardados no history do ticket (entrada `sn`),
-// SEM tabela nova. sn={u:utility, d:dataISO, n:ordinal(2,3,4...), src}.
+// SEM tabela nova. sn={u:utility, d:dataISO, n:ordinal(2,3,4...), src, tk:numero_do_ticket}.
+// `tk` = número do ticket em que o no-show foi feito. getSecondNotices só conta os do
+// número ATUAL — então renovação NÃO herda no-show do antigo (e a regra laranja recalcula
+// junto quando o antigo expira/renova). Entrada legada sem `tk` = tratada como do atual.
 function _ordEn(n){n=parseInt(n,10)||2;if(n===1)return'1st';if(n===2)return'2nd';if(n===3)return'3rd';return n+'th';}
 function getSecondNotices(t){
-  return ((t&&t.history)||[]).filter(h=>h&&h.sn).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,n:parseInt(h.sn.n,10)||2,source:h.sn.src||'manual'}));
+  const cur=String((t&&t.ticket)||'').trim();
+  const raw=((t&&t.history)||[]).filter(h=>{
+    if(!h||!h.sn)return false;
+    const tk=String(h.sn.tk||'').trim();
+    return !tk||tk===cur;                       // só no-shows DESTE número (legado sem tk = atual)
+  }).map(h=>({ts:h.ts,utility:h.sn.u,date:h.sn.d,source:h.sn.src||'manual',n:parseInt(h.sn.n,10)||0}));
+  // Recalcula o ordinal por utility pela ordem de data (1º registro = "2nd notice" = n2).
+  // Corrige rótulos herdados (o n salvo podia ter contado no-shows de outro número de ticket).
+  const byU={};
+  raw.forEach(x=>{const k=(x.utility||'').toUpperCase();(byU[k]=byU[k]||[]).push(x);});
+  Object.keys(byU).forEach(k=>{
+    byU[k].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||((a.ts||0)-(b.ts||0)));
+    byU[k].forEach((x,i)=>{x.n=i+2;});
+  });
+  return raw;
 }
 function countSecondNotices(t,utilityName){
   // Contagem de no-shows da utility = MAIOR ordinal registrado (2nd=2, 3rd=3...).
@@ -679,7 +696,7 @@ async function addSecondNotice(ticketNum){
   const iso=_snDateToIso(dateRaw)||new Date().toISOString().slice(0,10);
   const label=iso.split('-').reverse().join('/');
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')',color:'#db2777',sn:{u:util,d:iso,n:n,src:'manual'}});
+  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')',color:'#db2777',sn:{u:util,d:iso,n:n,src:'manual',tk:String(t.ticket).trim()}});
   const ok=await saveTicketToDb(t);
   if(ok){toast(_ordEn(n)+' no-show registrado: '+util,'success');renderSecondNotices(t);}
   else{t.history.pop();toast('Erro ao salvar. Tente Refresh (⟳).','danger');}
@@ -1936,6 +1953,9 @@ async function renewTicket(){
   t.oldTicket2=fullChain;
   t.expireOld=oldExpire;
   t.statusOld=oldStatus;
+  // No-shows pertencem ao número em que foram feitos: carimba as entradas ainda sem
+  // `tk` com o número ANTIGO antes de renomear, pra NÃO contarem no ticket renovado.
+  (t.history||[]).forEach(h=>{if(h&&h.sn&&!String(h.sn.tk||'').trim())h.sn.tk=oldNum;});
   // Atualiza para novo ticket
   t.ticket=newTicket;
   // Nova data de expire — comportamento depende do estado:
@@ -2047,6 +2067,8 @@ async function editRenewal(){
         '  Expira:  '+(curExpire||'(mantém atual)')+'\n\n'+
         'O número '+t.ticket+' deixa de existir.'+(restChain?'\n(Continua como renovação de '+restChain+'.)':'')+'\n\n'+
         'Obs.: respostas de utilities do número novo podem ficar órfãs — o sync 811 reorganiza.\n\nContinuar?'))return;
+      // No-shows feitos sob o número NOVO não devem contar no antigo restaurado.
+      (t.history||[]).forEach(h=>{if(h&&h.sn&&!String(h.sn.tk||'').trim())h.sn.tk=_bk.ticket;});
       t.ticket=oldNum;
       if(curStatus)t.status=curStatus;   // restaura status antigo (se foi registrado na renovação)
       if(curExpire)t.expire=curExpire;   // restaura vencimento antigo (se foi registrado)

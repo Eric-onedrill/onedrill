@@ -1952,14 +1952,32 @@ async def scrape(state, ticket_numbers, tickets_data=None):
                                 pass
                             await wait_tab_content(pg)
 
-                            await _dismiss_dialog(pg, "Marking delay", label=tnum)
-
-                            # Clica "All" pra capturar TODAS as utilities
+                            # Vários tickets abrem modais Angular ("Marking delay",
+                            # "Excavation Date" etc.) que INTERCEPTAM o clique no filtro
+                            # "All (N)" e estouram o timeout de 60s — foi o que congelou os
+                            # tickets de St. Pete desde 08/06. Alguns aparecem COM ATRASO,
+                            # então dispensa em loop (removendo qualquer overlay restante) e
+                            # clica "All" com retry curto.
                             filter_clicked = False
                             all_links = pg.locator('text=/^All \\(/')
                             if await all_links.count():
-                                await click_and_wait(pg, all_links.first, "filter")
-                                filter_clicked = True
+                                for _ftry in range(4):
+                                    for _dlg in ("Marking delay", "Excavation Date", "Date of Excavation"):
+                                        if await pg.locator(f'h1:has-text("{_dlg}")').count():
+                                            await _dismiss_dialog(pg, _dlg, label=tnum)
+                                    if await pg.locator('.cdk-overlay-backdrop, mat-dialog-container').count():
+                                        try:
+                                            await pg.evaluate("document.querySelectorAll('.cdk-overlay-container mat-dialog-container, .cdk-overlay-pane, .cdk-overlay-backdrop').forEach(el => el.remove())")
+                                        except Exception:
+                                            pass
+                                        await pg.wait_for_timeout(250)
+                                    try:
+                                        await all_links.first.click(timeout=12000)
+                                        await wait_stable(pg)
+                                        filter_clicked = True
+                                        break
+                                    except Exception:
+                                        await pg.wait_for_timeout(400)
 
                             if not filter_clicked:
                                 cur_links = pg.locator('text=/^Current Only/')

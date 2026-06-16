@@ -88,7 +88,7 @@ let clusterGroup=null;
 let fieldDrawing=false,fieldPts=[],fieldLine=null,fieldTicketId=null;
 let utilCache={},utilCacheLoaded=false;
 let dashStateVal='';
-let _soonDays=10,_metricProjFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='',_analyticsScope='all';
+let _soonDays=10,_metricProjFilter='',_metricPrimeFilter='',_clearProjFilter='',_progProjFilter='',_velProjFilter='',_analyticsScope='all';
 // Qual card expandiu os tickets clareados: 'today' | '7d' | '30d' | null
 let _clearedExpand=null;
 // Qual dia do bar chart expandiu (formato YYYY-MM-DD) | null.
@@ -5641,7 +5641,8 @@ function renderRiskAnalytics(fT){
 function renderClearTimeMetrics(fTickets){
   if(!utilCacheLoaded)return'';
   var mpf=_metricProjFilter||'';
-  var ft3=mpf?fTickets.filter(function(t){return t.projectId===mpf;}):fTickets;
+  var mprf=_metricPrimeFilter||'';
+  var ft3=fTickets.filter(function(t){return (!mpf||t.projectId===mpf)&&(!mprf||(t.prime||'').trim()===mprf);});
   var utilTimes={};
   for(var i=0;i<ft3.length;i++){
     var t=ft3[i];if(!t.history||!t.history.length)continue;
@@ -5658,11 +5659,21 @@ function renderClearTimeMetrics(fTickets){
   var utilAvg=[];
   for(var name in utilTimes){if(utilTimes[name].count>=2)utilAvg.push({name:name,avg:Math.round(utilTimes[name].total/utilTimes[name].count*10)/10,count:utilTimes[name].count});}
   utilAvg.sort(function(a,b){return b.avg-a.avg;});
-  if(!utilAvg.length)return'';
   var projOpts='<option value="">Todos projetos</option>'+projects.filter(function(p){return p.status!=='Completed';}).map(function(p){return'<option value="'+p.id+'"'+(mpf===p.id?' selected':'')+'>'+esc(projDropLabel(p))+'</option>';}).join('');
-  var projSel='<select class="fi" onchange="_metricProjFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px">'+projOpts+'</select>';
+  var projSel='<select class="fi" onchange="_metricProjFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px" title="Filtrar por projeto">'+projOpts+'</select>';
+  // Dropdown por PRIME (compõe com o de projeto) — primes distintos dos tickets visíveis.
+  var primesAll=[];var _seenP={};
+  for(var pi=0;pi<fTickets.length;pi++){var pn=(fTickets[pi].prime||'').trim();if(pn&&!_seenP[pn]){_seenP[pn]=1;primesAll.push(pn);}}
+  primesAll.sort(function(a,b){return a.localeCompare(b);});
+  var primeOpts='<option value="">Todos primes</option>'+primesAll.map(function(pn){return'<option value="'+esc(pn)+'"'+(mprf===pn?' selected':'')+'>'+esc(pn)+'</option>';}).join('');
+  var primeSel='<select class="fi" onchange="_metricPrimeFilter=this.value;refreshDashOrAnalytics()" style="width:auto;min-width:140px;font-size:11px;padding:4px 6px" title="Filtrar por prime">'+primeOpts+'</select>';
+  if(!utilAvg.length){
+    if(!mpf&&!mprf)return'';   // sem filtro e sem dados → painel some (comportamento original)
+    // filtro ativo sem dados: mostra só o cabeçalho + dropdowns (senão o filtro fica preso)
+    return '<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear</div><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--muted)">sem dados de clear pra este filtro</span>'+projSel+primeSel+'</div></div></div></div>';
+  }
   var globalAvg=utilAvg.reduce(function(s,u){return s+u.avg*u.count;},0)/utilAvg.reduce(function(s,u){return s+u.count;},0);
-  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear</div><div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px;font-weight:700;font-family:var(--mono);color:'+(globalAvg<=3?'var(--green)':globalAvg<=6?'var(--amber)':'var(--red)')+'">'+globalAvg.toFixed(1)+' dias</span>'+projSel+'</div></div>';
+  var h='<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="dash-card-title" style="margin-bottom:0">⏱ Tempo médio para Clear</div><div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px;font-weight:700;font-family:var(--mono);color:'+(globalAvg<=3?'var(--green)':globalAvg<=6?'var(--amber)':'var(--red)')+'">'+globalAvg.toFixed(1)+' dias</span>'+projSel+primeSel+'</div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">';
   for(var k=0;k<Math.min(utilAvg.length,12);k++){
     var u2=utilAvg[k];var color=u2.avg<=3?'var(--green)':u2.avg<=6?'var(--amber)':'var(--red)';

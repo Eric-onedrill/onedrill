@@ -629,7 +629,7 @@ function getTicketUtils(ticketNum){
 // Utilities de FIBRA (telecom/cabo). A liberação automática por no-show SÓ vale
 // pra estas — nunca água, gás, elétrico ou sewer. Lista mantida aqui + override
 // pelo campo utility_type quando preenchido no banco.
-const FIBER_NAMES=['COMCAST','XFINITY','AT&T','ATT','FRONTIER','UNITI','TIME WARNER','SPECTRUM','CHARTER','METRO FIBERNET','METRONET','MIDWEST FIBER','LUMEN','CENTURYLINK','ZAYO','WINDSTREAM','CROWN CASTLE','LEVEL 3','VERIZON','SEGRA','EVERSTREAM','WIDEOPENWEST','WOW'];
+const FIBER_NAMES=['COMCAST','XFINITY','AT&T','ATT','FRONTIER','UNITI','TIME WARNER','SPECTRUM','CHARTER','METRO FIBERNET','METRONET','MIDWEST FIBER','LUMEN','CENTURYLINK','ZAYO','WINDSTREAM','CROWN CASTLE','LEVEL 3','VERIZON','SEGRA','EVERSTREAM','WIDEOPENWEST','WOW','SURF'];
 const FIBER_KEYWORDS=['FIBER','FIBRE','FIBERNET','TELECOM','CABLE','BROADBAND','COMMUNICATION'];
 const NONFIBER_TYPES=['water','gas','electric','sewer','agua','água','eletrico','elétrico','esgoto'];
 function isFiberUtility(name,utilityType){

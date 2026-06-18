@@ -5139,6 +5139,7 @@ function renderClearedStats(fTickets){
   var cpf=_clearProjFilter||'';
   var ft2=cpf?fTickets.filter(function(t){return t.projectId===cpf;}):fTickets;
   function getTicketClearDate(t){
+    if(_isNoShowReleased(t))return _noShowReleaseDateTs(t);  // liberado por no-show → data do 4º no-show
     if(!t.history||!t.history.length)return 0;
     for(var j=t.history.length-1;j>=0;j--){
       var a=(t.history[j].action||'').toLowerCase();
@@ -5351,6 +5352,7 @@ function _renderClearedExpand(key,cToday,c7,c30){
 // Helper standalone pra extração de data — duplica lógica de getTicketClearDate que é local à função.
 // Precisa ser acessível fora do escopo original do renderDashboard.
 function _getTicketClearDateForExpand(t){
+  if(_isNoShowReleased(t))return _noShowReleaseDateTs(t);  // liberado por no-show → data do 4º no-show
   if(!t.history||!t.history.length)return 0;
   for(var j=t.history.length-1;j>=0;j--){
     var a=(t.history[j].action||'').toLowerCase();

@@ -2248,7 +2248,13 @@ function newTicketFullyCleared(t){
 function _isNoShowReleased(t){
   if(!utilCacheLoaded||!t||t.status_locked)return false;
   if((t.status||'')!=='Open')return false;      // só tickets em aberto
-  const utils=getTicketUtils(t.ticket);
+  // Em carência (renovação), o ticket opera sob o número ANTIGO até o cutover. Se o antigo
+  // estava liberado por no-show (laranja), o novo MANTÉM o laranja durante toda a carência —
+  // avaliamos os utils do antigo. Se o NOVO já clareou de verdade, vira verde (não laranja).
+  const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+  if(inGrace&&newTicketFullyCleared(t))return false;
+  const oldNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
+  const utils=getTicketUtils((inGrace&&oldNum)?oldNum:t.ticket);
   if(!utils.length)return false;
   const released=new Set(['Clear','Private','Marked','Unmarked']);
   let fiberExhausted=false;

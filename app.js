@@ -2288,6 +2288,11 @@ function effectiveStatus(t){
   // Status travado manualmente = sempre respeitar
   if(t.status_locked)return t.status;
 
+  // Liberado por no-show (fibra no 4º no-show + resto Clear) = status efetivo CLEAR (laranja).
+  // Checado ANTES do bloco de carência — senão um renovado em carência cairia em 'Open'.
+  // _isNoShowReleased já avalia o ticket ANTIGO durante a carência.
+  if(_isNoShowReleased(t))return 'Clear';
+
   if(isRenewed(t)&&isInRenewalGrace(t)){
     // Regra 3: novo já totalmente resolvido — sobrepõe carência
     if(utilCacheLoaded&&newTicketFullyCleared(t))return 'Clear';

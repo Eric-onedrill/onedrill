@@ -2263,6 +2263,21 @@ function _isNoShowReleased(t){
 function effColor(t){return _isNoShowReleased(t)?'#d97706':scol(effectiveStatus(t));}
 function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(effectiveStatus(t)||'').toLowerCase();}
 function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':effectiveStatus(t);}
+// Data em que o ticket foi liberado por no-show = data do no-show MAIS RECENTE (o que
+// completou o 4º). Usada pra bucketar no "Clareados Hoje" (vira clear efetivo nesse dia).
+function _noShowReleaseDateTs(t){
+  const ns=getSecondNotices(t);
+  if(!ns.length)return 0;
+  let best=0;
+  for(const x of ns){
+    const iso=_snDateToIso(x.date)||(x.date||'');
+    let ms=0;
+    if(/^\d{4}-\d{2}-\d{2}/.test(iso)){const p=iso.slice(0,10).split('-');ms=new Date(+p[0],+p[1]-1,+p[2],12,0,0).getTime();}
+    else if(x.ts){ms=x.ts;}
+    if(ms>best)best=ms;
+  }
+  return best;
+}
 function effectiveStatus(t){
   // Status travado manualmente = sempre respeitar
   if(t.status_locked)return t.status;
@@ -2944,6 +2959,7 @@ function renderDash(){
   +renderClearedStats(fTickets)
   +renderWatchAndProtectAlert(fTickets)
   +renderPrivateLocatorAlert(fTickets)
+  +renderNoShowReleasedAlert(fTickets)
   +'<div id="dash-sync-timer" style="text-align:center;font-size:10px;color:var(--muted);padding:10px 0">sync automático em breve</div>';
 
   loadLastSync();
@@ -5142,8 +5158,12 @@ function renderClearedStats(fTickets){
   var cToday=[],c24=[],c7=[],c30=[],byU7={};
   var seenToday={},seen24={},seen7={},seen30={};
   for(var i=0;i<ft2.length;i++){
-    var t=ft2[i];if(t.status!=='Clear')continue;
-    var cd=getTicketClearDate(t);if(!cd)continue;
+    var t=ft2[i];
+    // Clear direto OU liberado por no-show (fibra no 4º no-show + resto Clear) — ambos contam.
+    var cd=0;
+    if(t.status==='Clear'){cd=getTicketClearDate(t);}
+    else if(_isNoShowReleased(t)){cd=_noShowReleaseDateTs(t);}
+    if(!cd)continue;
     var tk=t.ticket;
     if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
     if(cd>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
@@ -5558,6 +5578,41 @@ function renderPrivateLocatorAlert(fTickets){
         +'<span class="sbadge b-'+effStatusCls(t)+'" style="font-size:9px">'+esc(effStatusLabel(t))+'</span></div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
         +'<div style="font-size:9px;color:#7c3aed;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
+        +'</div>';
+    }).join('')
+    +'</div></div>';
+}
+
+function renderNoShowReleasedAlert(fTickets){
+  if(!utilCacheLoaded)return'';
+  const released=new Set(['Clear','Private','Marked','Unmarked']);
+  const list=[];
+  const active=fTickets.filter(t=>t.status!=='Closed'&&t.status!=='Cancel'&&!isSuperseded(t));
+  for(const t of active){
+    if(!_isNoShowReleased(t))continue;
+    const utils=getTicketUtils(String(t.ticket).trim());
+    const fib=[];
+    for(const u of utils){
+      if(!released.has(u.status)&&isFiberUtility(u.utility_name)&&countSecondNotices(t,u.utility_name)>=4)
+        fib.push(u.utility_name);
+    }
+    list.push({t,utils:fib.length?fib:['(fibra no 4º no-show)']});
+  }
+  if(!list.length)return'';
+  return'<div style="background:#fff3e0;border:2px solid #fed7aa;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+    +'<span style="font-size:12px;font-weight:700;color:#d97706">🟠 Liberado por No-Show (Fibra) ('+list.length+' ticket'+(list.length>1?'s':'')+')</span>'
+    +'</div>'
+    +'<div style="font-size:10px;color:#b45309;margin-bottom:8px">Fibra atingiu o 4º no-show e o resto está Clear → ticket liberado pra trabalhar. <strong>Localize a fibra em campo</strong> antes de escavar.</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+    +list.map(({t,utils})=>{
+      const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
+      return'<div style="background:white;border:1px solid #fed7aa;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center">'
+        +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
+        +'<span class="sbadge b-'+effStatusCls(t)+'" style="font-size:9px">'+esc(effStatusLabel(t))+'</span></div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
+        +'<div style="font-size:9px;color:#d97706;margin-top:3px;font-weight:600">'+utils.map(esc).join(', ')+'</div>'
         +'</div>';
     }).join('')
     +'</div></div>';

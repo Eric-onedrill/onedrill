@@ -5637,8 +5637,11 @@ function renderNoShowReleasedAlert(fTickets){
     +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
     +list.map(({t,utils})=>{
       const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
-      // Vencimento: usa o expire do ticket; se vazio (renovado em carência), usa a data da carência.
-      const venc=(t.expire&&t.expire!=='—')?t.expire:graceCutoverDate(t);
+      // Vencimento do CÓDIGO LARANJA: se renovado em carência, o laranja vale só até o
+      // CUTOVER (vencimento do ANTIGO) — NÃO a data do ticket novo. Depois do cutover deixa
+      // de ser laranja. Só usa o expire próprio quando o no-show não é via carência.
+      const _inGrace=isRenewed(t)&&isInRenewalGrace(t);
+      const venc=_inGrace?graceCutoverDate(t):((t.expire&&t.expire!=='—')?t.expire:'—');
       return'<div style="background:white;border:1px solid #fed7aa;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
         +'<div style="display:flex;justify-content:space-between;align-items:center">'
         +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
@@ -5646,7 +5649,7 @@ function renderNoShowReleasedAlert(fTickets){
         +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
         +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;gap:6px">'
         +'<span style="font-size:9px;color:#d97706;font-weight:600">'+utils.map(esc).join(', ')+'</span>'
-        +'<span style="font-size:9px;color:var(--muted);white-space:nowrap">📅 vence '+esc(venc||'—')+'</span>'
+        +'<span style="font-size:9px;color:#d97706;font-weight:600;white-space:nowrap">'+(_inGrace?'🟠 laranja até ':'📅 vence ')+esc(venc||'—')+'</span>'
         +'</div>'
         +'</div>';
     }).join('')

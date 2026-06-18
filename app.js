@@ -185,8 +185,9 @@ function filterTickets(opts={}){
     // Superseded
     if(excludeSuperseded && isSuperseded(t)) return false;
 
-    // Status exato (usa status real — effectiveStatus é só visual)
-    if(status && t.status!==status) return false;
+    // Status: usa effectiveStatus pra respeitar carência/no-show. Um ticket Clear-via-carência
+    // (status bruto Open, efetivo Clear) cai no filtro "Clear", NÃO no "Open". Idem no-show (laranja=Clear).
+    if(status && effectiveStatus(t)!==status) return false;
 
     // Status filter (mapa checkboxes) — usa effectiveStatus pra respeitar
     // a carencia: ticket renovado em grace com status=Open mas effective=Clear

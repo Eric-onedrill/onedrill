@@ -5158,18 +5158,23 @@ function renderClearedStats(fTickets){
   }
   var cToday=[],c24=[],c7=[],c30=[],byU7={};
   var seenToday={},seen24={},seen7={},seen30={};
+  var _dayBuckets={};   // dayKey(YYYY-MM-DD) -> contagem (por EVENTO de clear; IMUTÁVEL)
   for(var i=0;i<ft2.length;i++){
-    var t=ft2[i];
-    // Clear direto OU liberado por no-show (fibra no 4º no-show + resto Clear) — ambos contam.
-    var cd=0;
-    if(t.status==='Clear'){cd=getTicketClearDate(t);}
-    else if(_isNoShowReleased(t)){cd=_noShowReleaseDateTs(t);}
-    if(!cd)continue;
-    var tk=t.ticket;
-    if(cd>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
-    if(cd>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
-    if(cd>=day7&&!seen7[tk]){c7.push(t);seen7[tk]=1;}
-    if(cd>=day30&&!seen30[tk]){c30.push(t);seen30[tk]=1;}
+    var t=ft2[i];var tk=t.ticket;
+    // Conta por EVENTO de clear no history (imutável) — independe do status ATUAL.
+    // Um ticket clareado num dia continua nesse dia mesmo se depois revertido/fechado.
+    var evs=_clearEventTimes(t);
+    if(!evs.length)continue;
+    var perDay={};
+    for(var e=0;e<evs.length;e++){
+      var ts=evs[e];
+      if(ts>=todayCutoff&&!seenToday[tk]){cToday.push(t);seenToday[tk]=1;}
+      if(ts>=day1&&!seen24[tk]){c24.push(t);seen24[tk]=1;}
+      if(ts>=day7&&!seen7[tk]){c7.push(t);seen7[tk]=1;}
+      if(ts>=day30&&!seen30[tk]){c30.push(t);seen30[tk]=1;}
+      var dk0=localDateKey(ts);
+      if(!perDay[dk0]){perDay[dk0]=1;_dayBuckets[dk0]=(_dayBuckets[dk0]||0)+1;}  // 1x por ticket por dia
+    }
   }
   if(utilCacheLoaded){for(var i2=0;i2<c7.length;i2++){var us=getTicketUtils(String(c7[i2].ticket).trim());for(var j=0;j<us.length;j++){if(us[j].status==='Clear'){if(!byU7[us[j].utility_name])byU7[us[j].utility_name]=0;byU7[us[j].utility_name]++;}}}}
   var ftToday=0,ft24=0,ft7=0,ft30=0;
@@ -5190,15 +5195,9 @@ function renderClearedStats(fTickets){
   for(var d=6;d>=0;d--){
     var dd=new Date(dayNow);dd.setDate(dd.getDate()-d);
     var dk=localDateKey(dd.getTime());
-    dayBuckets[dk]=0;
+    dayBuckets[dk]=_dayBuckets[dk]||0;   // contagem por EVENTO de clear (imutável)
     var dias=['dom','seg','ter','qua','qui','sex','sáb'];
     dayLabels.push({key:dk,label:dias[dd.getDay()]+', '+String(dd.getDate()).padStart(2,'0')});
-  }
-  for(var ib=0;ib<c7.length;ib++){
-    var cdt=getTicketClearDate(c7[ib]);
-    if(!cdt)continue;
-    var cdd=localDateKey(cdt);
-    if(dayBuckets[cdd]!==undefined)dayBuckets[cdd]++;
   }
   var maxBar=Math.max.apply(null,dayLabels.map(function(d2){return dayBuckets[d2.key]||0;}))||1;
   var barHtml='<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding-top:20px">';
@@ -5364,6 +5363,29 @@ function _getTicketClearDateForExpand(t){
   return 0;
 }
 
+// ── KPI IMUTÁVEL ──────────────────────────────────────────────────────────────
+// Todos os timestamps de eventos de CLEAR no history (auto 811 / auto-clear / manual)
+// + a data de liberação por no-show. Cada evento conta no SEU dia. Como eventos no
+// history NUNCA são apagados (revert/cancel é um evento NOVO depois), os dias passados
+// ficam IMUTÁVEIS — o relatório de um dia sempre bate com a verdade daquele dia.
+function _clearEventTimes(t){
+  var out=[];var h=(t&&t.history)||[];
+  for(var j=0;j<h.length;j++){
+    var a=(h[j].action||'').toLowerCase();
+    var ok=(a.indexOf('auto-clear')>=0)
+        ||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0)
+        ||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
+    if(ok&&h[j].ts)out.push(h[j].ts);
+  }
+  if(_isNoShowReleased(t)){var ns=_noShowReleaseDateTs(t);if(ns)out.push(ns);}
+  return out;
+}
+function _clearedOnDay(t,dayKey){
+  var ts=_clearEventTimes(t);
+  for(var i=0;i<ts.length;i++){if(_localDateKeyForExpand(ts[i])===dayKey)return true;}
+  return false;
+}
+
 // Converte timestamp → YYYY-MM-DD em fuso LOCAL (match com localDateKey do renderDashboard).
 function _localDateKeyForExpand(ts){
   var d=new Date(ts);
@@ -5378,8 +5400,7 @@ function _renderClearedDayExpand(dayKey,c7){
   var seen={};
   for(var i=0;i<c7.length;i++){
     var t=c7[i];
-    var cd=_getTicketClearDateForExpand(t);if(!cd)continue;
-    if(_localDateKeyForExpand(cd)!==dayKey)continue;
+    if(!_clearedOnDay(t,dayKey))continue;   // teve EVENTO de clear nesse dia (imutável)
     if(seen[t.ticket])continue;
     seen[t.ticket]=1;
     list.push(t);
@@ -5437,9 +5458,8 @@ function exportClearedDay(dayKey){
   var source=cpf?tickets.filter(function(t){return t.projectId===cpf;}):tickets;
   var list=[],seen={};
   for(var i=0;i<source.length;i++){
-    var t=source[i];if(t.status==='Cancel')continue;
-    var cd=_getTicketClearDateForExpand(t);if(!cd)continue;
-    if(_localDateKeyForExpand(cd)!==dayKey)continue;
+    var t=source[i];
+    if(!_clearedOnDay(t,dayKey))continue;   // teve EVENTO de clear nesse dia (imutável)
     if(seen[t.ticket])continue;
     seen[t.ticket]=1;
     list.push(t);
@@ -5447,17 +5467,13 @@ function exportClearedDay(dayKey){
   if(!list.length){toast('Nenhum ticket clareado nesse dia','warn');return;}
   list.sort(function(a,b){return(b.footage||0)-(a.footage||0);});
 
+  // "Liberado em" = o próprio dia (MM/DD/YYYY) — é a data do evento de clear daquele dia.
+  var _dp=dayKey.split('-');var dayStr=_dp[1]+'/'+_dp[2]+'/'+_dp[0];
   var rows=[['Ticket','Cliente','Prime','Estado','Location','Projeto','Footage','Liberado em','Expira','Tipo','Endereço']];
   for(var r=0;r<list.length;r++){
     var tk=list[r];
     var projName=(projects.find(function(p){return p.id===tk.projectId;})||{}).name||'';
-    var cdRT=_getTicketClearDateForExpand(tk);
-    var cdStr='';
-    if(cdRT){
-      var dd=new Date(cdRT);
-      cdStr=String(dd.getMonth()+1).padStart(2,'0')+'/'+String(dd.getDate()).padStart(2,'0')+'/'+dd.getFullYear();
-    }
-    rows.push([tk.ticket||'',tk.client||'',tk.prime||'',tk.state||'',tk.location||'',projName,tk.footage||0,cdStr,tk.expire||'',tk.tipo||'',tk.address||'']);
+    rows.push([tk.ticket||'',tk.client||'',tk.prime||'',tk.state||'',tk.location||'',projName,tk.footage||0,dayStr,tk.expire||'',tk.tipo||'',tk.address||'']);
   }
   var wb=XLSX.utils.book_new();
   var ws=XLSX.utils.aoa_to_sheet(rows);
@@ -5481,9 +5497,10 @@ function exportClearedTickets(key){
   var list=[],seen={};
   var cutoff=key==='today'?todayCutoff:key==='7d'?day7:day30;
   for(var i=0;i<source.length;i++){
-    var t=source[i];if(t.status==='Cancel')continue;
-    var cd=_getTicketClearDateForExpand(t);
-    if(!cd||cd<cutoff)continue;
+    var t=source[i];
+    var evs=_clearEventTimes(t);   // event-based (imutável)
+    var inP=false;for(var z=0;z<evs.length;z++){if(evs[z]>=cutoff){inP=true;break;}}
+    if(!inP)continue;
     if(seen[t.ticket])continue;
     seen[t.ticket]=1;
     list.push(t);

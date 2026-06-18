@@ -2815,6 +2815,9 @@ function renderTable(){
         +`</div>`
       :'';
     const es=effectiveStatus(t);const inGrace=isRenewed(t)&&isInRenewalGrace(t);
+    // EXPIRA: renovado em carência mostra o vencimento da CARÊNCIA (cutover do antigo),
+    // NÃO o do ticket novo (mais longo) — senão planeja além do limite da carência.
+    const _vencCol=inGrace?(graceCutoverDate(t)||t.expire||'—'):(t.expire||'—');
     return`<tr onclick="openTicketDetail(${t.id})">`
       +`<td style="font-family:var(--mono);font-weight:500">${esc(t.ticket)}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 renovou '+esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+(inGrace?' (carência)':'')+'</div>':''}</td>`
       +`<td style="color:var(--text2);font-size:12px">${esc(t.client)}</td>`
@@ -2822,7 +2825,7 @@ function renderTable(){
       +`<td>${esc(t.location)}, ${esc(t.state)}</td>`
       +`<td class="tc-${es.toLowerCase()}">${esc(es)}${inGrace?' <span style="font-size:9px;color:#7c3aed">🔄</span>':''}${pendChips}</td>`
       +`<td style="font-family:var(--mono)">${t.completedFeet?fmtProgress(t):(t.footage+' ft')}</td>`
-      +`<td style="font-family:var(--mono);font-size:12px">${esc(t.expire||'—')}</td>`
+      +`<td style="font-family:var(--mono);font-size:12px">${esc(_vencCol)}${inGrace?' <span style="font-size:9px;color:#7c3aed">carência</span>':''}</td>`
       +`<td style="color:var(--muted)">${esc(t.tipo||'—')}</td>`
       +`<td onclick="event.stopPropagation()"><div style="display:flex;gap:5px"><button class="btn btn-sm" onclick="openTicketDetail(${t.id})">Ver</button>${isAdmin?`<button class="btn btn-sm" onclick="editFromTbl(${t.id})">Editar</button>`:''}</div></td>`
       +`</tr>`;

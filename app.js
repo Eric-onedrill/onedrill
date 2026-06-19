@@ -3035,7 +3035,9 @@ function renderProjects(){
     const openC=ts.filter(t=>_es(t)==='Open').length,clearC=ts.filter(t=>_es(t)==='Clear').length,damageC=ts.filter(t=>_es(t)==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
     const campoFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);const pctCampoP=projTotal>0?Math.round(campoFt/projTotal*100):0;
-    const clearFtP=ts.filter(t=>_es(t)==='Clear').reduce((s,t)=>s+(t.footage||0),0);
+    // ft clear = footage dos tickets Clear MENOS o já produzido parcialmente (completedFeet)
+    // = o que realmente sobra pra trabalhar nos clear.
+    const clearFtP=ts.filter(t=>_es(t)==='Clear').reduce((s,t)=>s+Math.max(0,(t.footage||0)-(t.completedFeet||0)),0);
     const openFtP=ts.filter(t=>_es(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
     const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
     const damageFtV=ts.filter(t=>_es(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);

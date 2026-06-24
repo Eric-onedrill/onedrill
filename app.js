@@ -2258,23 +2258,40 @@ function newTicketFullyCleared(t){
 // são utilities de FIBRA que chegaram ao 4º no-show (3 falhas reais: 2nd/3rd/4th) e
 // todo o resto está Clear → o ticket é liberado. effectiveStatus vira 'Clear'; a COR
 // é laranja (via _isNoShowReleased nos pontos de render) com a nota "localizar fibra".
+// Libera por no-show avaliando UM número de ticket: usa os utils desse número e os no-shows
+// DESSE número (sem acumular). True se ≥1 fibra chegou ao 4º no-show e o resto está liberado.
+function _noShowReleasedForNum(t,num){
+  num=String(num||'').trim();
+  if(!num)return false;
+  const utils=getTicketUtils(num);
+  if(!utils.length)return false;
+  const released=new Set(['Clear','Private','Marked','Unmarked']);
+  let fiberEx=false;
+  for(const u of utils){
+    if(released.has(u.status))continue;
+    const list=getSecondNotices(t,num).filter(n=>(n.utility||'').toUpperCase()===(u.utility_name||'').toUpperCase());
+    const mx=list.length?Math.max(...list.map(x=>x.n)):0;
+    if(isFiberUtility(u.utility_name)&&mx>=4){fiberEx=true;continue;}
+    return false;                                // pendência que NÃO é fibra no 4º no-show → bloqueia
+  }
+  return fiberEx;
+}
 function _isNoShowReleased(t){
   if(!utilCacheLoaded||!t||t.status_locked)return false;
   if((t.status||'')!=='Open')return false;      // só tickets em aberto
-  // No-show é POR TICKET — NÃO acumula com o antigo. Avalia SÓ os utils e os no-shows do
-  // PRÓPRIO ticket (countSecondNotices conta só os deste número). Se o renovado já clareou
-  // de verdade, é verde (não laranja).
-  if(newTicketFullyCleared(t))return false;
-  const utils=getTicketUtils(t.ticket);
-  if(!utils.length)return false;
-  const released=new Set(['Clear','Private','Marked','Unmarked']);
-  let fiberExhausted=false;
-  for(const u of utils){
-    if(released.has(u.status))continue;          // utility já liberada
-    if(isFiberUtility(u.utility_name)&&countSecondNotices(t,u.utility_name)>=4){fiberExhausted=true;continue;}
-    return false;                                // pendência que NÃO é fibra no 4º no-show → bloqueia
+  if(isRenewed(t)&&isInRenewalGrace(t)&&newTicketFullyCleared(t))return false;  // novo já verde
+  // 1) Liberação PRÓPRIA: a fibra DESTE ticket chegou ao 4º no-show (conta só os dele).
+  if(_noShowReleasedForNum(t,String((t&&t.ticket)||'').trim()))return true;
+  // 2) Em CARÊNCIA: herda o laranja do ANTIGO (que foi liberado por no-show NO 4º DELE) —
+  //    MAS só se o NOVO não tiver pendência NÃO-FIBRA (gás/água/elétrica = bloqueio real).
+  if(isRenewed(t)&&isInRenewalGrace(t)){
+    const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    const released=new Set(['Clear','Private','Marked','Unmarked']);
+    const newU=getTicketUtils(t.ticket);
+    const newNonFiberPend=newU.some(u=>!released.has(u.status)&&!isFiberUtility(u.utility_name));
+    if(!newNonFiberPend&&_noShowReleasedForNum(t,oldNum))return true;
   }
-  return fiberExhausted;                          // libera só se ≥1 fibra esgotada e nada mais bloqueia
+  return false;
 }
 // Cor / classe de badge / label do status considerando a liberação por no-show (laranja).
 function effColor(t){return _isNoShowReleased(t)?'#d97706':scol(effectiveStatus(t));}
@@ -2283,7 +2300,14 @@ function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':effect
 // Data em que o ticket foi liberado por no-show = data do no-show MAIS RECENTE (o que
 // completou o 4º). Usada pra bucketar no "Clareados Hoje" (vira clear efetivo nesse dia).
 function _noShowReleaseDateTs(t){
-  const ns=getSecondNotices(t,String((t&&t.ticket)||'').trim());  // só no-shows DESTE ticket
+  // Liberação própria → data dos no-shows DESTE ticket. Herdado na carência → data do ANTIGO
+  // (a fibra dele esgotou há tempos — NÃO puxar pra hoje).
+  let num=String((t&&t.ticket)||'').trim();
+  if(!_noShowReleasedForNum(t,num)&&isRenewed(t)&&isInRenewalGrace(t)){
+    const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    if(oldNum)num=oldNum;
+  }
+  const ns=getSecondNotices(t,num);
   if(!ns.length)return 0;
   let best=0;
   for(const x of ns){

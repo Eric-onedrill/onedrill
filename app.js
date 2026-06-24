@@ -1695,7 +1695,18 @@ function openTicketDetail(id){
 
   const graceBannerDet=(()=>{
     if(!inGrace)return'';
-    const oldSt=t.statusOld||t.status_old||'Open';
+    // oldSt parte do snapshot da renovação, MAS se as utilities do antigo já estão TODAS
+    // liberadas AGORA (ex.: clarearam depois da renovação), trata como 'Clear' — consistente
+    // com effectiveStatus. Sem isso a caixa fica desatualizada ("era Open") mesmo já clareado.
+    let oldSt=t.statusOld||t.status_old||'Open';
+    if(oldSt!=='Clear'&&utilCacheLoaded){
+      const _on=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+      const _ou=_on?(utilCache[_on]||[]):[];
+      const _rel=new Set(['Clear','Private','Marked','Unmarked']);
+      const _np=u=>(u.response_text||'').toLowerCase().includes('not participating');
+      const _relev=_ou.filter(u=>!_np(u));
+      if(_relev.length>0&&_relev.every(u=>_rel.has(u.status)))oldSt='Clear';
+    }
     const oldNum=esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]);
 
     // NOVA PRIORIDADE: novo totalmente clareado sobrepõe graça.

@@ -2266,7 +2266,11 @@ function _isNoShowReleased(t){
   const inGrace=isRenewed(t)&&isInRenewalGrace(t);
   if(inGrace&&newTicketFullyCleared(t))return false;
   const oldNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
-  const utils=getTicketUtils((inGrace&&oldNum)?oldNum:t.ticket);
+  // Avalia os utils do número ATUAL. Só cai no antigo se o novo ainda NÃO tem respostas
+  // (carência recém-criada). Assim uma pendência NOVA não-fibra (ex.: NIPSCO 3C Unmarked)
+  // BLOQUEIA a liberação, mesmo que o antigo estivesse liberado por no-show.
+  const newUtils=getTicketUtils(t.ticket);
+  const utils=(inGrace&&!newUtils.length&&oldNum)?getTicketUtils(oldNum):newUtils;
   if(!utils.length)return false;
   const released=new Set(['Clear','Private','Marked','Unmarked']);
   let fiberExhausted=false;

@@ -679,7 +679,8 @@ function countSecondNotices(t,utilityName){
   // 1 no-show→2, 2→3, 3→4. NÃO é a contagem (é qtd+1). A regra laranja usa >=4,
   // ou seja exige 3 no-shows reais. Se mudar o recompute pra 1-based, ajustar o limiar.
   const u=(utilityName||'').toUpperCase();
-  const list=getSecondNotices(t).filter(n=>(n.utility||'').toUpperCase()===u);
+  // SÓ os no-shows DESTE ticket (onlyTk = número atual) — não acumula com o antigo.
+  const list=getSecondNotices(t,String((t&&t.ticket)||'').trim()).filter(n=>(n.utility||'').toUpperCase()===u);
   return list.length?Math.max(...list.map(x=>x.n)):0;
 }
 function _snDateToIso(s){
@@ -2260,17 +2261,11 @@ function newTicketFullyCleared(t){
 function _isNoShowReleased(t){
   if(!utilCacheLoaded||!t||t.status_locked)return false;
   if((t.status||'')!=='Open')return false;      // só tickets em aberto
-  // Em carência (renovação), o ticket opera sob o número ANTIGO até o cutover. Se o antigo
-  // estava liberado por no-show (laranja), o novo MANTÉM o laranja durante toda a carência —
-  // avaliamos os utils do antigo. Se o NOVO já clareou de verdade, vira verde (não laranja).
-  const inGrace=isRenewed(t)&&isInRenewalGrace(t);
-  if(inGrace&&newTicketFullyCleared(t))return false;
-  const oldNum=inGrace?((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim():'';
-  // Avalia os utils do número ATUAL. Só cai no antigo se o novo ainda NÃO tem respostas
-  // (carência recém-criada). Assim uma pendência NOVA não-fibra (ex.: NIPSCO 3C Unmarked)
-  // BLOQUEIA a liberação, mesmo que o antigo estivesse liberado por no-show.
-  const newUtils=getTicketUtils(t.ticket);
-  const utils=(inGrace&&!newUtils.length&&oldNum)?getTicketUtils(oldNum):newUtils;
+  // No-show é POR TICKET — NÃO acumula com o antigo. Avalia SÓ os utils e os no-shows do
+  // PRÓPRIO ticket (countSecondNotices conta só os deste número). Se o renovado já clareou
+  // de verdade, é verde (não laranja).
+  if(newTicketFullyCleared(t))return false;
+  const utils=getTicketUtils(t.ticket);
   if(!utils.length)return false;
   const released=new Set(['Clear','Private','Marked','Unmarked']);
   let fiberExhausted=false;
@@ -2288,7 +2283,7 @@ function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':effect
 // Data em que o ticket foi liberado por no-show = data do no-show MAIS RECENTE (o que
 // completou o 4º). Usada pra bucketar no "Clareados Hoje" (vira clear efetivo nesse dia).
 function _noShowReleaseDateTs(t){
-  const ns=getSecondNotices(t);
+  const ns=getSecondNotices(t,String((t&&t.ticket)||'').trim());  // só no-shows DESTE ticket
   if(!ns.length)return 0;
   let best=0;
   for(const x of ns){

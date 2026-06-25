@@ -5538,7 +5538,10 @@ function _renderClearedDayExpand(dayKey,c7){
 // Exporta tickets de um dia específico.
 function exportClearedDay(dayKey){
   var cpf=_clearProjFilter||'';
-  var source=cpf?tickets.filter(function(t){return t.projectId===cpf;}):tickets;
+  // MESMA base do dashboard: exclui supersedidos (nº antigos re-importados = 0 ft) e projetos
+  // Completed. Sem isso o Excel trazia os supersedidos e não batia com a contagem da tela.
+  var base=(typeof filterTickets==='function')?filterTickets({}):tickets;
+  var source=cpf?base.filter(function(t){return t.projectId===cpf;}):base;
   var list=[],seen={};
   for(var i=0;i<source.length;i++){
     var t=source[i];
@@ -5575,7 +5578,10 @@ function exportClearedTickets(key){
   var day7=now-7*86400000;
   var day30=now-30*86400000;
   var cpf=_clearProjFilter||'';
-  var source=cpf?tickets.filter(function(t){return t.projectId===cpf;}):tickets;
+  // MESMA base do dashboard: exclui supersedidos e projetos Completed (senão o Excel não bate
+  // com a contagem da tela — trazia os nº antigos re-importados com 0 ft).
+  var base=(typeof filterTickets==='function')?filterTickets({}):tickets;
+  var source=cpf?base.filter(function(t){return t.projectId===cpf;}):base;
 
   var list=[],seen={};
   var cutoff=key==='today'?todayCutoff:key==='7d'?day7:day30;

@@ -5423,12 +5423,22 @@ function _getTicketClearDateForExpand(t){
 // ficam IMUTÁVEIS — o relatório de um dia sempre bate com a verdade daquele dia.
 function _clearEventTimes(t){
   var out=[];var h=(t&&t.history)||[];
+  // HOJE é dia VIVO, não imutável: um evento de clear de HOJE só conta se o ticket
+  // ainda está efetivamente Clear AGORA. Se foi clareado e revertido pra Open/Closed
+  // no MESMO dia (status atual não-Clear), não conta em "hoje". Dias PASSADOS continuam
+  // congelados pelos eventos — não dependem do status atual (imutáveis).
+  var _now=new Date();
+  var _todayKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0');
+  var _effClearNow=(typeof effectiveStatus==='function')?(effectiveStatus(t)==='Clear'):true;
   for(var j=0;j<h.length;j++){
     var a=(h[j].action||'').toLowerCase();
     var ok=(a.indexOf('auto-clear')>=0)
         ||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0)
         ||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
-    if(ok&&h[j].ts)out.push(h[j].ts);
+    if(ok&&h[j].ts){
+      if(_localDateKeyForExpand(h[j].ts)===_todayKey&&!_effClearNow)continue;  // clear de hoje revertido no mesmo dia
+      out.push(h[j].ts);
+    }
   }
   if(_isNoShowReleased(t)){var ns=_noShowReleaseDateTs(t);if(ns)out.push(ns);}
   return out;

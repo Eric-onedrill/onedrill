@@ -5430,14 +5430,34 @@ function _clearEventTimes(t){
   var _now=new Date();
   var _todayKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0');
   var _effClearNow=(typeof effectiveStatus==='function')?(effectiveStatus(t)==='Clear'):true;
-  for(var j=0;j<h.length;j++){
-    var a=(h[j].action||'').toLowerCase();
-    var ok=(a.indexOf('auto-clear')>=0)
-        ||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0)
-        ||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
-    if(ok&&h[j].ts){
-      if(_localDateKeyForExpand(h[j].ts)===_todayKey&&!_effClearNow)continue;  // clear de hoje revertido no mesmo dia
-      out.push(h[j].ts);
+  // onlyToday=true → só empurra eventos de clear cuja data é HOJE (usado no pull do registro
+  // antigo, pra NÃO mexer em dias passados = imutabilidade).
+  function _scanClear(hist,onlyToday){
+    if(!hist)return;
+    for(var j=0;j<hist.length;j++){
+      var a=(hist[j].action||'').toLowerCase();
+      var ok=(a.indexOf('auto-clear')>=0)
+          ||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0)
+          ||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
+      if(ok&&hist[j].ts){
+        var _isToday=_localDateKeyForExpand(hist[j].ts)===_todayKey;
+        if(_isToday&&!_effClearNow)continue;   // clear de hoje revertido no mesmo dia
+        if(onlyToday&&!_isToday)continue;       // pull do antigo: só hoje (não rescreve dias passados)
+        out.push(hist[j].ts);
+      }
+    }
+  }
+  _scanClear(h,false);
+  // CARÊNCIA: o renovado opera sob o ANTIGO. Se o nº antigo foi RE-IMPORTADO como registro
+  // SEPARADO (o sync FL re-importa o nº antigo enquanto ele não expira) e clareou LÁ HOJE, esse
+  // clear NÃO está no history do renovado e o antigo (supersedido) fica escondido do dashboard →
+  // a escavação clareou hoje mas não aparecia. Puxa SÓ os clears de HOJE do registro antigo
+  // (dias passados NÃO são tocados = imutáveis; e o antigo escondido não duplica).
+  if(isRenewed(t)&&isInRenewalGrace(t)&&typeof tickets!=='undefined'&&tickets){
+    var _oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    if(_oldNum){
+      var _oldRec=tickets.find(function(x){return x!==t&&String(x.ticket).trim()===_oldNum;});
+      if(_oldRec)_scanClear(_oldRec.history,true);
     }
   }
   if(_isNoShowReleased(t)){var ns=_noShowReleaseDateTs(t);if(ns)out.push(ns);}

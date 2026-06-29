@@ -3861,7 +3861,9 @@ function exportProjectReport(pid){
   const p=projects.find(x=>x.id===pid);if(!p){toast('Projeto não encontrado','danger');return;}
   const ts=tickets.filter(t=>t.projectId===pid&&!isSuperseded(t));
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
-  const doneFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);
+  // Closed/Completed = 100% concluído (mesma regra do export filtrado).
+  const _effDone=t=>(t.status==='Closed'||t.status==='Completed')?(t.footage||0):(t.completedFeet||0);
+  const doneFt=ts.reduce((s,t)=>s+_effDone(t),0);
   const openC=ts.filter(t=>effectiveStatus(t)==='Open').length;
   const clearC=ts.filter(t=>effectiveStatus(t)==='Clear').length;
   const damageC=ts.filter(t=>effectiveStatus(t)==='Damage').length;
@@ -3888,7 +3890,7 @@ function exportProjectReport(pid){
   const tData=[['Ticket #','Status','Footage','Concluído','Restante','% Campo','Local','Endereço','Expira','Tipo','Job #','Utilities Pendentes']];
   for(const t of ts){
     const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
-    const ft=t.footage||0;const cf=t.completedFeet||0;const rest=ft-cf;
+    const ft=t.footage||0;const cf=_effDone(t);const rest=Math.max(0,ft-cf);
     const pct=ft>0?Math.round(cf/ft*100):0;
     tData.push([t.ticket,effectiveStatus(t),ft,cf,rest,pct+'%',t.location,t.address,t.expire,t.tipo,t.job,pends]);
   }
@@ -4335,7 +4337,9 @@ function exportFiltered(){
   if(!f.length){toast('Nenhum ticket para exportar com esses filtros.','warn');return;}
   const totalFt=f.reduce((s,t)=>s+(t.footage||0),0);
   const wb=XLSX.utils.book_new();
-  const _doneFtExp=f.reduce((s,t)=>s+(t.completedFeet||0),0);
+  // Closed/Completed = 100% concluído → "A realizar" desses é 0 (não traz footage pendente).
+  const _effDone=t=>(t.status==='Closed'||t.status==='Completed')?(t.footage||0):(t.completedFeet||0);
+  const _doneFtExp=f.reduce((s,t)=>s+_effDone(t),0);
   const tData=[
     ['Ticket #','Projeto','Cliente','Prime','Estado','Local','Status','Footage','Concluído','A realizar','Expira','Tipo','Endereço','Job #','Pending','Utilities Pendentes','Empresa','Old Ticket #','Status Old','Expire Old','Pending (Old)','Utilities Pendentes (Old)','Respostas (Old)'],
     ...f.map(t=>{
@@ -4351,7 +4355,7 @@ function exportFiltered(){
         const oldAll=getTicketUtils(oldNum);
         oldAllResps=oldAll.map(u=>u.utility_name+' ('+u.status+')').join(', ');
       }
-      return [t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,t.completedFeet||0,Math.max(0,(t.footage||0)-(t.completedFeet||0)),t.expire,t.tipo,t.address,t.job,t.pending,pendNames,t.company,t.oldTicket2||'',t.statusOld||'',t.expireOld||'',oldPendCount,oldPendNames,oldAllResps];
+      return [t.ticket,projects.find(p=>p.id===t.projectId)?.name||'',t.client,t.prime,t.state,t.location,t.status,t.footage,_effDone(t),Math.max(0,(t.footage||0)-_effDone(t)),t.expire,t.tipo,t.address,t.job,t.pending,pendNames,t.company,t.oldTicket2||'',t.statusOld||'',t.expireOld||'',oldPendCount,oldPendNames,oldAllResps];
     }),
     ['','','','','','','TOTAL:',totalFt,_doneFtExp,Math.max(0,totalFt-_doneFtExp),'','','','','','','','','','','','','']
   ];

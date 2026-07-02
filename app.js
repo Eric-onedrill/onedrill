@@ -5434,8 +5434,18 @@ function _clearEventTimes(t){
   var _now=new Date();
   var _todayKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0');
   var _effClearNow=(typeof effectiveStatus==='function')?(effectiveStatus(t)==='Clear'):true;
+  // Data REAL do clear pro PULL do antigo: o texto "Clear em MM/DD/YYYY" tem a data que a
+  // utility liberou no portal. O ts do evento é QUANDO foi logado — e o sync RE-LOGA clears
+  // antigos com ts=hoje ao re-importar o nº antigo. Então uma renovação de hoje (que re-importa
+  // o antigo já-clear) parecia "clear de hoje". Pro pull, usa a data do texto; sem texto, cai no ts.
+  function _clearActionMs(hentry){
+    var m=(hentry&&hentry.action||'').match(/clear em\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+    if(m)return new Date(+m[3],+m[1]-1,+m[2],12,0,0).getTime();
+    return hentry.ts;
+  }
   // onlyToday=true → só empurra eventos de clear cuja data é HOJE (usado no pull do registro
-  // antigo, pra NÃO mexer em dias passados = imutabilidade).
+  // antigo, pra NÃO mexer em dias passados = imutabilidade). No pull, "hoje" é pela data do
+  // TEXTO (clear real), não pelo ts (que o sync carimba como hoje no re-import).
   function _scanClear(hist,onlyToday){
     if(!hist)return;
     for(var j=0;j<hist.length;j++){
@@ -5444,9 +5454,15 @@ function _clearEventTimes(t){
           ||(a.indexOf('auto 811')>=0&&a.indexOf('revertido')<0&&a.indexOf('cancelado')<0)
           ||(a.indexOf('status manual')>=0&&a.indexOf('→ clear')>=0);
       if(ok&&hist[j].ts){
-        var _isToday=_localDateKeyForExpand(hist[j].ts)===_todayKey;
-        if(_isToday&&!_effClearNow)continue;   // clear de hoje revertido no mesmo dia
-        if(onlyToday&&!_isToday)continue;       // pull do antigo: só hoje (não rescreve dias passados)
+        if(onlyToday){
+          // pull do antigo: só se o antigo clareou HOJE DE VERDADE (data do texto = hoje)
+          var _realMs=_clearActionMs(hist[j]);
+          if(_localDateKeyForExpand(_realMs)!==_todayKey)continue;
+          out.push(_realMs);
+          continue;
+        }
+        // history PRÓPRIO: comportamento imutável por ts (não reescreve dias passados)
+        if(_localDateKeyForExpand(hist[j].ts)===_todayKey&&!_effClearNow)continue;   // clear de hoje revertido no mesmo dia
         out.push(hist[j].ts);
       }
     }

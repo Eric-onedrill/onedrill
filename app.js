@@ -5877,7 +5877,7 @@ function renderClearTimeMetrics(fTickets){
 function renderUtilSummaryHtml(){
   if(!utilCacheLoaded)return'';
   const allUtils={};
-  const openTickets=filterTickets({}).filter(t=>t.status!=='Closed'&&t.status!=='Cancel');
+  const openTickets=filterTickets({prime:_metricPrimeFilter||'',projectId:_metricProjFilter||''}).filter(t=>t.status!=='Closed'&&t.status!=='Cancel');
   for(const t of openTickets){
     const utils=getTicketUtils(String(t.ticket).trim());
     for(const u of utils){
@@ -5886,7 +5886,7 @@ function renderUtilSummaryHtml(){
   }
   const sorted=Object.entries(allUtils).sort((a,b)=>b[1]-a[1]);
   if(!sorted.length)return'';
-  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📡 Utilities Pendentes (global)</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">'
+  return'<div class="dash-row"><div class="dash-card" style="grid-column:1/-1"><div class="dash-card-title">📡 Utilities Pendentes '+(_metricPrimeFilter?('— '+esc(_metricPrimeFilter)):(_metricProjFilter?'— (projeto filtrado)':'(global)'))+'</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">'
     +sorted.slice(0,15).map(([name,count])=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)"><span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px" title="'+esc(name)+'">'+esc(name)+'</span><div style="display:flex;gap:6px;align-items:center"><span style="font-size:12px;font-weight:700;font-family:var(--mono);color:var(--red)">'+count+'</span><button class="btn btn-sm" onclick="exportUtilTickets(decodeURIComponent(\''+encodeURIComponent(name).replace(/\x27/g,"%27")+'\'))" style="font-size:9px;padding:2px 6px">↓</button></div></div>').join('')
     +'</div><button class="btn btn-sm" onclick="exportAllPending()" style="margin-top:8px;font-size:11px">↓ Exportar todas pendências</button></div></div>';
 }

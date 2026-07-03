@@ -2555,6 +2555,86 @@ def send_session_expired_alert(state):
         return False
 
 
+# ── Alerta de tickets travando no scrape (respostas congeladas em silencio) ──
+_SCRAPE_FAIL_PATH = os.path.join(BASE_DIR, "_scrape_fail_streak.json")
+_SCRAPE_FAIL_THRESHOLD = 3  # runs consecutivos sem ler NENHUMA resposta = alerta
+
+
+def send_scrape_failure_alert(state, chronic):
+    """Email listando tickets que falham o scrape ha varios runs seguidos."""
+    import smtplib
+    from email.mime.text import MIMEText
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_pass = os.getenv("GMAIL_PASS")
+    alert_to = os.getenv("ALERT_EMAIL")
+    if not all([gmail_user, gmail_pass, alert_to]):
+        log.info(f"[ScrapeFail] {state}: email nao configurado — pulado")
+        return False
+    lines = "\n".join(f"  {tn} — {n} runs seguidos sem resposta" for tn, n in chronic)
+    subject = f"[OneDrill] {state}: {len(chronic)} ticket(s) travando no scrape 811"
+    body = (
+        f"Estes tickets estao ativos (Open/Damage) mas o scrape do portal 811 ({state}) NAO le "
+        f"nenhuma resposta ha {_SCRAPE_FAIL_THRESHOLD}+ runs seguidos — as respostas ficam "
+        f"CONGELADAS ate resolver:\n\n"
+        f"{lines}\n\n"
+        f"O que checar: abrir o ticket no portal 811 na mao; ver se ha modal/estado travando o "
+        f"scrape (ex.: 'Excavation Date' / 'Marking delay'); conferir 811_sync.log.\n\n"
+        f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    )
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = gmail_user
+    msg["To"] = alert_to
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(gmail_user, gmail_pass)
+            s.send_message(msg)
+        log.info(f"[ScrapeFail] {state}: alerta enviado ({len(chronic)} tickets) -> {alert_to}")
+        return True
+    except Exception as e:
+        log.warning(f"[ScrapeFail] {state}: erro ao enviar email: {e}")
+        return False
+
+
+def check_scrape_failures(state, tickets_to_scrape, results):
+    """Ticket que FOI scrapeado mas voltou SEM nenhuma resposta = falha do scrape.
+    Conta runs consecutivos por ticket num JSON e alerta (1x por mudanca/dia) quando
+    chega em _SCRAPE_FAIL_THRESHOLD. Chamador envolve em try/except — nunca quebra o sync."""
+    scraped = {str(t.get("ticket")).strip() for t in (tickets_to_scrape or []) if t.get("ticket")}
+    results = results or {}
+    failed = {tn for tn in scraped if tn in results and not (results.get(tn) or {}).get("responses")}
+    try:
+        with open(_SCRAPE_FAIL_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    st = data.get(state, {})
+    for tn in scraped:
+        if tn in failed:
+            st[tn] = int(st.get(tn, 0)) + 1
+        else:
+            st.pop(tn, None)  # leu ok agora -> zera o streak
+    data[state] = st
+    chronic = sorted([(tn, st[tn]) for tn in st if st[tn] >= _SCRAPE_FAIL_THRESHOLD])
+    cur_set = [tn for tn, _ in chronic]
+    alerted = data.get("_alerted", {})
+    prev = alerted.get(state, {})
+    today = datetime.now().strftime("%Y-%m-%d")
+    if chronic and (cur_set != prev.get("set") or prev.get("date") != today):
+        send_scrape_failure_alert(state, chronic)
+        alerted[state] = {"set": cur_set, "date": today}
+    elif not cur_set:
+        alerted.pop(state, None)
+    data["_alerted"] = alerted
+    try:
+        with open(_SCRAPE_FAIL_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        log.warning(f"[ScrapeFail] erro salvando streak: {e}")
+    if chronic:
+        log.info(f"[{state}] ScrapeFail cronicos (>= {_SCRAPE_FAIL_THRESHOLD} runs): {cur_set}")
+
+
 # ── │ SECTION: SAVE │ SAVE TO SUPABASE ────────────────────────────────────────
 def save_to_supabase(state, results, tickets, grace_old_map=None):
     grace_old_map = grace_old_map or {}
@@ -3811,6 +3891,10 @@ async def sync_state(state, triggered_by="manual"):
 
         summary = save_to_supabase(state, results, all_tickets, grace_old_map=grace_old_map)
         log_finish(lid, checked, summary.responses_saved)
+        try:
+            check_scrape_failures(state, tickets_to_scrape, results)
+        except Exception as _e:
+            log.warning(f"[{state}] check_scrape_failures falhou: {_e}")
         log.info(f"[{state}] CONCLUÍDO  {checked} verificados, {skipped} em cache | {summary}")
 
     except Exception as e:

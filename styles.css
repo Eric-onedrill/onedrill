@@ -1786,6 +1786,14 @@ body {
   background: var(--bg);
 }
 
+/* Histórico (projetos finalizados): precisa rolar igual dash/analytics — senão a lista
+   longa é cortada por causa do overflow:hidden herdado de .page. */
+#pg-completed {
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
 .dash-inner {
   padding: 28px;
   max-width: 1280px;

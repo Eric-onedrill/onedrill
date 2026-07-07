@@ -1373,7 +1373,7 @@ async function renderMap(){
   clusterGroup=L.markerClusterGroup({maxClusterRadius:40,spiderfyOnMaxZoom:true,showCoverageOnHover:false,disableClusteringAtZoom:17});
 
   for(const t of mapFiltered()){
-    const c=effColor(t),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const c=mapColor(t),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
     const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
     if(coords){
       const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});
@@ -2306,6 +2306,22 @@ function _isNoShowReleased(t){
 }
 // Cor / classe de badge / label do status considerando a liberação por no-show (laranja).
 function effColor(t){return _isNoShowReleased(t)?'#d97706':scol(effectiveStatus(t));}
+// Cor do ticket NO MAPA: um Clear (verde) a ≤4 dias do vencimento vira AMARELO (aviso de que
+// vai vencer). No-show (laranja) e demais status seguem effColor. Só usada no mapa — NÃO mexe
+// nas cores de lista/badges. Vencimento considerado: em carência (novo ainda não clareado),
+// o cutover do antigo (o válido); senão t.expire.
+function mapColor(t){
+  if(effectiveStatus(t)==='Clear'&&!_isNoShowReleased(t)){
+    const exp=(isRenewed(t)&&isInRenewalGrace(t)&&!newTicketFullyCleared(t))?(graceCutoverDate(t)||t.expire):t.expire;
+    const eod=_eod(exp);
+    if(!isNaN(eod)){
+      const t0=new Date();t0.setHours(0,0,0,0);
+      const days=Math.floor((eod-t0)/86400000);
+      if(days>=0&&days<=4)return '#eab308';   // amarelo: Clear vencendo em ≤4 dias
+    }
+  }
+  return effColor(t);
+}
 function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(effectiveStatus(t)||'').toLowerCase();}
 function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':effectiveStatus(t);}
 // Data em que o ticket foi liberado por no-show = data do no-show MAIS RECENTE (o que

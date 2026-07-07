@@ -1407,6 +1407,16 @@ async function renderMap(){
   if(clusterGroup)map.addLayer(clusterGroup);
 }
 
+// Título de ticket renovado. Durante a CARÊNCIA o ANTIGO é o principal (é ele que tem os
+// clearances e o vencimento válidos AGORA) e o NOVO vai no colchete "(novo ticket: NNN)".
+// Quando o antigo vence (sai da carência), fica só o número ATUAL (o novo).
+function _renewTitle(t){
+  var cur=String((t&&t.ticket)||'').trim();
+  if(!isRenewed(t))return cur;
+  var oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+  if(oldNum&&isInRenewalGrace(t))return oldNum+' 🔄 (novo ticket: '+cur+')';
+  return cur;   // fora da carência → só o atual
+}
 function showPanel(t){
   const es=effectiveStatus(t);
   const c=effColor(t);
@@ -1416,11 +1426,11 @@ function showPanel(t){
   currentPanelId=t.id;
   // Bloqueio "não cavar" — baseado em datas, NUNCA suprimido pela trava. '' / 'expired' / 'grace'.
   const isExp=ticketExpiredEffective(t);
-  document.getElementById('ptitle-txt').textContent=t.ticket+(isRenewed(t)?' (🔄 '+( t.oldTicket2||t.old_ticket2)+')':'');
+  document.getElementById('ptitle-txt').textContent=_renewTitle(t);
   document.getElementById('pbody').innerHTML=
     (isExp?'<div style="background:#dc2626;color:white;padding:8px 10px;border-radius:var(--r);margin-bottom:8px;text-align:center;font-weight:700;font-size:12px;animation:expPulse 1.5s infinite">⛔ NÃO TRABALHAR — '+(isExp==='grace'?'CARÊNCIA VENCIDA':'VENCIDO')+'</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:6px 10px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data de vencimento ainda não confirmada</div>':'')
-    +(inGrace?(()=>{if(newTicketFullyCleared(t))return'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Liberado — novo clareou</div>';const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
+    +(inGrace?(()=>{const _new=esc(String(t.ticket||'').trim());const _old=esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim());const _cut=graceCutoverDate(t);if(newTicketFullyCleared(t))return'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">✅ Novo ticket '+_new+' já clareou</div>';const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#16a34a">🔄 Renovado → '+_new+' · trab. sob '+_old+' até '+_cut+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:var(--r);margin-bottom:6px;text-align:center;font-size:10px;font-weight:600;color:#b45309">🔄 Renovado → '+_new+' · sob '+_old+' ('+esc(os)+') até '+_cut+'</div>';})():'')
     +(proj?`<div class="mp-row"><span class="mp-key">Projeto</span><span class="mp-val">${esc(proj.name)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Cliente</span><span class="mp-val">${esc(t.client)}</span></div>`
     +(t.prime?`<div class="mp-row"><span class="mp-key">Prime</span><span class="mp-val">${esc(t.prime)}</span></div>`:'')
@@ -1684,7 +1694,7 @@ function openTicketDetail(id){
   if(isExpired)showExpiredAlert(t,isExpired);
 
   const proj=projects.find(p=>p.id===t.projectId);
-  document.getElementById('det-title').textContent=t.ticket+(isRenewed(t)?' (renovou '+((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]+')':'');
+  document.getElementById('det-title').textContent=_renewTitle(t);
   document.getElementById('det-sub').textContent=(proj?proj.name+' · ':'')+t.client+(t.prime?' · '+t.prime:'')+(inGrace?' · 🔄 Carência até '+graceCutoverDate(t):'');
   const hasOldInfo=t.oldTicket2||t.statusOld||t.expireOld||t.pending;
 
@@ -1709,15 +1719,17 @@ function openTicketDetail(id){
       if(_relev.length>0&&_relev.every(u=>_rel.has(u.status)))oldSt='Clear';
     }
     const oldNum=esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0]);
+    const newNum=esc(String(t.ticket||'').trim());   // ticket NOVO (renovação, vencimento futuro)
+    const _cut=graceCutoverDate(t);
 
     // NOVA PRIORIDADE: novo totalmente clareado sobrepõe graça.
-    // Mesmo que o antigo fosse Open, se o novo já foi resolvido, mostra liberado.
     if(newTicketFullyCleared(t)){
-      return'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Novo ticket clareou</div><div style="font-size:11px;color:#15803d;margin-top:3px">Todas as utilities do ticket <strong>'+esc(t.ticket)+'</strong> responderam <strong>Clear</strong>. As respostas do novo sobrepõem a carência do antigo ('+oldNum+').</div></div>';
+      return'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ Novo ticket '+newNum+' já clareou</div><div style="font-size:11px;color:#15803d;margin-top:3px">Todas as utilities do ticket novo <strong>'+newNum+'</strong> responderam <strong>Clear</strong> — pode seguir sob ele.</div></div>';
     }
 
-    if(oldSt==='Clear')return'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">✅ LIBERADO — Carência do ticket anterior</div><div style="font-size:11px;color:#15803d;margin-top:3px">Status efetivo: <strong>Clear</strong> até 23:59 de '+graceCutoverDate(t)+'. Utilities do ticket antigo ('+oldNum+') ainda válidas.</div></div>';
-    return'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#b45309">⚠ Carência — Ticket anterior era '+esc(oldSt)+'</div><div style="font-size:11px;color:#92400e;margin-top:3px">O ticket antigo ('+oldNum+') <strong>não estava liberado</strong>. Status mantido como <strong>'+esc(oldSt)+'</strong> até '+graceCutoverDate(t)+'. Após essa data, segue as respostas do ticket novo.</div></div>';
+    // Carência: o ANTIGO ainda é o válido. O novo tem vencimento futuro.
+    if(oldSt==='Clear')return'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#16a34a">🔄 Renovado → ticket novo '+newNum+' (vencimento futuro)</div><div style="font-size:11px;color:#15803d;margin-top:3px">Trabalhando sob <strong>'+oldNum+'</strong> (liberado) até 23:59 de '+_cut+'. Depois dessa data, segue as respostas do ticket novo '+newNum+'.</div></div>';
+    return'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#b45309">🔄 Renovado → ticket novo '+newNum+' (vencimento futuro)</div><div style="font-size:11px;color:#92400e;margin-top:3px">⚠ Trabalhando sob <strong>'+oldNum+'</strong> (<strong>'+esc(oldSt)+'</strong>, não liberado) até '+_cut+'. Após essa data, segue as respostas do ticket novo '+newNum+'.</div></div>';
   })();
 
   // ── WATCH & PROTECT / PRIVATE LOCATOR BANNERS ──
@@ -1750,7 +1762,7 @@ function openTicketDetail(id){
     +`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${esc(t.job||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${esc(t.address||'—')}</span></div>`
-    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale?' style="color:#b45309"':'')}>${isStale?'⏳ aguardando sync 811':esc(t.expire||'—')}${isExpired?(isExpired==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`
+    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale&&!inGrace?' style="color:#b45309"':'')}>${inGrace?(esc(graceCutoverDate(t)||t.expireOld||t.expire||'—')+' <span style="font-size:10px;color:#7c3aed;font-weight:600">(carência)</span>'):(isStale?'⏳ aguardando sync 811':esc(t.expire||'—'))}${isExpired?(isExpired==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>`
     +(t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${esc(t.notes)}</div>`:'')
     +(hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>`
@@ -2282,14 +2294,12 @@ function _isNoShowReleased(t){
   if(isRenewed(t)&&isInRenewalGrace(t)&&newTicketFullyCleared(t))return false;  // novo já verde
   // 1) Liberação PRÓPRIA: a fibra DESTE ticket chegou ao 4º no-show (conta só os dele).
   if(_noShowReleasedForNum(t,String((t&&t.ticket)||'').trim()))return true;
-  // 2) Em CARÊNCIA: herda o laranja do ANTIGO (que foi liberado por no-show NO 4º DELE) —
-  //    MAS só se o NOVO não tiver pendência NÃO-FIBRA (gás/água/elétrica = bloqueio real).
+  // 2) Em CARÊNCIA: herda o laranja do ANTIGO (liberado por no-show no 4º dele). O antigo
+  //    COBRE a obra durante a carência, então o ciclo de re-marca do NOVO (utilities ainda
+  //    pendentes) NÃO bloqueia — mesma lógica da carência, que já confia no status do antigo.
   if(isRenewed(t)&&isInRenewalGrace(t)){
     const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
-    const released=new Set(['Clear','Private','Marked','Unmarked']);
-    const newU=getTicketUtils(t.ticket);
-    const newNonFiberPend=newU.some(u=>!released.has(u.status)&&!isFiberUtility(u.utility_name));
-    if(!newNonFiberPend&&_noShowReleasedForNum(t,oldNum))return true;
+    if(oldNum&&_noShowReleasedForNum(t,oldNum))return true;
   }
   return false;
 }

@@ -1409,13 +1409,14 @@ async function renderMap(){
 
 // Título de ticket renovado. Durante a CARÊNCIA o ANTIGO é o principal (é ele que tem os
 // clearances e o vencimento válidos AGORA) e o NOVO vai no colchete "(novo ticket: NNN)".
-// Quando o antigo vence (sai da carência), fica só o número ATUAL (o novo).
+// O NOVO só SOBREPÕE o antigo (vira principal) quando o novo fica Clear (newTicketFullyCleared)
+// OU quando o antigo vence (sai da carência) — aí fica só o número ATUAL (o novo).
 function _renewTitle(t){
   var cur=String((t&&t.ticket)||'').trim();
   if(!isRenewed(t))return cur;
   var oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
-  if(oldNum&&isInRenewalGrace(t))return oldNum+' 🔄 (novo ticket: '+cur+')';
-  return cur;   // fora da carência → só o atual
+  if(oldNum&&isInRenewalGrace(t)&&!newTicketFullyCleared(t))return oldNum+' 🔄 (novo ticket: '+cur+')';
+  return cur;   // novo clareou (sobrepôs) OU fora da carência → só o atual
 }
 function showPanel(t){
   const es=effectiveStatus(t);
@@ -1762,7 +1763,7 @@ function openTicketDetail(id){
     +`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Job #</span><span class="mp-val">${esc(t.job||'—')}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Endereço</span><span class="mp-val">${esc(t.address||'—')}</span></div>`
-    +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale&&!inGrace?' style="color:#b45309"':'')}>${inGrace?(esc(graceCutoverDate(t)||t.expireOld||t.expire||'—')+' <span style="font-size:10px;color:#7c3aed;font-weight:600">(carência)</span>'):(isStale?'⏳ aguardando sync 811':esc(t.expire||'—'))}${isExpired?(isExpired==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`
+    +(()=>{const _oldReg=inGrace&&!newTicketFullyCleared(t);return`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExpired?' style="color:#dc2626;font-weight:700"':(isStale&&!_oldReg?' style="color:#b45309"':'')}>${_oldReg?(esc(graceCutoverDate(t)||t.expireOld||t.expire||'—')+' <span style="font-size:10px;color:#7c3aed;font-weight:600">(carência)</span>'):(isStale?'⏳ aguardando sync 811':esc(t.expire||'—'))}${isExpired?(isExpired==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`;})()
     +`<div class="mp-row"><span class="mp-key">Trajeto</span><span class="mp-val" style="color:${t.fieldPath?'var(--purple)':'var(--muted)'}">${t.fieldPath?`✏️ Campo (${t.fieldPath.length} pts)`:'Sem trajeto'}</span></div>`
     +(t.notes?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-word">${esc(t.notes)}</div>`:'')
     +(hasOldInfo?`<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r)"><div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Ticket Anterior</div>`

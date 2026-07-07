@@ -1856,6 +1856,16 @@ function openTicketDetail(id){
     document.getElementById('field-status-section').style.display='none';
   }
   renderHistory(t);renderMiniMap(t);renderUtils(t);renderSecondNotices(t);openModal('ov-detail');
+  // Popup de vencimento ao abrir — dias até vencer (pelo vencimento efetivo: carência usa o
+  // cutover do antigo). Só pra tickets ativos (Closed/Cancel/Completed não têm prazo pra cavar).
+  (function(){
+    if(['Closed','Cancel','Completed'].indexOf(t.status)>=0)return;
+    const d=_daysToEffExpire(t);
+    if(d===null)return;
+    if(d<0)toast('⛔ Ticket VENCIDO há '+(-d)+' dia'+((-d)>1?'s':''),'danger');
+    else if(d===0)toast('⚠ Vence HOJE!','danger');
+    else toast('🗓️ Vence em '+d+' dia'+(d>1?'s':''),d<=4?'warn':'info');
+  })();
 }
 
 // ── EXPIRED TICKET FULLSCREEN ALERT ──
@@ -2310,15 +2320,19 @@ function effColor(t){return _isNoShowReleased(t)?'#d97706':scol(effectiveStatus(
 // vai vencer). No-show (laranja) e demais status seguem effColor. Só usada no mapa — NÃO mexe
 // nas cores de lista/badges. Vencimento considerado: em carência (novo ainda não clareado),
 // o cutover do antigo (o válido); senão t.expire.
+// Dias até o vencimento EFETIVO: em carência (novo ainda não clareado) usa o cutover do antigo
+// (o vencimento que vale); senão t.expire. Retorna null se não há data; negativo = já vencido.
+function _daysToEffExpire(t){
+  const exp=(isRenewed(t)&&isInRenewalGrace(t)&&!newTicketFullyCleared(t))?(graceCutoverDate(t)||t.expire):t.expire;
+  const eod=_eod(exp);
+  if(isNaN(eod))return null;
+  const t0=new Date();t0.setHours(0,0,0,0);
+  return Math.floor((eod-t0)/86400000);
+}
 function mapColor(t){
   if(effectiveStatus(t)==='Clear'&&!_isNoShowReleased(t)){
-    const exp=(isRenewed(t)&&isInRenewalGrace(t)&&!newTicketFullyCleared(t))?(graceCutoverDate(t)||t.expire):t.expire;
-    const eod=_eod(exp);
-    if(!isNaN(eod)){
-      const t0=new Date();t0.setHours(0,0,0,0);
-      const days=Math.floor((eod-t0)/86400000);
-      if(days>=0&&days<=4)return '#eab308';   // amarelo: Clear vencendo em ≤4 dias
-    }
+    const days=_daysToEffExpire(t);
+    if(days!==null&&days>=0&&days<=4)return '#eab308';   // amarelo: Clear vencendo em ≤4 dias
   }
   return effColor(t);
 }

@@ -752,9 +752,11 @@
   --amber-bg: #fffbeb;
   --amber-border: #fde68a;
 
-  --pink: #db2777;
-  --pink-bg: #fce7f3;
-  --pink-border: #f9a8d4;
+  /* Damage = Cinza Tranquilo (SW 7015) — cinza claro morno. Usado como PREENCHIMENTO
+     (linha do mapa, stripe do card, fundo do badge). Texto sobre ele = escuro. */
+  --pink: #C9C6BD;
+  --pink-bg: #ecebe7;
+  --pink-border: #b6b2a7;
 
   --red: #dc2626;
   --red-bg: #fef2f2;
@@ -1676,7 +1678,7 @@ body {
 .b-open   { background: var(--red-bg);    color: var(--red); }
 .b-clear  { background: var(--green-bg);  color: var(--green); }
 .b-noshow { background: #fff3e0;  color: #d97706; }
-.b-damage { background: var(--pink-bg);  color: var(--pink); }
+.b-damage { background: var(--pink);  color: #33302a; }
 .b-closed { background: #f5f5f3;          color: #888; }
 .b-cancel { background: var(--purple-bg); color: var(--purple); }
 
@@ -1991,7 +1993,7 @@ body {
 }
 
 .ftog.on-open   { background: var(--red-bg);    color: var(--red);    border-color: var(--red-border); }
-.ftog.on-damage { background: var(--pink-bg);  color: var(--pink);  border-color: var(--pink-border); }
+.ftog.on-damage { background: var(--pink);  color: #33302a;  border-color: var(--pink-border); }
 .ftog.on-clear  { background: var(--green-bg);  color: var(--green);  border-color: var(--green-border); }
 .ftog.on-noshow { background: #fff3e0;  color: #d97706;  border-color: #fed7aa; }
 .ftog.on-closed { background: #f5f5f3;          color: #888;          border-color: var(--border2); }
@@ -2462,7 +2464,7 @@ tbody td {
 .tc-open   { color: var(--red);    font-weight: 600; }
 .tc-clear  { color: var(--green);  font-weight: 600; }
 .tc-noshow { color: #d97706;  font-weight: 600; }
-.tc-damage { color: var(--pink);  font-weight: 600; }
+.tc-damage { color: #7a7669;  font-weight: 600; }  /* texto de status em lista: cinza legível (Cinza Tranquilo puro seria claro demais no branco) */
 .tc-closed { color: var(--muted); }
 .tc-cancel { color: var(--purple); font-weight: 600; }
 
@@ -3935,9 +3937,9 @@ tbody td {
     --amber-bg: rgba(180, 83, 9, .15);
     --amber-border: rgba(180, 83, 9, .3);
 
-    --pink: #f472b6;
-    --pink-bg: rgba(219, 39, 119, .18);
-    --pink-border: rgba(219, 39, 119, .35);
+    --pink: #C9C6BD;
+    --pink-bg: rgba(201, 198, 189, .16);
+    --pink-border: rgba(201, 198, 189, .4);
 
     --red-bg: rgba(220, 38, 38, .15);
     --red-border: rgba(220, 38, 38, .3);
@@ -3971,9 +3973,9 @@ tbody td {
   --amber-bg: rgba(180, 83, 9, .15);
   --amber-border: rgba(180, 83, 9, .3);
 
-  --pink: #f472b6;
-  --pink-bg: rgba(219, 39, 119, .18);
-  --pink-border: rgba(219, 39, 119, .35);
+  --pink: #C9C6BD;
+  --pink-bg: rgba(201, 198, 189, .16);
+  --pink-border: rgba(201, 198, 189, .4);
 
   --red-bg: rgba(220, 38, 38, .15);
   --red-border: rgba(220, 38, 38, .3);

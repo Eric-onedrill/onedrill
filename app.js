@@ -3560,7 +3560,7 @@ function renderSharedMap(){
   clearSharedMapLayers();
   const f=sharedFiltered();
   for(const t of f){
-    const c=effColor(t),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);
+    const c=mapColor(t),dash=tipoDash(t.tipo),lw=lineWeight(t.tipo);   // mapColor: Clear a ≤4 dias fica amarelo (igual mapa interno)
     const coords=t.fieldPath&&t.fieldPath.length>=2?t.fieldPath:null;
     if(coords){
       const mi=op=>L.divIcon({className:'',html:`<div style="width:9px;height:9px;border-radius:50%;background:${c};border:2px solid white;opacity:${op};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,iconSize:[9,9],iconAnchor:[4,4]});

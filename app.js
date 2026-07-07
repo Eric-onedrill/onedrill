@@ -2332,7 +2332,7 @@ function _daysToEffExpire(t){
 function mapColor(t){
   if(effectiveStatus(t)==='Clear'&&!_isNoShowReleased(t)){
     const days=_daysToEffExpire(t);
-    if(days!==null&&days>=0&&days<=4)return '#d4a017';   // amarelo MOSTARDA forte: Clear vencendo em ≤4 dias
+    if(days!==null&&days>=0&&days<=4)return '#FFE600';   // amarelo FORTE/vivo: Clear vencendo em ≤4 dias
   }
   return effColor(t);
 }

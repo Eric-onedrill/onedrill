@@ -1348,7 +1348,7 @@ function buildPopup(t,c){
     +`<div><span style="color:#9a9888">Footage: </span>${fmtProgress(t)}</div>`+miniProgressBar(t)
     +(t.tipo?`<div><span style="color:#9a9888">Tipo: </span>${esc(t.tipo)}</div>`:'')
     +`<div><span style="color:#9a9888">Status: </span><span style="color:${scol(es)};font-weight:700">${esc(es)}${inGrace?' 🔄':''}</span></div>`
-    +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div style="display:flex;flex-wrap:wrap;gap:2px;margin:4px 0">'+pu.slice(0,4).map(p=>'<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#fef2f2;color:#dc2626;font-family:monospace;white-space:nowrap">'+esc(p.utility_name.length>18?p.utility_name.substring(0,18)+'…':p.utility_name)+'</span>').join('')+(pu.length>4?'<span style="font-size:9px;color:#9a9888">+'+( pu.length-4)+'</span>':'')+'</div>';})()
+    +(()=>{const pu=getTicketPendingUtils(_currentTicketNum(t));if(!pu.length)return'';return'<div style="display:flex;flex-wrap:wrap;gap:2px;margin:4px 0">'+pu.slice(0,4).map(p=>'<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#fef2f2;color:#dc2626;font-family:monospace;white-space:nowrap">'+esc(p.utility_name.length>18?p.utility_name.substring(0,18)+'…':p.utility_name)+'</span>').join('')+(pu.length>4?'<span style="font-size:9px;color:#9a9888">+'+( pu.length-4)+'</span>':'')+'</div>';})()
     +`<div><span style="color:#9a9888">Expira: </span><span${isExp?' style="color:#dc2626;font-weight:700"':''}>${esc(t.expire||'—')}${isExp?(isExp==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`
     +(t.address?`<div><span style="color:#9a9888">Endereço: </span>${esc(t.address)}</div>`:'')
     +`<div style="margin-top:7px;padding-top:7px;border-top:1px solid #e2e0da;display:flex;gap:8px">`
@@ -1450,7 +1450,7 @@ function showPanel(t){
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(effStatusLabel(t))}${inGrace?' 🔄':''}</span></div>`
     +(_isNoShowReleased(t)?`<div style="background:#fff3e0;border:1px solid #fed7aa;border-radius:var(--r);padding:6px 9px;margin:4px 0;font-size:10px;color:#b45309;font-weight:600">🟠 Liberado por no-show — necessário localizar a fibra em campo</div>`:'')
-    +(()=>{const pu=getTicketPendingUtils(String(t.ticket).trim());if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
+    +(()=>{const pu=getTicketPendingUtils(_currentTicketNum(t));if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
     +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?(isExp==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
 }
@@ -2893,7 +2893,7 @@ function renderTable(){
   const _totalFtTbl=f.reduce((s,t)=>s+(t.footage||0),0);
   document.getElementById('tbl-count').textContent=`${f.length} tickets · ${_totalFtTbl.toLocaleString()} ft`;
   document.getElementById('tbl-body').innerHTML=f.map(t=>{
-    const pends=getTicketPendingUtils(String(t.ticket).trim());
+    const pends=getTicketPendingUtils(_currentTicketNum(t));   // utilities do ticket ATUAL (antigo na carência)
     const pendNames=pends.map(p=>p.utility_name);
     const pendChips=pendNames.length
       ?`<div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:3px">`
@@ -2908,7 +2908,7 @@ function renderTable(){
     const _viaCarencia=inGrace&&!newTicketFullyCleared(t);
     const _vencCol=_viaCarencia?(graceCutoverDate(t)||t.expire||'—'):(t.expire||'—');
     return`<tr onclick="openTicketDetail(${t.id})">`
-      +`<td style="font-family:var(--mono);font-weight:500">${esc(t.ticket)}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 renovou '+esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])+(inGrace?' (carência)':'')+'</div>':''}</td>`
+      +`<td style="font-family:var(--mono);font-weight:500">${esc(_currentTicketNum(t))}${isRenewed(t)?'<div style="font-size:9px;color:#7c3aed">🔄 '+(_viaCarencia?('novo: '+esc(t.ticket)+' (carência)'):('renovou '+esc(((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0])))+'</div>':''}</td>`
       +`<td style="color:var(--text2);font-size:12px">${esc(t.client)}</td>`
       +`<td style="color:var(--muted);font-size:12px">${esc(t.prime||'—')}</td>`
       +`<td>${esc(t.location)}, ${esc(t.state)}</td>`

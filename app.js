@@ -1341,7 +1341,7 @@ function buildPopup(t,c){
     +(isExp?'<div style="background:#dc2626;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;text-align:center;font-weight:700;font-size:12px">⛔ NÃO TRABALHAR — '+(isExp==='grace'?'CARÊNCIA VENCIDA':'VENCIDO')+'</div>':'')
     +(isStale&&!inGrace?'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⏳ Aguardando sync 811 — data não confirmada</div>':'')
     +(inGrace?(()=>{if(newTicketFullyCleared(t))return'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Liberado — novo clareou</div>';const os=t.statusOld||t.status_old||'Open';return os==='Clear'?'<div style="background:#f0fdf4;border:1px solid #86efac;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#16a34a">✅ Carência até '+graceCutoverDate(t)+'</div>':'<div style="background:#fffbeb;border:1px solid #fde68a;padding:5px 8px;border-radius:6px;margin-bottom:6px;text-align:center;font-size:11px;font-weight:600;color:#b45309">⚠ Carência ('+esc(os)+') até '+graceCutoverDate(t)+'</div>';})():'')
-    +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(t.ticket)}</div>`
+    +`<div style="font-weight:700;color:#18180f;margin-bottom:6px;font-size:14px;font-family:'DM Mono',monospace">${esc(_currentTicketNum(t))}</div>`
     +(proj?`<div><span style="color:#9a9888">Projeto: </span>${esc(proj.name)}</div>`:'')
     +`<div><span style="color:#9a9888">Cliente: </span>${esc(t.client)}</div>`
     +(t.prime?`<div><span style="color:#9a9888">Prime: </span>${esc(t.prime)}</div>`:'')
@@ -1386,7 +1386,7 @@ async function renderMap(){
       ln.on('click',()=>{hiT(t.id);showPanel(t)});
       lines.push(ln);
       const mid=coords[Math.floor(coords.length/2)]||coords[0];
-      const lbl=L.marker(mid,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="border-left:3px solid ${c}">${esc(t.ticket)}</a>`,iconAnchor:[32,10]})}).addTo(map);
+      const lbl=L.marker(mid,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="border-left:3px solid ${c}">${esc(_currentTicketNum(t))}</a>`,iconAnchor:[32,10]})}).addTo(map);
       labels.push(lbl);
     }else{
       let pos=t._geocoded||null;
@@ -1400,7 +1400,7 @@ async function renderMap(){
       const mi=L.divIcon({className:'',html:`<div style="width:11px;height:11px;border-radius:50%;background:${c};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3);opacity:${t._geocoded?1:.6}"></div>`,iconSize:[11,11],iconAnchor:[5,5]});
       const mk=L.marker(pos,{icon:mi});mk.bindPopup(buildPopup(t,c));mk.on('click',()=>hiT(t.id));
       mkrs.push(mk);clusterGroup.addLayer(mk);
-      const lbl=L.marker(pos,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="margin-top:12px;display:block;border-left:3px solid ${c}">${esc(t.ticket)}</a>`,iconAnchor:[32,-2]})}).addTo(map);
+      const lbl=L.marker(pos,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="margin-top:12px;display:block;border-left:3px solid ${c}">${esc(_currentTicketNum(t))}</a>`,iconAnchor:[32,-2]})}).addTo(map);
       labels.push(lbl);
     }
   }
@@ -1417,6 +1417,17 @@ function _renewTitle(t){
   var oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
   if(oldNum&&isInRenewalGrace(t)&&!newTicketFullyCleared(t))return oldNum+' 🔄 (novo ticket: '+cur+')';
   return cur;   // novo clareou (sobrepôs) OU fora da carência → só o atual
+}
+// Número ATUAL (o que vale AGORA) — pra labels do mapa/lista. Durante a carência com o novo
+// ainda não clareado, é o ANTIGO (clearances válidos); quando o novo clareia ou o antigo vence,
+// é o t.ticket (novo). Mesma regra do _renewTitle, mas devolve só o número.
+function _currentTicketNum(t){
+  var cur=String((t&&t.ticket)||'').trim();
+  if(isRenewed(t)&&isInRenewalGrace(t)&&!newTicketFullyCleared(t)){
+    var oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    if(oldNum)return oldNum;
+  }
+  return cur;
 }
 function showPanel(t){
   const es=effectiveStatus(t);
@@ -3569,7 +3580,7 @@ function renderSharedMap(){
       m1.bindPopup(buildPopup(t,c));m2.bindPopup(buildPopup(t,c));shMkrs.push(m1,m2);
       const ln=L.polyline(coords,{color:c,weight:lw,opacity:.92,dashArray:dash}).addTo(shMap);shLines.push(ln);
       const mid=coords[Math.floor(coords.length/2)]||coords[0];
-      const lbl=L.marker(mid,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="border-left:3px solid ${c}">${esc(t.ticket)}</a>`,iconAnchor:[32,10]})}).addTo(shMap);
+      const lbl=L.marker(mid,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="border-left:3px solid ${c}">${esc(_currentTicketNum(t))}</a>`,iconAnchor:[32,10]})}).addTo(shMap);
       shLabels.push(lbl);
     }else{
       let pos=t._geocoded||null;
@@ -3582,7 +3593,7 @@ function renderSharedMap(){
       }
       const mi=L.divIcon({className:'',html:`<div style="width:11px;height:11px;border-radius:50%;background:${c};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3);opacity:${t._geocoded?1:.6}"></div>`,iconSize:[11,11],iconAnchor:[5,5]});
       const mk=L.marker(pos,{icon:mi}).addTo(shMap);mk.bindPopup(buildPopup(t,c));shMkrs.push(mk);
-      const lbl=L.marker(pos,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="margin-top:12px;display:block;border-left:3px solid ${c}">${esc(t.ticket)}</a>`,iconAnchor:[32,-2]})}).addTo(shMap);
+      const lbl=L.marker(pos,{icon:L.divIcon({className:'',html:`<a class="ticket-label" onclick="openTicketDetail(${t.id});return false;" href="#" style="margin-top:12px;display:block;border-left:3px solid ${c}">${esc(_currentTicketNum(t))}</a>`,iconAnchor:[32,-2]})}).addTo(shMap);
       shLabels.push(lbl);
     }
   }

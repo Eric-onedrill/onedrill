@@ -223,7 +223,9 @@ function filterTickets(opts={}){
           && !(t.address||'').toLowerCase().includes(sr)
           && !(t.prime||'').toLowerCase().includes(sr)
           && !(t.job||'').toLowerCase().includes(sr)
-          && !(t.notes||'').toLowerCase().includes(sr)) return false;
+          && !(t.notes||'').toLowerCase().includes(sr)
+          // cadeia de renovação: busca acha o nº ANTIGO tb (que é exibido como "atual" na carência)
+          && !(t.oldTicket2||t.old_ticket2||'').toLowerCase().includes(sr)) return false;
 
     // Utility filter
     if(utility){

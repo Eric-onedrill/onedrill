@@ -5368,9 +5368,9 @@ async def save_ticket_pdfs_il(force=False):
         log.error("[IL] PDF: IL_USER/IL_PASS não definidos no .env")
         return
 
-    all_tickets = sb_get("tickets", "&state=eq.IL&status=in.(Clear,Damage,Completed)&order=ticket")
+    all_tickets = sb_get("tickets", "&state=eq.IL&status=in.(Clear,Damage,Completed,Closed)&order=ticket")
     if not all_tickets:
-        log.info("[IL] PDF: nenhum ticket Clear/Damage/Completed")
+        log.info("[IL] PDF: nenhum ticket Clear/Damage/Completed/Closed")
         return
 
     # Busca projetos pra resolver nome pelo project_id
@@ -5384,7 +5384,7 @@ async def save_ticket_pdfs_il(force=False):
         all_tickets = [t for t in all_tickets if not _ticket_has_pdf_on_disk(t, _disk, 5000)]
 
     if not all_tickets:
-        log.info("[IL] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
+        log.info("[IL] PDF: todos os tickets Clear/Damage/Completed/Closed já têm PDF")
         return
 
     # Mapa nº → ticket pra casar com o grid do JULIE. Indexa por TODA a cadeia de renovação
@@ -9999,9 +9999,9 @@ async def save_ticket_pdfs(state="FL", force=False):
       4. CDP Page.printToPDF com margins 0.5in → PDF idêntico ao "Save as PDF" do Chrome
     """
 
-    all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Clear,Damage,Completed)&order=ticket")
+    all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Clear,Damage,Completed,Closed)&order=ticket")
     if not all_tickets:
-        log.info(f"[{state}] PDF: nenhum ticket Clear/Damage/Completed")
+        log.info(f"[{state}] PDF: nenhum ticket Clear/Damage/Completed/Closed")
         return
 
     # Busca projetos pra resolver nome pelo project_id
@@ -10016,11 +10016,11 @@ async def save_ticket_pdfs(state="FL", force=False):
         all_tickets = [t for t in all_tickets if not _ticket_has_pdf_on_disk(t, _disk, 10000)]
 
     if not all_tickets:
-        log.info(f"[{state}] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
+        log.info(f"[{state}] PDF: todos os tickets Clear/Damage/Completed/Closed já têm PDF")
         return
 
     log.info("=" * 55)
-    log.info(f"  SAVE-PDF: {len(all_tickets)} tickets Clear/Damage/Completed ({state})")
+    log.info(f"  SAVE-PDF: {len(all_tickets)} tickets Clear/Damage/Completed/Closed ({state})")
     log.info(f"  Headless — pode usar o PC normalmente")
     log.info("=" * 55)
 
@@ -10232,9 +10232,9 @@ async def save_ticket_pdfs_wi(force=False):
     Estrutura: pdfs/WI/{PRIME}/{PROJECT}/{ticket}.pdf (ou subpasta de renovação).
     Damage duplicado em Damage/WI/{PRIME}/{PROJECT}/{ticket}.pdf.
     """
-    all_tickets = sb_get("tickets", "&state=eq.WI&status=in.(Clear,Damage,Completed)&order=ticket")
+    all_tickets = sb_get("tickets", "&state=eq.WI&status=in.(Clear,Damage,Completed,Closed)&order=ticket")
     if not all_tickets:
-        log.info("[WI] PDF: nenhum ticket Clear/Damage/Completed")
+        log.info("[WI] PDF: nenhum ticket Clear/Damage/Completed/Closed")
         return
 
     # Busca projetos pra resolver nome pelo project_id
@@ -10248,11 +10248,11 @@ async def save_ticket_pdfs_wi(force=False):
         all_tickets = [t for t in all_tickets if not _ticket_has_pdf_on_disk(t, _disk, 5000)]
 
     if not all_tickets:
-        log.info("[WI] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
+        log.info("[WI] PDF: todos os tickets Clear/Damage/Completed/Closed já têm PDF")
         return
 
     log.info("=" * 55)
-    log.info(f"  SAVE-PDF WI (DIGGERS): {len(all_tickets)} tickets Clear/Damage/Completed")
+    log.info(f"  SAVE-PDF WI (DIGGERS): {len(all_tickets)} tickets Clear/Damage/Completed/Closed")
     log.info("=" * 55)
 
     saved = 0
@@ -11863,7 +11863,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-cache",   action="store_true", help="Forçar re-scrape de todos (incluindo Clear em cache)")
     parser.add_argument("--selftest",   action="store_true", help="Rodar testes internos (classify, parser)")
     parser.add_argument("--backup",     action="store_true", help="Backup completo do banco de dados (JSON)")
-    parser.add_argument("--save-pdf",   action="store_true", help="Salvar PDF de tickets Clear/Damage/Completed (FL/IN via impressora, IL/WI via headless)")
+    parser.add_argument("--save-pdf",   action="store_true", help="Salvar PDF de tickets Clear/Damage/Completed/Closed (FL/IN via impressora, IL/WI via headless)")
     parser.add_argument("--sync-il",    action="store_true", help="Sincronizar respostas JULIE (Illinois)")
     parser.add_argument("--sync-wi",    action="store_true", help="Sincronizar respostas Diggers Hotline (Wisconsin)")
     parser.add_argument("--imp-wi",     action="store_true", help="Importar tickets novos WI (Diggers Hotline) + sync respostas")

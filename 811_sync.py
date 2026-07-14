@@ -83,7 +83,7 @@ MANUTENÇÃO E TESTES
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse, shutil, base64
+import os, sys, time, logging, logging.handlers, argparse, asyncio, re, urllib.parse, shutil, base64, glob
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -5219,6 +5219,31 @@ def _build_renewal_groups(all_tickets):
     return result
 
 
+def _pdf_disk_map(state):
+    """Mapa {numero_do_arquivo (sem .pdf) -> path} de todos os PDFs em disco pra um estado.
+    Usado pra validar se um ticket JÁ TEM PDF salvo (por qualquer nº da cadeia de renovação),
+    em vez de confiar só no anexo 'ticket_pdf' do banco (que pode estar dessincronizado)."""
+    d = {}
+    for p in glob.glob(os.path.join(BASE_DIR, "pdfs", state, "**", "*.pdf"), recursive=True):
+        d[os.path.splitext(os.path.basename(p))[0]] = p
+    return d
+
+
+def _ticket_has_pdf_on_disk(t, disk_map, min_bytes):
+    """True se existe arquivo PDF (>min_bytes) pro nº atual OU algum nº da cadeia de renovação."""
+    nums = [str(t.get("ticket") or "").strip()]
+    nums += [x.strip() for x in (t.get("old_ticket2") or "").split(" → ") if x.strip()]
+    for n in nums:
+        p = disk_map.get(n)
+        if p:
+            try:
+                if os.path.getsize(p) > min_bytes:
+                    return True
+            except OSError:
+                pass
+    return False
+
+
 def _compute_pdf_paths(t, projects_map, renewal_groups, base_dir):
     """Computa paths do PDF principal e duplicata Damage.
 
@@ -5354,10 +5379,9 @@ async def save_ticket_pdfs_il(force=False):
     renewal_groups = _build_renewal_groups(all_tickets)
 
     if not force:
-        all_tickets = [t for t in all_tickets if not any(
-            (a.get("type") or "") == "ticket_pdf"
-            for a in (t.get("attachments") or [])
-        )]
+        # Valida se o ticket JÁ TEM arquivo PDF salvo (nº atual OU cadeia), não só o anexo do banco.
+        _disk = _pdf_disk_map("IL")
+        all_tickets = [t for t in all_tickets if not _ticket_has_pdf_on_disk(t, _disk, 5000)]
 
     if not all_tickets:
         log.info("[IL] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
@@ -9981,10 +10005,10 @@ async def save_ticket_pdfs(state="FL", force=False):
     renewal_groups = _build_renewal_groups(all_tickets)
 
     if not force:
-        all_tickets = [t for t in all_tickets if not any(
-            (a.get("type") or "") == "ticket_pdf"
-            for a in (t.get("attachments") or [])
-        )]
+        # Valida se o ticket JÁ TEM arquivo PDF salvo (pelo nº atual OU da cadeia de renovação),
+        # não confia só no anexo 'ticket_pdf' do banco. Re-salva só quem realmente não tem o arquivo.
+        _disk = _pdf_disk_map(state)
+        all_tickets = [t for t in all_tickets if not _ticket_has_pdf_on_disk(t, _disk, 10000)]
 
     if not all_tickets:
         log.info(f"[{state}] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
@@ -10214,10 +10238,9 @@ async def save_ticket_pdfs_wi(force=False):
     renewal_groups = _build_renewal_groups(all_tickets)
 
     if not force:
-        all_tickets = [t for t in all_tickets if not any(
-            (a.get("type") or "") == "ticket_pdf"
-            for a in (t.get("attachments") or [])
-        )]
+        # Valida se o ticket JÁ TEM arquivo PDF salvo (nº atual OU cadeia), não só o anexo do banco.
+        _disk = _pdf_disk_map("WI")
+        all_tickets = [t for t in all_tickets if not _ticket_has_pdf_on_disk(t, _disk, 5000)]
 
     if not all_tickets:
         log.info("[WI] PDF: todos os tickets Clear/Damage/Completed já têm PDF")

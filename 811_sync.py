@@ -5387,15 +5387,19 @@ async def save_ticket_pdfs_il(force=False):
         log.info("[IL] PDF: todos os tickets Clear/Damage/Completed já têm PDF")
         return
 
-    # Mapa ticket_base → dados Supabase pra match com grid
+    # Mapa nº → ticket pra casar com o grid do JULIE. Indexa por TODA a cadeia de renovação
+    # (nº atual + antigos) e em MAIÚSCULA — o grid pode listar o renovado pelo nº ANTIGO, e há
+    # tickets com nº minúsculo no banco (ex: x261...). Assim o match acha os renovados também.
     need_pdf = {}
     for t in all_tickets:
-        tnum = (t.get("ticket") or "").strip()
-        if tnum:
-            need_pdf[tnum] = t
+        chain = [(t.get("ticket") or "").strip()]
+        chain += [x.strip() for x in (t.get("old_ticket2") or "").split(" → ") if x.strip()]
+        for n in chain:
+            if n:
+                need_pdf.setdefault(n.upper(), t)
 
     log.info("=" * 55)
-    log.info(f"  SAVE-PDF IL (JULIE Ticket Entry): {len(need_pdf)} tickets")
+    log.info(f"  SAVE-PDF IL (JULIE Ticket Entry): {len(all_tickets)} tickets")
     log.info("=" * 55)
 
     saved = 0
@@ -5422,16 +5426,17 @@ async def save_ticket_pdfs_il(force=False):
             grid_ours = _filter_il_onedrill(grid_rows)
             grid_latest = _dedupe_latest_revision(grid_ours)
             log.info(f"[IL] PDF: {len(grid_latest)} tickets ONEDRILL no grid, "
-                     f"{len(need_pdf)} precisam PDF")
+                     f"{len(all_tickets)} precisam PDF")
 
             processed = 0
+            _done_ids = set()
             for row in grid_latest:
-                base = row["ticket_base"]
-                if base not in need_pdf:
+                base = (row.get("ticket_base") or "").strip()
+                t = need_pdf.get(base.upper())
+                if not t or t.get("id") in _done_ids:
                     continue
-
-                t = need_pdf[base]
-                tnum = base
+                _done_ids.add(t.get("id"))
+                tnum = (t.get("ticket") or base)
                 tid = t.get("id", "")
                 processed += 1
 
@@ -5454,7 +5459,7 @@ async def save_ticket_pdfs_il(force=False):
                         continue
 
                 try:
-                    log.info(f"  ({processed}/{len(need_pdf)}) {tnum}...")
+                    log.info(f"  ({processed}/{len(all_tickets)}) {tnum}...")
 
                     # ── 1. Dblclick no ticket no grid → Inquire view ──
                     if not await _il_open_detail(page, row):

@@ -3642,6 +3642,14 @@ function editCurrentTicket(){
   document.getElementById('ticket-modal-title').textContent='Editar ticket';
   document.getElementById('tm-t').value=t.ticket;
   document.getElementById('tm-s').value=t.status;
+  // PROJETO: só projetos ATIVOS. Se o ticket já está num projeto CONCLUÍDO, mantém ele
+  // na lista (marcado) pra não desatribuir ao salvar — mas novos só vão pra ativos.
+  const _tmp=document.getElementById('tm-proj');
+  if(_tmp){
+    let _o='<option value="">Sem projeto</option>'+projects.filter(p=>p.status!=='Completed').map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');
+    if(t.projectId){const _cp=projects.find(p=>p.id===t.projectId&&p.status==='Completed');if(_cp)_o+=`<option value="${_cp.id}">${esc(projDropLabel(_cp))} (concluído)</option>`;}
+    _tmp.innerHTML=_o;
+  }
   document.getElementById('tm-proj').value=t.projectId||'';
   document.getElementById('tm-c').value=t.client;
   document.getElementById('tm-co').value=t.company;
@@ -6053,7 +6061,7 @@ function syncProjectSelects(){
     +(completed.length?'<optgroup label="── Concluídos ──">'+completed.map(p=>`<option value="${p.id}">📁 ${esc(projDropLabel(p))}</option>`).join('')+'</optgroup>':'');
   const pf=document.getElementById('proj-filter');if(pf){const pv=pf.value;pf.innerHTML=mkOpts('Todos os projetos');if(pv)pf.value=pv;}
   const tp=document.getElementById('tbl-proj');if(tp){const tv=tp.value;tp.innerHTML=mkOpts('Todos projetos');if(tv)tp.value=tv;}
-  const tm=document.getElementById('tm-proj');if(tm){const mv=tm.value;tm.innerHTML='<option value="">Sem projeto</option>'+projects.map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');if(mv)tm.value=mv;}
+  const tm=document.getElementById('tm-proj');if(tm){const mv=tm.value;tm.innerHTML='<option value="">Sem projeto</option>'+projects.filter(p=>p.status!=='Completed').map(p=>`<option value="${p.id}">${esc(projDropLabel(p))}</option>`).join('');if(mv)tm.value=mv;}
 }
 function syncPrimes(){
   const primes=[...new Set(tickets.map(t=>t.prime).filter(Boolean))].sort();

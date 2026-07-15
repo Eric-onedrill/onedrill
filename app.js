@@ -4888,8 +4888,11 @@ function buildNotifications(){
 function _buildUrgencyAlert(expiring){
   // Remove alert anterior se existir
   const old=document.getElementById('urgency-float');if(old)old.remove();
-  // Filtra: vence em ≤3 dias E campo não concluído
+  // Filtra: vence em ≤3 dias E campo não concluído.
+  // NÃO conta RENOVADOS: o expire deles é de um ciclo que só vai renovar de novo — não é
+  // urgência real (o "ticket antigo" que o Eric mencionou). O sininho ainda lista renovados.
   const critical=expiring.filter(t=>{
+    if(isRenewed(t))return false;
     const d=_eod(t.expire);const diff=(d-Date.now())/864e5;
     if(diff>3)return false;
     const ft=t.footage||0;const cf=t.completedFeet||0;

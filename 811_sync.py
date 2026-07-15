@@ -11864,6 +11864,7 @@ if __name__ == "__main__":
     parser.add_argument("--selftest",   action="store_true", help="Rodar testes internos (classify, parser)")
     parser.add_argument("--backup",     action="store_true", help="Backup completo do banco de dados (JSON)")
     parser.add_argument("--save-pdf",   action="store_true", help="Salvar PDF de tickets Clear/Damage/Completed/Closed (FL/IN via impressora, IL/WI via headless)")
+    parser.add_argument("--login",      action="store_true", help="Abrir navegador VISIVEL pra login manual no portal (renova a sessao do profile). Requer --state (FL/IN/WI).")
     parser.add_argument("--sync-il",    action="store_true", help="Sincronizar respostas JULIE (Illinois)")
     parser.add_argument("--sync-wi",    action="store_true", help="Sincronizar respostas Diggers Hotline (Wisconsin)")
     parser.add_argument("--imp-wi",     action="store_true", help="Importar tickets novos WI (Diggers Hotline) + sync respostas")
@@ -11879,6 +11880,12 @@ if __name__ == "__main__":
             run_self_tests()
         elif args.backup:
             backup_database()
+        elif getattr(args, 'login', False):
+            st = (args.state or "").upper()
+            if st not in PORTALS:
+                print(f"--login requer --state FL, IN ou WI (recebido: {args.state!r}). IL loga sozinho no sync.")
+            else:
+                asyncio.run(auto_login(st))
         elif getattr(args, 'save_pdf', False):
             if args.state == "IL":
                 asyncio.run(save_ticket_pdfs_il(force=args.force))

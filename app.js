@@ -2221,6 +2221,23 @@ function isInRenewalGrace(t){
   return cutoverMs>=Date.now();// true até 23:59:59 do cutover (expire_old)
 }
 function isRenewed(t){return !!(t.oldTicket2||t.old_ticket2);}
+// Corte da carência em ms (quando a cobertura do ANTIGO acaba): usa expireOld, ou o
+// expire do registro antigo como fallback. 0 se não dá pra determinar.
+function _graceCutoverMs(t){
+  let c=(t.expireOld||t.expire_old||'').trim();
+  if(c&&c!=='—'){const d=_eod(c);if(d&&!isNaN(d.getTime()))return d.getTime();}
+  const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+  if(oldNum){const o=tickets.find(x=>String(x.ticket).trim()===oldNum);if(o&&o.expire&&o.expire!=='—'){const d=_eod(o.expire);if(d&&!isNaN(d.getTime()))return d.getTime();}}
+  return 0;
+}
+// A carência só deve ESCONDER um ticket de "vencendo" se o antigo cobre PARA ALÉM do
+// próprio expire do novo. Se o corte da carência é <= ao próprio expire (não estende nada —
+// ex.: antigo e novo vencem no mesmo dia), o ticket vence de fato e DEVE aparecer.
+function _graceExtendsCoverage(t){
+  if(!isRenewed(t)||!isInRenewalGrace(t))return false;
+  const own=_eod(t.expire);const ownMs=(own&&!isNaN(own.getTime()))?own.getTime():0;
+  return _graceCutoverMs(t)>ownMs;
+}
 
 /**
  * Ticket renovado cujo expire AINDA NÃO foi atualizado pelo scraper 811.
@@ -2960,7 +2977,7 @@ function renderDash(){
   const noMap=fTickets.filter(t=>(!t.fieldPath||t.fieldPath.length<2)&&t.status!=='Cancel'&&t.status!=='Closed');
   const noProj=fTickets.filter(t=>!t.projectId&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
-  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
+  const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(_graceExtendsCoverage(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
 
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
@@ -3464,8 +3481,8 @@ function enterSharedView(pid){
     if(es!=='Open'&&es!=='Damage')return false;
     return _eod(t.expire)<now;
   });
-  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
-  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(isRenewed(t)&&isInRenewalGrace(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
+  const expiring3d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(_graceExtendsCoverage(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>=0&&diff<=3;});
+  const expiring7d=ts.filter(t=>{if(!t.expire||t.expire==='—')return false;if(t.status==='Closed'||t.status==='Cancel')return false;if(isSuperseded(t))return false;if(_graceExtendsCoverage(t))return false;if(expireIsStale(t))return false;const d=_eod(t.expire);const diff=(d-now)/86400000;return diff>3&&diff<=7;});
 
   const hasExpired=expired.length>0;
   if(hasExpired||expiring3d.length){
@@ -4870,7 +4887,7 @@ function buildNotifications(){
     const expiring=tickets.filter(t=>{
       if(!t.expire||t.expire==='—'||isSuperseded(t))return false;
       if(t.status==='Closed'||t.status==='Cancel')return false;
-      if(isRenewed(t)&&isInRenewalGrace(t))return false;
+      if(_graceExtendsCoverage(t))return false;
       if(expireIsStale(t))return false;
       const d=_eod(t.expire);const diff=(d-now)/864e5;return diff>=0&&diff<=5;
     });

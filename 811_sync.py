@@ -487,8 +487,27 @@ def _qv(val):
 
 
 def sb_get(table, qs=""):
-    r = _sb_request(requests.get, f"{SB_URL}/rest/v1/{table}?select=*{qs}", headers=SB_H)
-    return r.json()
+    # PAGINA. O PostgREST corta em 1000 linhas/request. Sem paginar, tabelas com >1000
+    # linhas (ex.: FL tem 1073 tickets) voltam truncadas — o `existing_nums` do import fica
+    # incompleto e ele RE-INSERE tickets que já existem (DUPLICA), e o sync não cobre o resto.
+    # Se o caller já passou um limit explícito, respeita (não pagina).
+    if "limit=" in qs:
+        r = _sb_request(requests.get, f"{SB_URL}/rest/v1/{table}?select=*{qs}", headers=SB_H)
+        return r.json()
+    order = "" if "order=" in qs else "&order=id.asc"
+    out, page, offset = [], 1000, 0
+    while True:
+        r = _sb_request(requests.get,
+                        f"{SB_URL}/rest/v1/{table}?select=*{qs}{order}&limit={page}&offset={offset}",
+                        headers=SB_H)
+        chunk = r.json()
+        if not isinstance(chunk, list):
+            return chunk if not out else out   # erro do PostgREST na 1a página → devolve como veio
+        out.extend(chunk)
+        if len(chunk) < page:
+            break
+        offset += page
+    return out
 
 
 def sb_upsert(table, data, on_conflict="ticket_num,utility_name,state"):
@@ -2605,7 +2624,7 @@ def check_scrape_failures(state, tickets_to_scrape, results):
     failed = {tn for tn in scraped if tn in results and not (results.get(tn) or {}).get("responses")}
     try:
         with open(_SCRAPE_FAIL_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            data = _json.load(f)
     except Exception:
         data = {}
     st = data.get(state, {})
@@ -2628,7 +2647,7 @@ def check_scrape_failures(state, tickets_to_scrape, results):
     data["_alerted"] = alerted
     try:
         with open(_SCRAPE_FAIL_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+            _json.dump(data, f)
     except Exception as e:
         log.warning(f"[ScrapeFail] erro salvando streak: {e}")
     if chronic:
@@ -3543,6 +3562,17 @@ async def import_new_tickets(state, triggered_by="manual"):
     for td in new_tickets:
         if td['ticket'] in existing_nums:
             log.warning(f"[{state}] {td['ticket']}: DUPLICATA — já existe no sistema, pulando")
+
+    # BLINDAGEM anti-duplicata: re-confere no banco AGORA (o scrape pode ter demorado e um
+    # re-run/outro processo pode ter inserido; sb_get pagina → pega TUDO). Só insere o que
+    # realmente NÃO existe — nunca duplica um ticket já presente.
+    if to_insert:
+        fresh_nums = {t["ticket"] for t in sb_get("tickets", f"&state=eq.{state}") if isinstance(t, dict)}
+        _before = len(to_insert)
+        to_insert = [td for td in to_insert if td['ticket'] not in fresh_nums]
+        existing_nums |= fresh_nums
+        if len(to_insert) < _before:
+            log.warning(f"[{state}] Anti-dup: {_before-len(to_insert)} ticket(s) já existiam no banco (re-check) — pulados, sem duplicar")
 
     if to_insert:
         try:

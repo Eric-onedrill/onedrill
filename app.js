@@ -78,6 +78,8 @@ function lineWeight(t){return(t||'').toLowerCase().includes('main')?5:3;}
 /* ═══════════ 3. STATE ═══════════ */
 let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoords={};
 let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null,currentUserEmail='';
+// Escopo de acesso por estado: 'all' | 'no_fl' | 'only_fl' (vem do app_metadata do usuário)
+let userScope='all',_recoveryMode=false,_setPwMode='first';
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
 let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
@@ -500,7 +502,13 @@ async function initSupabase(){
     // Listener pra detectar refresh/logout em qualquer aba
     sb.auth.onAuthStateChange((event,session)=>{
       if(event==='TOKEN_REFRESHED')console.log('[Auth] token renovado');
-      if(event==='SIGNED_OUT'){isAdmin=false;role='viewer';}
+      if(event==='SIGNED_OUT'){isAdmin=false;role='viewer';userScope='all';}
+      // Link de recuperação de senha (e-mail): mostra tela pra definir nova senha
+      if(event==='PASSWORD_RECOVERY'){
+        _recoveryMode=true;
+        const ls=document.getElementById('loading-screen');if(ls)ls.style.display='none';
+        showSetPasswordScreen('recovery');
+      }
     });
     // Fix bug #13: 8s é agressivo demais em 4G no campo (tablets de supervisor em obra).
     // 15s dá margem mas ainda detecta servidor down em tempo razoável.
@@ -1086,61 +1094,118 @@ async function tryLogin(){
       errEl.textContent=error.message==='Invalid login credentials'?'Email ou senha incorretos':error.message;
       errEl.style.display='block';
       document.querySelector('.login-admin-btn').disabled=false;
-      document.querySelector('.login-admin-btn').textContent='Entrar como Admin';
+      document.querySelector('.login-admin-btn').textContent='Entrar';
       return;
     }
     await resolveRole(data.user);
+    // 1º acesso: senha 123456 é temporária → força definir nova senha
+    const um=data.user.user_metadata||{};
+    if(um.must_change){
+      document.querySelector('.login-admin-btn').disabled=false;
+      document.querySelector('.login-admin-btn').textContent='Entrar';
+      showSetPasswordScreen('first');
+      return;
+    }
     document.getElementById('login-screen').style.display='none';
     enterApp();
   }catch(e){errEl.textContent='Erro de conexão';errEl.style.display='block';}
   document.querySelector('.login-admin-btn').disabled=false;
-  document.querySelector('.login-admin-btn').textContent='Entrar como Admin';
+  document.querySelector('.login-admin-btn').textContent='Entrar';
 }
 
-/** Resolve role via app_roles com fallback por email */
+/** Resolve perfil (admin/viewer) e escopo de estado via app_metadata do JWT.
+ *  app_metadata é definido pelo service_role (não é editável pelo usuário) →
+ *  fonte de verdade confiável. Fallback: só engineering@ é admin caso o
+ *  metadata ainda não tenha propagado (ex.: token antigo). */
 async function resolveRole(user){
   currentUserEmail=(user.email||'').toLowerCase();
-  try{
-    const{data:roleData,error:roleErr}=await sb.from('app_roles').select('role').eq('user_id',user.id).single();
-    if(roleData&&roleData.role==='admin'){isAdmin=true;role='admin';}
-    else if(roleErr){
-      isAdmin=ADMIN_EMAILS.includes((user.email||'').toLowerCase());
-      role=isAdmin?'admin':'viewer';
-      console.warn('[Auth] app_roles inacessivel ('+roleErr.code+'), fallback email:',user.email,'->',role);
-    }else{isAdmin=false;role='viewer';}
-  }catch(e){
-    isAdmin=ADMIN_EMAILS.includes((user.email||'').toLowerCase());
+  const am=user.app_metadata||{};
+  userScope=(am.scope==='no_fl'||am.scope==='only_fl'||am.scope==='all')?am.scope:'all';
+  if(am.role==='admin'){isAdmin=true;role='admin';userScope='all';}
+  else if(am.role==='viewer'){isAdmin=false;role='viewer';}
+  else{
+    // Sem metadata no token: só o admin-mestre passa (evita liberar geral)
+    isAdmin=(currentUserEmail==='engineering@onedrill.us');
     role=isAdmin?'admin':'viewer';
+    if(isAdmin)userScope='all';
   }
+  // Nome pro Jarvis (saudação) — deriva do e-mail se ainda não houver
+  try{ if(!localStorage.getItem('jarvis-username')){const n=(currentUserEmail.split('@')[0]||'').split(/[._]/)[0];if(n)localStorage.setItem('jarvis-username',n.charAt(0).toUpperCase()+n.slice(1));} }catch(e){}
 }
 
-// Senha pra acessar como Manager / Visualizador.
-// Hardcoded por simplicidade — pra trocar, edita aqui e dá push no GitHub.
-// Não protege contra alguém com F12 (a senha é visível em texto puro no JS),
-// mas barra acesso casual de quem só descobriu a URL do app.
-const VIEWER_PASSWORD = '#Onedrill@2020';
+// ── Recuperação de senha por e-mail (Supabase Auth nativo) ──
+async function forgotPassword(){
+  let email=(document.getElementById('admin-email')?.value||'').trim();
+  if(!email){ email=(prompt('Digite o e-mail da sua conta para receber o link de recuperação:')||'').trim(); }
+  if(!email)return;
+  try{
+    const{error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname});
+    if(error)throw error;
+    toast('Link de recuperação enviado para '+email+'. Verifique a caixa de entrada (e o spam).','success');
+  }catch(e){ toast('Erro ao enviar recuperação: '+(e.message||e),'danger'); }
+}
 
-function enterViewer(){
-  // UX (2026-05-13): se ja autorizou nesse dispositivo, pula a senha.
-  // Salva flag em localStorage apos primeiro acerto. doLogout limpa.
-  try {
-    if (localStorage.getItem('viewer-auth') === 'true') {
-      isAdmin=false;role='viewer';
-      document.getElementById('login-screen').style.display='none';
-      enterApp();
-      return;
-    }
-  } catch(e) {}
-  const pw = prompt('Digite a senha de acesso (so na primeira vez):');
-  if(pw === null) return;
-  if(pw !== VIEWER_PASSWORD){
-    alert('Senha incorreta.');
-    return;
+// ── Tela "definir nova senha" (1º acesso com 123456 ou recuperação por e-mail) ──
+function showSetPasswordScreen(mode){
+  _setPwMode=mode||'first';
+  const hide=id=>{const el=document.getElementById(id);if(el){el.style.display='none';el.classList&&el.classList.add('hidden');}};
+  hide('loading-screen');hide('login-screen');hide('app-shell');
+  const sp=document.getElementById('setpw-screen');
+  if(sp){sp.classList.remove('hidden');sp.style.display='flex';}
+  const msg=document.getElementById('setpw-msg');
+  if(msg)msg.textContent=_setPwMode==='recovery'?'Defina uma nova senha para sua conta.':'Primeiro acesso — a senha 123456 é temporária. Defina sua nova senha.';
+  const err=document.getElementById('setpw-err');if(err)err.style.display='none';
+  const n=document.getElementById('setpw-new'),c=document.getElementById('setpw-confirm');
+  if(n)n.value='';if(c)c.value='';
+  if(n)setTimeout(()=>n.focus(),60);
+}
+
+async function submitNewPassword(){
+  const n=(document.getElementById('setpw-new')||{}).value||'';
+  const c=(document.getElementById('setpw-confirm')||{}).value||'';
+  const err=document.getElementById('setpw-err');
+  const show=m=>{if(err){err.textContent=m;err.style.display='block';}};
+  if(err)err.style.display='none';
+  if(n.length<6)return show('A senha precisa ter ao menos 6 caracteres.');
+  if(n!==c)return show('As senhas não conferem.');
+  if(n==='123456')return show('Escolha uma senha diferente de 123456.');
+  const btn=document.getElementById('setpw-btn');
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+  try{
+    const{error}=await sb.auth.updateUser({password:n,data:{must_change:false}});
+    if(error)throw error;
+    _recoveryMode=false;
+    const{data:{session}}=await sb.auth.getSession();
+    if(session&&session.user)await resolveRole(session.user);
+    const sp=document.getElementById('setpw-screen');if(sp)sp.style.display='none';
+    toast('Senha atualizada com sucesso!','success');
+    enterApp();
+  }catch(e){ show('Erro: '+(e.message||e)); }
+  if(btn){btn.disabled=false;btn.textContent='Salvar nova senha';}
+}
+
+// ── Escopo de estado (defesa em profundidade; o RLS já filtra no banco) ──
+function _scopeAllows(state){
+  const s=(state||'').toUpperCase();
+  if(userScope==='no_fl')return s!=='FL';
+  if(userScope==='only_fl')return s==='FL';
+  return true;
+}
+function _applyScope(){
+  if(userScope&&userScope!=='all'){
+    tickets=tickets.filter(t=>_scopeAllows(t.state));
+    projects=projects.filter(p=>_scopeAllows(p.state));
   }
-  try { localStorage.setItem('viewer-auth', 'true'); } catch(e) {}
-  isAdmin=false;role='viewer';
-  document.getElementById('login-screen').style.display='none';
-  enterApp();
+}
+// Recarrega tickets/projects usando a sessão logada (respeita RLS/escopo).
+async function loadCoreData(){
+  const{data:p}=await sb.from('projects').select('*').order('name');
+  let all=[],from=0;const P=1000;
+  while(true){const{data:pg,error:et}=await sb.from('tickets').select('*').order('ticket').range(from,from+P-1);if(et||!pg||!pg.length)break;all=all.concat(pg);if(pg.length<P)break;from+=P;}
+  projects=(p||[]).map(dbToProject);
+  tickets=all.map(dbToTicket);
+  _applyScope();
+  rebuildSupersededSet();
 }
 
 async function doLogout(){
@@ -1150,7 +1215,7 @@ async function doLogout(){
   // Evita que o interval continue rodando (e tentando fetchar dados) após logout.
   if(_autoRefreshId){clearInterval(_autoRefreshId);_autoRefreshId=null;}
   if(_syncTimerId){clearTimeout(_syncTimerId);_syncTimerId=null;}
-  isAdmin=false;role='viewer';currentUserEmail='';
+  isAdmin=false;role='viewer';currentUserEmail='';userScope='all';
   document.getElementById('app-shell').style.display='none';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('pg-dash').classList.add('active');
@@ -1159,11 +1224,12 @@ async function doLogout(){
 }
 
 /* ═══════════ 11. APP SHELL ═══════════ */
-function enterApp(){
+async function enterApp(){
   const shell=document.getElementById('app-shell');
   shell.classList.remove('hidden');
   shell.style.display='grid';
-  document.getElementById('role-badge').textContent=isAdmin?'ADMIN':'VIEWER';
+  const _scopeLbl=userScope==='no_fl'?' · s/ FL':userScope==='only_fl'?' · só FL':'';
+  document.getElementById('role-badge').textContent=isAdmin?'ADMIN':('VIEWER'+_scopeLbl);
   document.getElementById('role-badge').style.background=isAdmin?'var(--green-bg)':'var(--accent-bg)';
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
   const logoutBtn=document.getElementById('btn-logout');
@@ -1171,6 +1237,8 @@ function enterApp(){
   const adminEls=['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'];
   adminEls.forEach(id=>{const e=document.getElementById(id);if(e){if(isAdmin)e.classList.remove('hidden');else e.classList.add('hidden');}});
   if(!isAdmin){const fss=document.getElementById('field-status-section');if(fss)fss.style.display='none';}
+  // Recarrega tickets/projects com a sessão do usuário (RLS filtra por estado no banco)
+  try{ await loadCoreData(); }catch(e){ console.warn('[enterApp] loadCoreData',e); }
   syncAll();renderDash();
   loadLastSync();
   loadUtilCache().then(()=>{syncAll();buildNotifications();});
@@ -1192,6 +1260,7 @@ function enterApp(){
       while(true){const{data:pg}=await sb.from('tickets').select('*').order('ticket').range(_af,_af+999);if(!pg||!pg.length)break;_art=_art.concat(pg);if(pg.length<1000)break;_af+=1000;}
       if(p)projects=p.map(dbToProject);
       if(_art.length)tickets=_art.map(dbToTicket);
+      _applyScope();
       rebuildSupersededSet();
       await loadUtilCache();
       await loadLastSync();
@@ -3357,6 +3426,7 @@ async function confirmDelProj(){
   }else{toast('Erro ao excluir projeto','danger');}
 }
 function openMoveProj(tid){
+  if(!isAdmin){toast('Apenas o admin pode mover tickets de projeto.','warn');return;}
   const t=tickets.find(x=>x.id===tid);if(!t)return;
   document.getElementById('move-proj-ticket-info').innerHTML=`Ticket: ${esc(t.ticket)}`+(t.project_locked?'<div style="margin-top:6px;font-size:11px;padding:5px 10px;background:var(--accent-bg);border:1px solid var(--border);border-radius:var(--r);color:var(--accent)">🔒 Projeto travado — ao salvar, o novo projeto será travado também.<br><button class="btn btn-sm" onclick="unlockProject('+t.id+')" style="margin-top:4px;font-size:10px">🔓 Desbloquear projeto</button></div>':'');
   const sel=document.getElementById('move-proj-sel');
@@ -3364,6 +3434,7 @@ function openMoveProj(tid){
   openModal('ov-move-proj');
 }
 async function saveMoveProj(){
+  if(!isAdmin){toast('Apenas o admin pode mover tickets.','warn');return;}
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
   t.projectId=document.getElementById('move-proj-sel').value;
   t.project_locked=!!t.projectId;// trava se tem projeto, destrava se "Sem projeto"
@@ -3373,11 +3444,15 @@ async function saveMoveProj(){
   closeModal('ov-move-proj');openTicketDetail(currentDetailId);syncAll();toast('Projeto atualizado!'+(t.project_locked?' (travado)':''),'success');
 }
 
-function shareProject(pid){
+async function shareProject(pid){
+  if(!isAdmin){toast('Apenas o admin pode compartilhar projetos.','warn');return;}
   const p=projects.find(x=>x.id===pid);if(!p)return;
+  // Marca o projeto como compartilhado → sob RLS, o anon (link público) lê projeto shared=true.
+  try{ const{error}=await sb.from('projects').update({shared:true}).eq('id',pid); if(error)console.warn('[share] flag',error.message); else p.shared=true; }
+  catch(e){ console.warn('[share] flag',e); }
   const url=window.location.origin+window.location.pathname+'?p='+encodeURIComponent(p.id);
   if(navigator.clipboard){
-    navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Quem abrir verá só este projeto.','success')).catch(()=>{prompt('Copie o link:',url);});
+    navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Quem tiver o link verá este projeto.','success')).catch(()=>{prompt('Copie o link:',url);});
   }else{prompt('Copie o link:',url);}
 }
 function checkProjectUrl(){
@@ -4505,6 +4580,7 @@ function _bulkResolveProject(raw){
 }
 
 function openBulkUpdate(){
+  if(!isAdmin){toast('Apenas o admin pode atualizar em massa.','warn');return;}
   document.getElementById('bu-input').value='';
   document.getElementById('bu-preview-area').style.display='none';
   document.getElementById('bu-apply-btn').disabled=true;
@@ -4699,6 +4775,7 @@ function previewBulkUpdate(){
 }
 
 async function applyBulkUpdate(){
+  if(!isAdmin){toast('Apenas o admin pode aplicar.','warn');return;}
   const plan=__bulkUpdatePlan.filter(r=>r.changes.length);
   if(!plan.length){toast('Nada pra aplicar.','warn');return;}
   if(!await requireAuth())return;
@@ -6240,6 +6317,7 @@ async function manualRefresh(){
     while(true){const{data:pg}=await sb.from('tickets').select('*').order('ticket').range(_mf2,_mf2+999);if(!pg||!pg.length)break;_mrt=_mrt.concat(pg);if(pg.length<1000)break;_mf2+=1000;}
     if(p)projects=p.map(dbToProject);
     if(_mrt.length)tickets=_mrt.map(dbToTicket);
+    _applyScope();
     rebuildSupersededSet();
     await loadUtilCache();
     await loadLastSync();
@@ -6265,6 +6343,9 @@ window.addEventListener('online',()=>{toast('✅ Conexão restaurada','success')
 window.addEventListener('load',async()=>{
   document.querySelector('#loading-screen div:last-child').textContent='Conectando ao Supabase...';
   const ok=await initSupabase();
+  // Link de recuperação de senha (e-mail) tem PRIORIDADE: nunca cair no login por aqui,
+  // mesmo que o init do banco falhe (rede ruim) — senão o admin que esqueceu a senha trava.
+  if(_recoveryMode||/type=recovery/.test(location.hash||'')){ document.getElementById('loading-screen').style.display='none'; showSetPasswordScreen('recovery'); return; }
   document.getElementById('loading-screen').style.display='none';
   if(!ok){document.getElementById('login-screen').classList.remove('hidden');document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
   if(checkProjectUrl())return;
@@ -6272,6 +6353,9 @@ window.addEventListener('load',async()=>{
     const{data:{session}}=await sb.auth.getSession();
     if(session){
       await resolveRole(session.user);
+      if(_recoveryMode){ showSetPasswordScreen('recovery'); return; }
+      // Troca obrigatória de senha ainda pendente (fechou a aba antes de trocar)
+      if(session.user.user_metadata&&session.user.user_metadata.must_change){ showSetPasswordScreen('first'); return; }
       enterApp();
       return;
     }

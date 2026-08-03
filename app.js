@@ -3248,6 +3248,10 @@ function projDropLabel(p){
   return locs?locs+' ('+p.name+')':p.name;
 }
 
+// Footage produzido em campo (EXATO): ticket done (Closed/Completed) = footage cheio (100%);
+// senão conta a baixa parcial registrada (completedFeet), limitada ao footage do ticket.
+function _producedFt(t){const f=t.footage||0;return (t.status==='Closed'||t.status==='Completed')?f:Math.min(t.completedFeet||0,f);}
+
 function renderProjects(){
   const g=document.getElementById('proj-grid');if(!g)return;
   const _slp=document.getElementById('ms-proj-slot');
@@ -3265,7 +3269,7 @@ function renderProjects(){
     const _es=(t)=>effectiveStatus(t);
     const openC=ts.filter(t=>_es(t)==='Open').length,clearC=ts.filter(t=>_es(t)==='Clear').length,damageC=ts.filter(t=>_es(t)==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
-    const campoFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);const pctCampoP=projTotal>0?Math.round(campoFt/projTotal*100):0;
+    const campoFt=ts.reduce((s,t)=>s+_producedFt(t),0);const pctCampoP=projTotal>0?Math.min(100,Math.round(campoFt/projTotal*100)):0;
     // ft clear = footage dos tickets Clear MENOS o já produzido parcialmente (completedFeet)
     // = o que realmente sobra pra trabalhar nos clear.
     const clearFtP=ts.filter(t=>_es(t)==='Clear').reduce((s,t)=>s+Math.max(0,(t.footage||0)-(t.completedFeet||0)),0);

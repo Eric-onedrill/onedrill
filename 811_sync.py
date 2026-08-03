@@ -2354,18 +2354,39 @@ def sb_batch_patch(table, patches, id_field="id"):
 
 
 # ── │ SECTION: UNRECOGNIZED │ RESPOSTAS NÃO RECONHECIDAS (salva no Supabase + alerta por email) 
+def _unrec_key(d):
+    """Chave de dedup de uma resposta não reconhecida."""
+    return (str(d.get("ticket_num", "")), str(d.get("utility_name", "")),
+            str(d.get("state", "")), str(d.get("status_raw", "")),
+            (str(d.get("raw_text") or ""))[:500])
+
+
 def save_unrecognized_responses(items):
     """Salva respostas não reconhecidas na tabela unrecognized_responses.
 
-    Tabela deve ser criada no Supabase (ver create_unrecognized_table.sql).
-    Se a tabela não existir, apenas loga o aviso.
+    DEDUP (2026-08-03): antes fazia INSERT puro e re-gravava os MESMOS padrões a cada
+    run — a tabela inchou pra ~30k linhas (98% duplicata) e virou o maior consumidor de
+    Disk IO do projeto. Agora só grava padrão NOVO: 1 leitura filtrada pega o que já
+    existe (pros ticket_nums do lote) e pula duplicata (do banco e do próprio lote).
     """
     if not items:
         return
     now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-    records = []
+
+    # 1 leitura filtrada: o que já foi logado pros ticket_nums deste lote
+    existing = set()
+    try:
+        nums = sorted({str(it["ticket_num"]) for it in items if it.get("ticket_num")})
+        for i in range(0, len(nums), 100):
+            chunk = ",".join(_qv(n) for n in nums[i:i + 100])
+            for r in sb_get("unrecognized_responses", f"&ticket_num=in.({chunk})"):
+                existing.add(_unrec_key(r))
+    except Exception as e:
+        log.warning(f"[Unrecognized] dedup-check falhou ({e}); grava tudo por segurança")
+
+    records, seen = [], set()
     for item in items:
-        records.append({
+        rec = {
             "ticket_num": item["ticket_num"],
             "state": item.get("state", ""),
             "utility_name": item.get("utility_name", ""),
@@ -2373,12 +2394,21 @@ def save_unrecognized_responses(items):
             "raw_text": (item.get("raw_text") or "")[:500],
             "detected_at": now_iso,
             "resolved": False,
-        })
+        }
+        k = _unrec_key(rec)
+        if k in existing or k in seen:
+            continue
+        seen.add(k)
+        records.append(rec)
+
+    if not records:
+        log.info(f"[Unrecognized] 0 novos (todos os {len(items)} já logados) — nada a inserir")
+        return
     try:
         h = {**SB_H, "Prefer": "return=minimal"}
         _sb_request(requests.post, f"{SB_URL}/rest/v1/unrecognized_responses",
                     headers=h, json=records, timeout=15)
-        log.info(f"[Unrecognized] {len(records)} respostas não reconhecidas salvas no Supabase")
+        log.info(f"[Unrecognized] {len(records)} padrões NOVOS salvos (de {len(items)} candidatos; resto já logado)")
     except Exception as e:
         # Se a tabela não existir, loga mas não quebra o sync
         log.warning(f"[Unrecognized] Erro ao salvar (tabela existe?): {e}")

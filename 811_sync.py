@@ -193,8 +193,33 @@ TIMEOUT_NAV        = 5000     # wait_for / wait_nav
 TIMEOUT_CLICK      = 8000     # click_and_wait
 
 
+# Perfis do Chrome ficam FORA do OneDrive (2026-08-03, pedido do Eric #5):
+# o OneDrive sincronizando o profile durante o scrape gera cópias de conflito
+# e é provável causa dos "Target crashed". Assim o OneDrive só copia os arquivos
+# necessários (código/config/dados) pro backup da gerência. Migração automática
+# na 1ª execução preserva a sessão logada (não precisa relogar).
+TRANSIENT_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP") or BASE_DIR, "Onedrill811"
+)
+try:
+    os.makedirs(TRANSIENT_DIR, exist_ok=True)
+except Exception:
+    TRANSIENT_DIR = BASE_DIR  # fallback seguro: volta pro comportamento antigo
+
+
 def _profile_path(state):
-    return os.path.join(BASE_DIR, f"chrome_profile_{state}")
+    new = os.path.join(TRANSIENT_DIR, f"chrome_profile_{state}")
+    old = os.path.join(BASE_DIR, f"chrome_profile_{state}")
+    # Migração única: move o profile do OneDrive pro local (preserva cookies/login).
+    if TRANSIENT_DIR != BASE_DIR and not os.path.exists(new) and os.path.isdir(old):
+        try:
+            import shutil
+            shutil.move(old, new)
+            log.info(f"[profile] {state} migrado do OneDrive -> {new}")
+        except Exception as e:
+            log.warning(f"[profile] falha ao migrar {state} ({e}); criando novo (pode exigir re-login)")
+            return old if os.path.isdir(old) else new
+    return new
 
 # ── │ SECTION: LOCK │ LOCK FILE (evita execuções simultâneas) ────────────────
 class ProcessLock:

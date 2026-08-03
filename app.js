@@ -557,27 +557,7 @@ async function initSupabase(){
     // Fix bug #13: 8s é agressivo demais em 4G no campo (tablets de supervisor em obra).
     // 15s dá margem mas ainda detecta servidor down em tempo razoável.
     const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),15000));
-    // Shared view (?p=ID): carrega SÓ o projeto do link + seus tickets — não os 2000+
-    // (corta Disk IO, 2026-08-03). checkProjectUrl resolve o projeto neste array reduzido.
-    const _sharedPid=new URLSearchParams(location.search).get('p');
-    const fetchScoped=async(pid)=>{
-      let{data:pr}=await sb.from('projects').select('*').eq('id',pid);
-      if(!pr||!pr.length){const r2=await sb.from('projects').select('*').eq('name',pid);pr=r2.data;}
-      if(!pr||!pr.length){const r3=await sb.from('projects').select('*').ilike('name','%'+pid+'%').limit(1);pr=r3.data;}
-      const proj=pr&&pr[0];
-      if(!proj)return{p:[],t:[]};
-      let allT=[];let from=0;const PAGE=1000;
-      while(true){
-        const{data:page,error:et}=await sb.from('tickets').select('*').eq('project_id',proj.id).order('ticket').range(from,from+PAGE-1);
-        if(et)throw new Error('Tickets: '+et.message);
-        if(!page||!page.length)break;
-        allT=allT.concat(page);
-        if(page.length<PAGE)break;
-        from+=PAGE;
-      }
-      return{p:[proj],t:allT};
-    };
-    const fetchFull=async()=>{
+    const fetchData=async()=>{
       const{data:p,error:ep}=await sb.from('projects').select('*').order('name');
       // Supabase default limit = 1000 rows. Paginar pra carregar TODOS os tickets.
       let allTickets=[];let from=0;const PAGE=1000;
@@ -592,7 +572,6 @@ async function initSupabase(){
       if(ep)throw new Error('Projetos: '+ep.message);
       return{p,t:allTickets};
     };
-    const fetchData=()=>_sharedPid?fetchScoped(_sharedPid):fetchFull();
     const{p,t}=await Promise.race([fetchData(),timeout]);
     projects=(p||[]).map(dbToProject);
     tickets=(t||[]).map(dbToTicket);
@@ -3594,8 +3573,7 @@ function enterSharedView(pid){
   // está em carência e mostra utilities pendentes do ticket antigo, divergindo do
   // que aparece no admin. Fire-and-forget pra não bloquear o render inicial; quando
   // termina, re-renderiza a lista lateral e (se aberto) o modal de detalhe.
-  const _pnums=tickets.filter(t=>t.projectId===p.id).map(t=>t.ticket);
-  loadUtilCache(_pnums).then(()=>{
+  loadUtilCache().then(()=>{
     if(!isSharedView)return;
     if(typeof renderSharedList==='function')renderSharedList();
     if(currentDetailId){
@@ -3612,18 +3590,15 @@ function enterSharedView(pid){
     if(!isSharedView){clearInterval(_sharedRefreshId);_sharedRefreshId=null;return;}
     if(document.querySelector('.overlay.open'))return;
     try{
-      const pid=sharedProjectId;
-      const{data:pp}=await sb.from('projects').select('*').eq('id',pid);
-      if(pp&&pp.length){
-        let _srt=[];let _sf2=0;
-        while(true){const{data:pg}=await sb.from('tickets').select('*').eq('project_id',pid).order('ticket').range(_sf2,_sf2+999);if(!pg||!pg.length)break;_srt=_srt.concat(pg);if(pg.length<1000)break;_sf2+=1000;}
-        projects=pp.map(dbToProject);
-        tickets=_srt.map(dbToTicket);
-        rebuildSupersededSet();
-        await loadUtilCache(_srt.map(t=>t.ticket));
-        if(typeof renderSharedList==='function')renderSharedList();
-      }
-      console.log('[SharedRefresh] OK (scoped)');
+      const{data:pp}=await sb.from('projects').select('*').order('name');
+      let _srt=[];let _sf2=0;
+      while(true){const{data:pg}=await sb.from('tickets').select('*').order('ticket').range(_sf2,_sf2+999);if(!pg||!pg.length)break;_srt=_srt.concat(pg);if(pg.length<1000)break;_sf2+=1000;}
+      if(pp)projects=pp.map(dbToProject);
+      if(_srt.length)tickets=_srt.map(dbToTicket);
+      rebuildSupersededSet();
+      await loadUtilCache();
+      if(typeof renderSharedList==='function')renderSharedList();
+      console.log('[SharedRefresh] OK');
     }catch(e){console.error('[SharedRefresh]',e);}
   },AUTO_REFRESH_MS);
   const ts0=tickets.filter(t=>t.projectId===p.id);

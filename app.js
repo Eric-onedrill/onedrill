@@ -128,7 +128,7 @@ const debouncedContacts=debounce(()=>renderContacts(),250);
    msSel[key] = array de estados marcados; [] = "todos".
    Componente: botão + popover com checkboxes. Aplica AO FECHAR (evita
    re-render a cada clique). Usado em: tabela, projetos, contatos,
-   dashboard/analytics (dash) e timeline (tl). */
+   dashboard/analytics (dash). */
 const msSel={tbl:[],proj:[],contacts:[],dash:[]};
 function _stMatch(sel,s){return !sel||!sel.length||sel.indexOf(s)>=0;}
 function _stMatchU(sel,s){if(typeof sel==='string')sel=sel?[sel]:[];if(!sel||!sel.length)return true;s=(s||'').toUpperCase();return sel.some(x=>(x||'').toUpperCase()===s);}
@@ -1297,7 +1297,7 @@ async function enterApp(){
   document.getElementById('role-badge').style.color=isAdmin?'var(--green)':'var(--accent)';
   const logoutBtn=document.getElementById('btn-logout');
   if(logoutBtn)logoutBtn.style.display='';
-  const adminEls=['btn-import','btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'];
+  const adminEls=['btn-new-ticket','btn-new-proj','det-edit-btn','det-draw-btn','btn-add-contact'];
   adminEls.forEach(id=>{const e=document.getElementById(id);if(e){if(isAdmin)e.classList.remove('hidden');else e.classList.add('hidden');}});
   if(!isAdmin){const fss=document.getElementById('field-status-section');if(fss)fss.style.display='none';}
   // Recarrega tickets/projects com a sessão do usuário (RLS filtra por estado no banco)

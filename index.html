@@ -169,7 +169,6 @@
 
     <div class="snav-actions">
       <button class="btn snav-action-btn" data-action="export-excel">↓ Excel</button>
-      <button class="btn snav-action-btn hidden" id="btn-import" data-action="open-import">↑ Importar</button>
       <button class="btn btn-primary snav-action-btn hidden" id="btn-new-ticket" data-action="new-ticket">+ Ticket</button>
     </div>
 
@@ -499,54 +498,6 @@
   </div>
 </div>
 
-<!-- MODAL: Import -->
-<div class="overlay" id="ov-import">
-  <div class="modal wide">
-    <div class="modal-head">
-      <div class="mtitle">Importar Excel</div>
-      <button class="modal-close" data-close="ov-import">×</button>
-    </div>
-    <div class="import-note">
-      Compatível com <strong>Controle_Tickets.xlsx</strong><br>
-      Colunas: <strong>Ticket#, Company, State, Location, Status, Expire on, Footage, Client, Prime, Tipo, Main Address, Pending, Old Ticket #, Status Old, Old Expiration Date</strong>
-    </div>
-    <div class="uzone" id="uzone" data-action="trigger-file-input">
-      <div class="uzone-icon">📂</div>
-      <div class="uzone-text">Clique ou arraste o arquivo aqui</div>
-      <div class="uzone-hint">.xlsx · .xls · .csv</div>
-    </div>
-    <input type="file" id="ffile" accept=".xlsx,.xls,.csv" class="hidden">
-    <div id="prevarea" class="hidden">
-      <div class="import-options">
-        <span class="import-label" id="prevlabel"></span>
-        <div class="import-modes">
-          <label class="import-mode-opt">
-            <input type="radio" name="importmode" value="replace">
-            <span><strong>Substituir tudo</strong></span>
-          </label>
-          <label class="import-mode-opt">
-            <input type="radio" name="importmode" value="update" checked>
-            <span><strong>Atualizar dados</strong> — preserva trajetos ✏️</span>
-          </label>
-          <label class="import-mode-opt">
-            <input type="radio" name="importmode" value="add">
-            <span><strong>Acumular</strong></span>
-          </label>
-        </div>
-      </div>
-      <div class="prevwrap"><table class="ptable" id="ptbl"></table></div>
-      <div class="progwrap" id="progwrap">
-        <span id="progtxt">Importando...</span>
-        <div class="progtrack"><div class="progfill" id="progfill"></div></div>
-      </div>
-    </div>
-    <div class="factions">
-      <button class="btn" data-close="ov-import">Cancelar</button>
-      <button class="btn btn-primary hidden" id="bimport" data-action="do-import">Importar dados</button>
-    </div>
-  </div>
-</div>
-
 <!-- MODAL: Move to project -->
 <div class="overlay" id="ov-move-proj">
   <div class="modal narrow">
@@ -727,7 +678,7 @@
   <span id="tmsg"></span>
 </div>
 
-<script src="app.js?v=20260731campo2"></script>
+<script src="app.js?v=20260803clean"></script>
 <script src="jarvis.js?v=20260731c"></script>
 
 <!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
@@ -766,7 +717,6 @@
     'toggle-shared-panel':   () => toggleSharedPanel(),
     'sh-fit-all':            () => shFitAll(),
     'export-excel':          () => exportExcel(),
-    'open-import':           () => openImport(),
     'new-ticket':            () => openNewTicket(),
     'manual-refresh':        () => manualRefresh(),
     'toggle-notif':          () => toggleNotifPanel(),
@@ -793,8 +743,6 @@
     'new-contact':           () => openContactModal(),
     'save-ticket':           () => saveTicket(),
     'save-project':          () => saveProject(),
-    'trigger-file-input':    () => document.getElementById('ffile').click(),
-    'do-import':             () => doImport(),
     'save-move-proj':        () => saveMoveProj(),
     'confirm-del-proj':      () => confirmDelProj(),
     'save-contact':          () => saveContact(),
@@ -889,16 +837,6 @@
     if (key && filterChangeMap[key] && e.target.tagName === 'INPUT') filterChangeMap[key]();
   });
 
-  /* ── Import: file input + drag & drop ── */
-  const ffile = document.getElementById('ffile');
-  if (ffile) ffile.addEventListener('change', e => onFileIn(e));
-
-  const uzone = document.getElementById('uzone');
-  if (uzone) {
-    uzone.addEventListener('dragover', e => { e.preventDefault(); uzone.classList.add('drag'); });
-    uzone.addEventListener('dragleave', () => uzone.classList.remove('drag'));
-    uzone.addEventListener('drop', e => onDrop(e));
-  }
 
 })();
 </script>

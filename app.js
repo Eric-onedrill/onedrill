@@ -76,7 +76,7 @@ function tipoDash(t){return(t||'').toLowerCase().includes('main')?null:'6,4';}
 function lineWeight(t){return(t||'').toLowerCase().includes('main')?5:3;}
 
 /* ═══════════ 3. STATE ═══════════ */
-let sb,projects=[],tickets=[],parsed=[],parsedProjectTotals={},parsedProjectCoords={};
+let sb,projects=[],tickets=[];
 let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null,currentUserEmail='';
 // Escopo de acesso por estado: 'all' | 'no_fl' | 'only_fl' (vem do app_metadata do usuário)
 let userScope='all',_recoveryMode=false,_setPwMode='first';
@@ -129,15 +129,14 @@ const debouncedContacts=debounce(()=>renderContacts(),250);
    Componente: botão + popover com checkboxes. Aplica AO FECHAR (evita
    re-render a cada clique). Usado em: tabela, projetos, contatos,
    dashboard/analytics (dash) e timeline (tl). */
-const msSel={tbl:[],proj:[],contacts:[],dash:[],tl:[]};
+const msSel={tbl:[],proj:[],contacts:[],dash:[]};
 function _stMatch(sel,s){return !sel||!sel.length||sel.indexOf(s)>=0;}
 function _stMatchU(sel,s){if(typeof sel==='string')sel=sel?[sel]:[];if(!sel||!sel.length)return true;s=(s||'').toUpperCase();return sel.some(x=>(x||'').toUpperCase()===s);}
 const _msRefresh={
   tbl:()=>renderTable(),
   proj:()=>renderProjects(),
   contacts:()=>{repopulateCountyDropdown();renderContacts();},
-  dash:()=>refreshDashOrAnalytics(),
-  tl:()=>renderTimeline()
+  dash:()=>refreshDashOrAnalytics()
 };
 let _msDirty={};
 function _msLbl(key){const sel=msSel[key]||[];return !sel.length?'Todos estados':sel.length<=2?sel.map(esc).join(', '):sel.length+' estados';}
@@ -3887,198 +3886,7 @@ async function saveTicket(){
   if(savedId)setTimeout(()=>openTicketDetail(savedId),200);
 }
 
-/* ═══════════ 22. IMPORT (BATCH) ═══════════ */
-function openImport(){
-  parsed=[];parsedProjectTotals={};parsedProjectCoords={};
-  document.getElementById('prevarea').style.display='none';
-  document.getElementById('bimport').style.display='none';
-  document.getElementById('progwrap').style.display='none';
-  document.getElementById('progfill').style.width='0%';
-  document.getElementById('ffile').value='';
-  openModal('ov-import');
-}
-function onDrop(e){e.preventDefault();document.getElementById('uzone').classList.remove('drag');if(e.dataTransfer.files[0])readFile(e.dataTransfer.files[0]);}
-function onFileIn(e){if(e.target.files[0])readFile(e.target.files[0]);}
-function nk(k){return String(k||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
-
-function readFile(file){
-  const reader=new FileReader();
-  reader.onload=e=>{
-    try{
-      const wb=XLSX.read(e.target.result,{type:'binary',cellDates:true});
-      // Parse project sheet
-      if(wb.SheetNames.length>1){
-        const wsP=wb.Sheets[wb.SheetNames[1]];
-        const projRows=XLSX.utils.sheet_to_json(wsP,{header:1,defval:''});
-        for(let i=0;i<projRows.length;i++){
-          if(projRows[i].some(c=>String(c||'').toLowerCase().includes('project'))){
-            const hdr=projRows[i].map(h=>String(h||'').toLowerCase().replace(/[^a-z0-9]/g,''));
-            for(let j=i+1;j<projRows.length;j++){
-              const r=projRows[j];
-              if(!r.some(c=>c!==null&&c!==''&&c!==undefined))continue;
-              const pidIdx=hdr.findIndex(h=>h.includes('project'));
-              const ftIdx=hdr.findIndex(h=>h.includes('feet')||h.includes('total'));
-              const coordIdx=hdr.findIndex(h=>h.includes('coord')||h.includes('lat'));
-              const pid=String(r[pidIdx]||'').trim();
-              const ft=parseFloat(r[ftIdx])||0;
-              if(pid){
-                parsedProjectTotals[pid]=ft;
-                if(coordIdx>=0){const coordStr=String(r[coordIdx]||'').trim();const m=coordStr.match(/([-\d.]+)\s*,\s*([-\d.]+)/);if(m)parsedProjectCoords[pid]=[parseFloat(m[1]),parseFloat(m[2])];}
-              }
-            }
-            break;
-          }
-        }
-      }
-      const ws=wb.Sheets[wb.SheetNames[0]];
-      const allRows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      if(!allRows.length){toast('Arquivo vazio.','danger');return;}
-      let headerRowIdx=0;
-      for(let i=0;i<Math.min(5,allRows.length);i++){
-        if(allRows[i].some(c=>String(c||'').toLowerCase().replace(/\s/g,'').includes('ticket'))){headerRowIdx=i;break;}
-      }
-      const headers=allRows[headerRowIdx].map(h=>nk(h));
-      const dataRows=allRows.slice(headerRowIdx+1).filter(r=>r.some(c=>c!==null&&c!==''&&c!==undefined));
-      const ci=(...names)=>{for(const n of names){const i=headers.findIndex(h=>h&&h===n);if(i>=0)return i;}for(const n of names){const i=headers.findIndex(h=>h&&h.startsWith(n)&&h.length<=n.length+3);if(i>=0)return i;}return -1;};
-      const idx={ticket:ci('ticket'),company:ci('company'),state:ci('state'),location:ci('location'),status:ci('status'),expire:ci('expireon'),footage:ci('footage'),completedFeet:ci('completedfeet','completed','concluido','donefeet','campo'),client:ci('client'),prime:ci('prime'),job:ci('jobnumber'),tipo:ci('tipo'),address:ci('mainaddress'),project:ci('project'),pending:ci('pending'),oldTicket2:ci('oldticket'),statusOld:ci('statusold'),expireOld:ci('oldexpirationdate')};
-      const getCell=(row,i)=>{if(i<0||i>=row.length)return'';const v=row[i];if(v===null||v===undefined)return'';if(v instanceof Date)return v.toLocaleDateString('en-US');return String(v).replace(/\xa0/g,'').trim();};
-      parsed=dataRows.map(row=>{
-        const ticket=getCell(row,idx.ticket);if(!ticket)return null;
-        let rawStatus=getCell(row,idx.status);
-        if(rawStatus.includes('✅')||rawStatus.includes('⚠'))rawStatus='Open';
-        let status='Open';const sl=rawStatus.toLowerCase();
-        if(sl==='clear')status='Clear';else if(sl==='open')status='Open';
-        else if(sl==='closed'||sl==='close')status='Closed';else if(sl==='damage')status='Damage';
-        else if(sl==='cancel')status='Cancel';else if(rawStatus)status=rawStatus;
-        // Normaliza expire (formato do Excel pode vir como Date → "4/15/2026" sem zero) e expireOld
-        const expire=normalizeExpire(getCell(row,idx.expire));
-        const expireOld=normalizeExpire(getCell(row,idx.expireOld));
-        return{ticket,company:getCell(row,idx.company)||'One Drill',state:getCell(row,idx.state),location:getCell(row,idx.location),status,expire,footage:parseFloat(getCell(row,idx.footage))||0,completedFeet:parseFloat(getCell(row,idx.completedFeet))||0,client:getCell(row,idx.client),prime:getCell(row,idx.prime),job:getCell(row,idx.job),tipo:getCell(row,idx.tipo),address:getCell(row,idx.address),projectName:getCell(row,idx.project),pending:getCell(row,idx.pending),oldTicket2:getCell(row,idx.oldTicket2),statusOld:getCell(row,idx.statusOld),expireOld};
-      }).filter(Boolean);
-      if(!parsed.length){toast('Nenhuma linha válida.','danger');return;}
-      const cols=['ticket','client','prime','status','footage','tipo'];
-      document.getElementById('prevlabel').textContent=`${parsed.length} ticket(s) detectados`;
-      document.getElementById('ptbl').innerHTML='<thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>'
-        +parsed.slice(0,10).map(r=>'<tr>'+cols.map(c=>`<td>${esc(r[c]||'—')}</td>`).join('')+'</tr>').join('')
-        +(parsed.length>10?`<tr><td colspan="${cols.length}" style="color:var(--muted);text-align:center">... +${parsed.length-10} linhas</td></tr>`:'')
-        +'</tbody>';
-      document.getElementById('prevarea').style.display='block';
-      document.getElementById('bimport').style.display='';
-    }catch(err){toast('Erro: '+err.message,'danger');console.error(err);}
-  };
-  reader.readAsBinaryString(file);
-}
-
-async function doImport(){
-  if(!parsed.length)return;
-  if(!await requireAuth())return;
-  const mode=document.querySelector('input[name="importmode"]:checked')?.value||'replace';
-  // Fix bug #6: modo "Substituir tudo" é IRREVERSÍVEL — apaga todos os tickets
-  // (inclusive trajetos desenhados manualmente). Exige confirmação explícita
-  // digitando o texto exato. Se cancelar, retorna ANTES de qualquer modificação.
-  if(mode==='replace'){
-    const confirmText=prompt('⚠️ ATENÇÃO — O modo "Substituir tudo" vai APAGAR TODOS os tickets do banco (inclusive trajetos desenhados). Esta ação é IRREVERSÍVEL.\n\nDigite APAGAR TUDO (em maiúsculas) para confirmar:');
-    if(confirmText!=='APAGAR TUDO'){
-      toast('Importação cancelada — nenhum dado foi alterado.','info');
-      return;
-    }
-  }
-  const pw=document.getElementById('progwrap'),pf=document.getElementById('progfill'),pt=document.getElementById('progtxt');
-  pw.style.display='block';document.getElementById('bimport').disabled=true;setSyncStatus(true,'Importando...');
-
-  // Save projects first
-  // Fix bug #12: helper pra gerar ID de projeto de forma consistente.
-  // Antes: 'p'+projId cru deixava passar espaços, quebras de linha, aspas no id,
-  // causando colisões (dois projetos "ABC " e "ABC" geram o mesmo id 'pABC '
-  // vs match sendo feito contra 'pABC'). Normaliza nome antes de prefixar.
-  const _mkProjectId=(name)=>'p'+String(name||'').trim().replace(/\s+/g,' ');
-  for(const[projId,ft]of Object.entries(parsedProjectTotals)){
-    const pc=parsedProjectCoords[projId]||null;
-    const normalizedName=String(projId||'').trim();
-    const normalizedId=_mkProjectId(projId);
-    let p=projects.find(x=>x.name===normalizedName||x.id===normalizedId);
-    if(!p){p={id:normalizedId,name:normalizedName,client:'',state:'',status:'Active',desc:'',totalFeet:ft,centerCoords:pc,_manual:false};projects.push(p);}
-    else{if(!p.totalFeet)p.totalFeet=ft;if(!p.centerCoords)p.centerCoords=pc;}
-    await saveProjectToDb(p);
-  }
-
-  if(mode==='replace'){
-    pt.textContent='Limpando tickets antigos...';
-    await sb.from('tickets').delete().neq('id',0);
-    tickets=[];projects=projects.filter(p=>p._manual||parsedProjectTotals.has(p.id));
-  }
-
-  // ── BATCH IMPORT ──
-  const novo=[];let updated=0;
-  const batchBuffer=[];
-
-  for(let i=0;i<parsed.length;i++){
-    const r=parsed[i];
-    pf.style.width=Math.round(((i+1)/parsed.length)*100)+'%';
-    pt.textContent=`${i+1}/${parsed.length}: ${r.ticket}...`;
-
-    let pid='';
-    if(r.projectName){
-      // Fix bug #12: usa helper _mkProjectId definido acima para lookup consistente
-      const normalizedName=String(r.projectName).trim();
-      const normalizedId=_mkProjectId(r.projectName);
-      let p=projects.find(x=>x.name.toLowerCase()===normalizedName.toLowerCase()||x.id===normalizedId);
-      if(!p){
-        const tf=parsedProjectTotals[normalizedName]||0;
-        const pc=parsedProjectCoords[normalizedName]||null;
-        p={id:normalizedId,name:normalizedName,client:r.client,state:r.state,status:'Active',desc:'',_manual:false,totalFeet:tf,centerCoords:pc};
-        projects.push(p);await saveProjectToDb(p);
-      }else{
-        if(!p.totalFeet)p.totalFeet=parsedProjectTotals[normalizedName]||0;
-        if(!p.centerCoords)p.centerCoords=parsedProjectCoords[normalizedName]||null;
-      }
-      pid=p.id;
-    }
-
-    if(mode==='update'){
-      const existing=tickets.find(t=>String(t.ticket).trim()===String(r.ticket).trim());
-      if(existing){
-        const oldStatus=existing.status;
-        // Respeita locks: não sobrescreve projeto travado nem status travado
-        const newPid=existing.project_locked?existing.projectId:(pid||existing.projectId);
-        const newStatus=existing.status_locked?existing.status:r.status;
-        Object.assign(existing,{company:r.company,state:r.state,location:r.location,status:newStatus,expire:r.expire,footage:r.footage,completedFeet:r.completedFeet||existing.completedFeet||0,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,projectId:newPid});
-        existing.history=existing.history||[];// Fix audit: garante array antes de push
-      if(oldStatus!==newStatus)existing.history.push({ts:Date.now(),action:`Status: ${oldStatus} → ${newStatus}`,color:scol(newStatus)});
-        existing.history.push({ts:Date.now(),action:'Atualizado via Excel ✅'+(existing.project_locked?' (projeto travado 🔒)':''),color:'#16a34a'});
-        batchBuffer.push(existing);
-        updated++;
-        // Flush batch
-        if(batchBuffer.length>=BATCH_SIZE){
-          await saveTicketBatch(batchBuffer);
-          batchBuffer.length=0;
-        }
-        continue;
-      }
-    }
-
-    const t={id:null,ticket:r.ticket,projectId:pid,company:r.company||'One Drill',state:r.state,location:r.location,status:r.status,expire:r.expire,footage:r.footage,completedFeet:r.completedFeet||0,client:r.client,prime:r.prime,job:r.job,tipo:r.tipo,address:r.address,pending:r.pending,oldTicket2:r.oldTicket2,statusOld:r.statusOld,expireOld:r.expireOld,notes:'',fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Importado via Excel',color:'#1a6cf0'}],attachments:[],status_locked:false,project_locked:false};
-    tickets.push(t);
-    batchBuffer.push(t);
-    novo.push(t);
-    // Flush batch
-    if(batchBuffer.length>=BATCH_SIZE){
-      pt.textContent=`Salvando batch... (${i+1}/${parsed.length})`;
-      await saveTicketBatch(batchBuffer);
-      batchBuffer.length=0;
-    }
-  }
-  // Flush remaining
-  if(batchBuffer.length){
-    pt.textContent='Salvando últimos tickets...';
-    await saveTicketBatch(batchBuffer);
-  }
-
-  document.getElementById('bimport').disabled=false;
-  closeModal('ov-import');syncAll();setSyncStatus(true,'Sincronizado ✓');
-  if(mode==='update')toast(`✅ ${updated} atualizados · ${novo.length} novos`,'success');
-  else toast(`${novo.length} tickets importados`,'success');
-}
+/* seção 22 (IMPORT em massa de Excel) removida — feature descontinuada */
 
 /* ═══════════ 23. EXPORT ═══════════ */
 function exportProjectReport(pid){
@@ -6246,119 +6054,7 @@ function syncLocations(){
   const el=document.getElementById('floc');
   if(el){const pv=el.value;el.innerHTML='<option value="">Todos locais</option>'+locs.map(l=>`<option>${esc(l)}</option>`).join('');if(pv)el.value=pv;}
 }
-/* ═══════════ TIMELINE / DIG WINDOW ═══════════ */
-function renderTimeline(){
-  const el=document.getElementById('timeline-content');if(!el)return;
-  const now=new Date();
-  const active=tickets.filter(t=>{
-    const s=(t.status||'').toLowerCase();
-    return s==='open'||s==='damage'||s==='clear';
-  });
-  const withExpire=active.map(t=>{
-    const ed=t.expire?_eod(t.expire):null;
-    return{t,ed};
-  }).filter(x=>x.ed&&!isNaN(x.ed.getTime())).sort((a,b)=>a.ed-b.ed);
-
-  if(!withExpire.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Nenhum ticket com data de vencimento</div>';return;}
-
-  // Range: 14 days back → 45 days ahead
-  const rangeStart=new Date(now);rangeStart.setDate(rangeStart.getDate()-14);
-  const rangeEnd=new Date(now);rangeEnd.setDate(rangeEnd.getDate()+45);
-  const totalDays=Math.round((rangeEnd-rangeStart)/(86400000));
-
-  // Stats
-  const expired=withExpire.filter(x=>x.ed<now).length;
-  const soon7=withExpire.filter(x=>{const d=(x.ed-now)/86400000;return d>=0&&d<=7;}).length;
-  const soon14=withExpire.filter(x=>{const d=(x.ed-now)/86400000;return d>7&&d<=14;}).length;
-
-  // Filters
-  const stateOpts=[...new Set(withExpire.map(x=>x.t.state).filter(Boolean))].sort();
-  const projOpts=[...new Set(withExpire.map(x=>x.t.projectId).filter(Boolean))].map(pid=>{const p=projects.find(x=>x.id===pid);return p?{id:pid,name:p.name}:null;}).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name));
-
-  let h='<div style="margin-bottom:16px">';
-  h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
-  h+='<h2 style="margin:0;font-size:18px;font-weight:700">📅 Timeline — Dig Window</h2>';
-  h+=msBox('tl',stateOpts);
-  h+='<select class="fi" id="tl-proj" onchange="renderTimeline()" style="width:auto;min-width:140px;font-size:12px;padding:4px 8px"><option value="">Todos projetos</option>'+projOpts.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('')+'</select>';
-  h+='<select class="fi" id="tl-status" onchange="renderTimeline()" style="width:auto;font-size:12px;padding:4px 8px"><option value="">Todos status</option><option>Open</option><option>Clear</option><option>Damage</option></select>';
-  h+='</div>';
-
-  // Stat pills
-  h+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">';
-  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#fef2f2;color:#dc2626;border:1px solid #fecaca">⛔ '+expired+' vencido'+(expired!==1?'s':'')+'</span>';
-  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#fffbeb;color:#d97706;border:1px solid #fde68a">⚠ '+soon7+' em 7d</span>';
-  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe">📋 '+soon14+' em 14d</span>';
-  h+='<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0">✅ '+(withExpire.length-expired-soon7-soon14)+' ok</span>';
-  h+='</div></div>';
-
-  // Get active filters (preserve across re-renders)
-  const curState=msSel.tl;
-  const curProj=document.getElementById('tl-proj')?.value||'';
-  const curStatus=document.getElementById('tl-status')?.value||'';
-
-  let filtered=withExpire;
-  if(curState.length)filtered=filtered.filter(x=>_stMatch(curState,x.t.state));
-  if(curProj)filtered=filtered.filter(x=>x.t.projectId===curProj);
-  if(curStatus)filtered=filtered.filter(x=>effectiveStatus(x.t)===curStatus);
-
-  // Date headers
-  h+='<div style="position:relative;overflow-x:auto;padding-bottom:12px">';
-  h+='<div style="display:flex;align-items:center;height:24px;border-bottom:1px solid var(--border);margin-left:200px;position:relative;min-width:'+(totalDays*24)+'px">';
-  for(let i=0;i<=totalDays;i+=7){
-    const d=new Date(rangeStart);d.setDate(d.getDate()+i);
-    const isToday=d.toDateString()===now.toDateString();
-    const leftPx=Math.round((i/totalDays)*totalDays*24);
-    h+='<span style="position:absolute;left:'+leftPx+'px;font-size:9px;font-family:var(--mono);color:'+(isToday?'var(--red)':'var(--muted)')+'">'+d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+'</span>';
-  }
-  h+='</div>';
-
-  // Today line position
-  const todayPct=Math.max(0,Math.min(100,((now-rangeStart)/(rangeEnd-rangeStart))*100));
-
-  // Bars
-  const maxRows=Math.min(filtered.length,150);
-  for(let i=0;i<maxRows;i++){
-    const{t:tk,ed}=filtered[i];
-    const es=effectiveStatus(tk);
-    const daysLeft=Math.round((ed-now)/86400000);
-    const isExp=ed<now;
-    const proj=projects.find(p=>p.id===tk.projectId);
-
-    // Bar position
-    const barEnd=Math.max(0,Math.min(100,((ed-rangeStart)/(rangeEnd-rangeStart))*100));
-    const barStart=Math.max(0,barEnd-8);// Approximate 8% width per ticket
-    const barW=Math.max(2,barEnd-barStart);
-
-    const bc=isExp?'#dc2626':es==='Clear'?'#16a34a':es==='Damage'?'#C9C6BD':'#2563eb';
-    const bgc=isExp?'#fef2f2':es==='Clear'?'#f0fdf4':es==='Damage'?'#fffbeb':'#eff6ff';
-
-    h+='<div style="display:flex;align-items:center;height:26px;border-bottom:1px solid var(--border)" onclick="openTicketDetail('+tk.id+')" title="'+esc(tk.ticket)+' — '+esc(es)+' — vence '+esc(tk.expire||'?')+'" class="tl-row">';
-    // Label
-    h+='<div style="width:200px;min-width:200px;padding:0 8px;display:flex;align-items:center;gap:6px;overflow:hidden">';
-    h+='<span style="font-family:var(--mono);font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+bc+'">'+esc(tk.ticket)+'</span>';
-    h+='<span style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(proj?proj.name:tk.client)+'</span>';
-    h+='</div>';
-    // Bar area
-    h+='<div style="flex:1;position:relative;height:100%;min-width:'+(totalDays*24)+'px">';
-    h+='<div style="position:absolute;left:'+barStart+'%;width:'+barW+'%;top:4px;height:18px;background:'+bc+';border-radius:3px;opacity:0.85"></div>';
-    // Expire label on bar
-    h+='<span style="position:absolute;left:'+(barEnd+0.5)+'%;top:5px;font-size:9px;font-family:var(--mono);color:var(--text2);white-space:nowrap">'+(isExp?'⛔ '+Math.abs(daysLeft)+'d atrás':(daysLeft<=7?'⚠ '+daysLeft+'d':daysLeft+'d'))+'</span>';
-    h+='</div>';
-    h+='</div>';
-  }
-
-  if(filtered.length>maxRows)h+='<div style="text-align:center;padding:8px;color:var(--muted);font-size:11px">... +'+(filtered.length-maxRows)+' tickets</div>';
-
-  // Today vertical line (overlay)
-  h+='<div style="position:absolute;top:0;bottom:0;left:calc(200px + '+todayPct+'%);width:2px;background:var(--red);opacity:0.5;pointer-events:none;z-index:1"></div>';
-  h+='</div>';
-
-  el.innerHTML=h;
-
-  // Restore filter values after innerHTML
-  const tlP=document.getElementById('tl-proj');if(tlP&&curProj)tlP.value=curProj;
-  const tlSt=document.getElementById('tl-status');if(tlSt&&curStatus)tlSt.value=curStatus;
-}
+/* seção TIMELINE removida — dead code (página não navegável) */
 
 function syncAll(){
   rebuildSupersededSet();syncProjectSelects();syncPrimes();syncLocations();updateCompletedSidebar();

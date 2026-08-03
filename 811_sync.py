@@ -180,6 +180,11 @@ NUM_TABS           = 5        # 5 abas paralelas (reduzir nao ajuda, aumentar de
 CLEAR_CACHE_HOURS  = 24       # re-verifica Clear tickets 1x por dia
 MAX_AUTO_NOTES     = 10       # máximo de notas automáticas por ticket
 BATCH_SIZE         = 200      # tamanho do lote para bulk upsert
+
+# Avisos por e-mail DESLIGADOS a pedido do Eric (2026-08-03): os alertas diarios
+# nao estavam sendo utilizados. Toda a logica (streaks, flags, logs) continua;
+# so o ENVIO de e-mail de alerta fica suspenso. Trocar para True reativa tudo.
+SEND_ALERT_EMAILS  = False
 MAX_IMPORT_PAGES   = 5        # com 100/pagina, 5 paginas = 500 tickets
 LOCK_FILE          = os.path.join(BASE_DIR, "811_sync.lock")
 TIMEOUT_PAGE       = 60000    # Playwright default timeout (ms)
@@ -2356,6 +2361,9 @@ def save_unrecognized_responses(items):
 
 
 def send_unrecognized_alert(state, items):
+    if not SEND_ALERT_EMAILS:
+        return False
+
     """Envia email com resumo de respostas não reconhecidas."""
     import smtplib
     from email.mime.text import MIMEText
@@ -2403,6 +2411,9 @@ LOCKED_RENEWED_MARKER = "[ALERTA] travado+renovado"
 
 
 def send_locked_renewed_alert(state, items):
+    if not SEND_ALERT_EMAILS:
+        return False
+
     """Email avisando tickets TRAVADOS (status_locked) que foram renovados —
     sinal de que o operador esqueceu de destravar antes de renovar.
     Retorna True se enviou (pra só então marcar no history e não reenviar)."""
@@ -2521,6 +2532,9 @@ def _touch_session_flag(state):
 
 
 def send_session_expired_alert(state):
+    if not SEND_ALERT_EMAILS:
+        return False
+
     """Email avisando que a sessão do portal {state} expirou — precisa login manual.
     Dedup: não reenvia nas próximas 24h por estado. Retorna True se mandou."""
     import smtplib
@@ -2580,6 +2594,9 @@ _SCRAPE_FAIL_THRESHOLD = 3  # runs consecutivos sem ler NENHUMA resposta = alert
 
 
 def send_scrape_failure_alert(state, chronic):
+    if not SEND_ALERT_EMAILS:
+        return False
+
     """Email listando tickets que falham o scrape ha varios runs seguidos."""
     import smtplib
     from email.mime.text import MIMEText

@@ -124,6 +124,48 @@ const debouncedRedraw=debounce(()=>redrawAll(),250);
 const debouncedTable=debounce(()=>renderTable(),250);
 const debouncedContacts=debounce(()=>renderContacts(),250);
 
+/* ── Multi-seleção de ESTADO nos filtros ─────────────────────────────
+   msSel[key] = array de estados marcados; [] = "todos".
+   Componente: botão + popover com checkboxes. Aplica AO FECHAR (evita
+   re-render a cada clique). Usado em: tabela, projetos, contatos,
+   dashboard/analytics (dash) e timeline (tl). */
+const msSel={tbl:[],proj:[],contacts:[],dash:[],tl:[]};
+function _stMatch(sel,s){return !sel||!sel.length||sel.indexOf(s)>=0;}
+function _stMatchU(sel,s){if(typeof sel==='string')sel=sel?[sel]:[];if(!sel||!sel.length)return true;s=(s||'').toUpperCase();return sel.some(x=>(x||'').toUpperCase()===s);}
+const _msRefresh={
+  tbl:()=>renderTable(),
+  proj:()=>renderProjects(),
+  contacts:()=>{repopulateCountyDropdown();renderContacts();},
+  dash:()=>refreshDashOrAnalytics(),
+  tl:()=>renderTimeline()
+};
+let _msDirty={};
+function _msLbl(key){const sel=msSel[key]||[];return !sel.length?'Todos estados':sel.length<=2?sel.map(esc).join(', '):sel.length+' estados';}
+function msBox(key,states,allLabel){
+  const sel=msSel[key]||(msSel[key]=[]);
+  const opts=(states&&states.length)?states:['FL','IN','IL','WI'];
+  const rows=opts.map(s=>'<label class="ms-opt"><input type="checkbox" value="'+esc(s)+'" '+(sel.indexOf(s)>=0?'checked':'')+' onchange="msToggle(\''+key+'\',\''+esc(s)+'\',this.checked)">'+esc(s)+'</label>').join('');
+  return '<span class="ms" id="ms-'+key+'">'
+    +'<button type="button" class="fi ms-btn" onclick="msPop(\''+key+'\',event)">'+esc(_msLbl(key)||allLabel||'Todos estados')+' <span class="ms-cx">▾</span></button>'
+    +'<span class="ms-pop" id="ms-pop-'+key+'" hidden>'
+    +'<label class="ms-opt ms-all" onclick="msClear(\''+key+'\');return false;">✳ Todos estados</label>'
+    +rows
+    +'</span></span>';
+}
+function _msSyncLabel(key){const b=document.querySelector('#ms-'+key+' .ms-btn');if(b)b.innerHTML=esc(_msLbl(key))+' <span class="ms-cx">▾</span>';}
+function msToggle(key,s,on){const a=msSel[key]||(msSel[key]=[]);const i=a.indexOf(s);if(on){if(i<0)a.push(s);}else{if(i>=0)a.splice(i,1);}_msDirty[key]=true;_msSyncLabel(key);}
+function msClear(key){msSel[key]=[];_msDirty[key]=true;_msSyncLabel(key);const p=document.getElementById('ms-pop-'+key);if(p)p.querySelectorAll('input[type=checkbox]').forEach(c=>{c.checked=false;});}
+function _msClose(key){const p=document.getElementById('ms-pop-'+key);if(p)p.hidden=true;if(_msDirty[key]){_msDirty[key]=false;(_msRefresh[key]||function(){})();}}
+function msPop(key,ev){if(ev)ev.stopPropagation();const p=document.getElementById('ms-pop-'+key);if(!p)return;
+  if(p.hidden){
+    document.querySelectorAll('.ms-pop').forEach(x=>{if(!x.hidden)_msClose(x.id.replace('ms-pop-',''));});
+    const btn=document.querySelector('#ms-'+key+' .ms-btn');
+    if(btn){const r=btn.getBoundingClientRect();p.style.left=Math.max(4,Math.min(r.left,(window.innerWidth||360)-150))+'px';p.style.top=(r.bottom+4)+'px';}
+    p.hidden=false;
+  }else _msClose(key);
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.ms')){document.querySelectorAll('.ms-pop').forEach(x=>{if(!x.hidden)_msClose(x.id.replace('ms-pop-',''));});}});
+
 /* ═══════════ 4. SUPERSEDED SET ═══════════ */
 function rebuildSupersededSet(){
   supersededSet=new Set();
@@ -213,8 +255,11 @@ function filterTickets(opts={}){
     // Prime
     if(prime && t.prime!==prime) return false;
 
-    // Estado
-    if(state && t.state!==state) return false;
+    // Estado (aceita string OU array de estados; array vazio = todos)
+    if(state){
+      if(Array.isArray(state)){ if(state.length && state.indexOf(t.state)<0) return false; }
+      else if(t.state!==state) return false;
+    }
 
     // Busca textual
     // Fix bug #7: (t.ticket||'') pra evitar crash se ticket vier null/undefined do banco.
@@ -919,10 +964,10 @@ async function loadUtilCoverage(){
 // Lê counties únicos da tabela utility_county_coverage filtrados pelo state.
 // Se _contactsPreselectCounty tá setado (usuário veio de um ticket), pré-seleciona.
 function repopulateCountyDropdown(){
-  const stateSel=document.getElementById('contacts-state-filter');
   const countySel=document.getElementById('contacts-county-filter');
-  if(!stateSel||!countySel)return;
-  const st=stateSel.value||'';
+  if(!countySel)return;
+  // County só faz sentido com EXATAMENTE 1 estado marcado; senão desabilita.
+  const st=(msSel.contacts.length===1)?msSel.contacts[0]:'';
   if(!st){
     // Sem state → county desabilitado
     countySel.innerHTML='<option value="">Todos counties</option>';
@@ -948,20 +993,28 @@ function repopulateCountyDropdown(){
 
 function renderContacts(){
   const grid=document.getElementById('contacts-grid');if(!grid)return;
+  const _slc=document.getElementById('ms-contacts-slot');
+  if(_slc){
+    const _cst=[...new Set(utilContacts.map(c=>c.state).filter(Boolean))];
+    const _op=['FL','IN','IL','WI'].filter(s=>_cst.includes(s));
+    const _ordered=_op.concat(_cst.filter(s=>!_op.includes(s)).sort());
+    _slc.innerHTML=msBox('contacts',_ordered);
+  }
   const sr=(document.getElementById('contacts-search')?.value||'').toLowerCase();
-  const sf=document.getElementById('contacts-state-filter')?.value||'';
+  const sfArr=msSel.contacts;
+  const only=(sfArr.length===1)?sfArr[0]:'';
   const cf=document.getElementById('contacts-county-filter')?.value||'';
-  // Se county foi selecionado, calcula set de utility_names que atendem esse county (daquele state)
+  // Se county foi selecionado (só com 1 estado), calcula set de utility_names que atendem esse county
   let allowedUtilities=null;
-  if(cf&&sf){
+  if(cf&&only){
     allowedUtilities=new Set(
       utilCoverage
-        .filter(c=>c.state===sf&&c.county===cf)
+        .filter(c=>c.state===only&&c.county===cf)
         .map(c=>(c.utility_name||'').toUpperCase())
     );
   }
   let f=utilContacts.filter(c=>{
-    if(sf&&(c.state||'')!==sf)return false;
+    if(!_stMatch(sfArr,c.state))return false;
     if(sr&&!(c.utility_name||'').toLowerCase().includes(sr)&&!(c.phone_main||'').includes(sr))return false;
     if(allowedUtilities&&!allowedUtilities.has((c.utility_name||'').toUpperCase()))return false;
     return true;
@@ -1294,9 +1347,8 @@ function nav(page){
 function gotoContactsForCounty(county,state){
   if(!county||!state)return;
   closeModal('ov-detail');
-  // Seta state primeiro, daí county é pré-selecionado automaticamente pelo repopulate
-  const stateSel=document.getElementById('contacts-state-filter');
-  if(stateSel)stateSel.value=state;
+  // Seta state primeiro (multi = só esse), daí county é pré-selecionado pelo repopulate
+  msSel.contacts=[state];
   _contactsPreselectCounty=county;
   nav('contacts');
   // repopulate é chamado pelo listener de change do state, mas como setamos programaticamente,
@@ -1729,7 +1781,7 @@ function _getFilteredListForNav(){
     const sf=document.getElementById('tbl-status')?.value||'';
     const pf=document.getElementById('tbl-proj')?.value||'';
     const sr=(document.getElementById('tbl-search')?.value||'').toLowerCase();
-    const stf=document.getElementById('tbl-state')?.value||'';
+    const stf=msSel.tbl;
     const prf=document.getElementById('tbl-prime')?.value||'';
     const utf=document.getElementById('tbl-util')?.value||'';
     return filterTickets({status:sf,projectId:pf,search:sr,state:stf,prime:prf,utility:utf});
@@ -2959,9 +3011,10 @@ function riskLabel(s){
 }
 
 function renderTable(){
+  const _sl=document.getElementById('ms-tbl-slot');if(_sl)_sl.innerHTML=msBox('tbl',['FL','IN','IL','WI']);
   const sr=(document.getElementById('tbl-srch').value||'').toLowerCase();
   const st=document.getElementById('tbl-stat').value;
-  const sta=document.getElementById('tbl-state')?.value||'';
+  const sta=msSel.tbl;
   const pr=document.getElementById('tbl-proj').value;
   const pm=document.getElementById('tbl-prime')?.value||'';
   const ut=document.getElementById('tbl-util')?.value||'';
@@ -3028,8 +3081,7 @@ function refreshDashOrAnalytics(){
 
 function renderDash(){
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
-  const dsf=dashStateVal;
-  const fTickets=filterTickets({state:dsf});
+  const fTickets=filterTickets({state:msSel.dash});
   const now=Date.now();const week=7*86400000;
 
   const total=fTickets.length;
@@ -3068,7 +3120,7 @@ function renderDash(){
     return'<span style="font-size:10px;font-weight:700;color:'+c+'">'+(up?'▲':'▼')+Math.abs(d)+' vs semana passada</span>';
   }
 
-  const sf='<select class="fi" onchange="dashStateVal=this.value;renderDash()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+esc(s)+'"'+(dsf===s?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select>';
+  const sf=msBox('dash',states);
 
   const el=document.getElementById('dash-content');if(!el)return;
 
@@ -3187,15 +3239,9 @@ function projDropLabel(p){
 
 function renderProjects(){
   const g=document.getElementById('proj-grid');if(!g)return;
-  const stateFilter=document.getElementById('proj-state-filter');
-  if(stateFilter){
-    const states=[...new Set(projects.map(p=>p.state).filter(Boolean))].sort();
-    const prev=stateFilter.value;
-    stateFilter.innerHTML='<option value="">Todos estados</option>'+states.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-    if(prev)stateFilter.value=prev;
-  }
-  const sf=stateFilter?.value||'';
-  const filteredProjects=sf?projects.filter(p=>p.state===sf):projects;
+  const _slp=document.getElementById('ms-proj-slot');
+  if(_slp)_slp.innerHTML=msBox('proj',[...new Set(projects.map(p=>p.state).filter(Boolean))].sort());
+  const filteredProjects=projects.filter(p=>_stMatch(msSel.proj,p.state));
   if(!filteredProjects.length){g.innerHTML='<div style="color:var(--muted);font-size:13px">Nenhum projeto.</div>';return;}
   const active=filteredProjects.filter(p=>p.status!=='Completed');
   const completed=filteredProjects.filter(p=>p.status==='Completed');
@@ -3445,11 +3491,13 @@ async function saveMoveProj(){
 }
 
 async function shareProject(pid){
-  if(!isAdmin){toast('Apenas o admin pode compartilhar projetos.','warn');return;}
   const p=projects.find(x=>x.id===pid);if(!p)return;
-  // Marca o projeto como compartilhado → sob RLS, o anon (link público) lê projeto shared=true.
-  try{ const{error}=await sb.from('projects').update({shared:true}).eq('id',pid); if(error)console.warn('[share] flag',error.message); else p.shared=true; }
-  catch(e){ console.warn('[share] flag',e); }
+  // Compartilhar liberado a TODOS os acessos: usa a função share_project (SECURITY DEFINER),
+  // que deixa qualquer usuário logado marcar como compartilhado um projeto que ele enxerga,
+  // sem precisar de acesso de edição. (Antes de rodar o SQL do RLS a função ainda não existe;
+  // o erro é ignorado e o link funciona igual, pois sem RLS o anon lê tudo.)
+  try{ const{error}=await sb.rpc('share_project',{pid:pid}); if(error)console.warn('[share]',error.message); else p.shared=true; }
+  catch(e){ console.warn('[share]',e); }
   const url=window.location.origin+window.location.pathname+'?p='+encodeURIComponent(p.id);
   if(navigator.clipboard){
     navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Quem tiver o link verá este projeto.','success')).catch(()=>{prompt('Copie o link:',url);});
@@ -4073,13 +4121,13 @@ function exportProjectReport(pid){
 // Exclui vencidos próprios e supersedidos. Footage = total − completed.
 function exportClearReport(){
   if(typeof XLSX==='undefined'){toast('XLSX não carregado','danger');return;}
-  // Respeita o filtro de estado da tela de Projetos (se selecionado)
-  const stateFilterEl=document.getElementById('proj-state-filter');
-  const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
+  // Respeita o filtro de estado da tela de Projetos (multi; vazio = todos)
+  const stateFilter=msSel.proj;
+  const stateTag=stateFilter.length?stateFilter.join('-'):'';
   const now=new Date();
   const rows=[];
   for(const t of tickets){
-    if(stateFilter&&(t.state||'').toUpperCase()!==stateFilter)continue;
+    if(!_stMatchU(stateFilter,t.state))continue;
     if(isSuperseded(t))continue;
     // Próprio expire vencido → exclui (a menos que esteja em carência ativa)
     const renewed=isRenewed(t);
@@ -4176,9 +4224,9 @@ function exportClearReport(){
   XLSX.utils.book_append_sheet(wb,ws,'Tickets Clear');
   const ts=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+
            '_'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0');
-  const suffix=stateFilter?'_'+stateFilter:'';
+  const suffix=stateTag?'_'+stateTag:'';
   XLSX.writeFile(wb,`OneDrill_Clear_pra_Trabalhar${suffix}_${ts}.xlsx`);
-  const filtTag=stateFilter?` (${stateFilter})`:'';
+  const filtTag=stateTag?` (${stateTag})`:'';
   toast(`${rows.length} tickets · ${totalFt.toLocaleString()} ft exportados${filtTag}`,'success');
 }
 
@@ -4267,7 +4315,7 @@ function _utilContactsFor(utilityName, state){
 function _collectPendingRows(stateFilter){
   const out=[];
   for(const t of tickets){
-    if(stateFilter&&(t.state||'').toUpperCase()!==stateFilter)continue;
+    if(!_stMatchU(stateFilter,t.state))continue;
     if(isSuperseded(t))continue;
     if(effectiveStatus(t)!=='Open')continue;   // só os efetivamente EM ABERTO
     const pend=getTicketPendingUtils(String(t.ticket||'').trim(),t);
@@ -4309,12 +4357,11 @@ function _prStat(n,lbl,color){
 async function openPendingReport(){
   if(!utilCacheLoaded){try{await loadUtilCache();}catch(e){}}
   if(!utilContacts||!utilContacts.length){try{await loadContacts();}catch(e){}}
-  const stateFilterEl=document.getElementById('proj-state-filter');
-  const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
+  const stateFilter=msSel.proj;
   const rows=_collectPendingRows(stateFilter);
   const totalTickets=rows.length;
   const actionTickets=rows.filter(r=>r.actionCount>0).length;
-  const filtTag=stateFilter?' · '+stateFilter:'';
+  const filtTag=stateFilter.length?' · '+stateFilter.join(', '):'';
 
   let ov=document.getElementById('ov-pending-report');
   if(!ov){
@@ -4333,7 +4380,7 @@ async function openPendingReport(){
     +'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">🔴 Toda utility que <b>não está Clear</b> é pendência <b>pra ligar</b>. O rótulo indica o motivo (sem resposta, tardia, não marcado, sem acesso…).</div>';
 
   if(!rows.length){
-    html+='<div style="color:var(--muted);font-size:13px;text-align:center;padding:30px">Nenhum ticket em aberto'+(stateFilter?' em '+stateFilter:'')+'. 🎉</div>';
+    html+='<div style="color:var(--muted);font-size:13px;text-align:center;padding:30px">Nenhum ticket em aberto'+(stateFilter.length?' em '+stateFilter.join(', '):'')+'. 🎉</div>';
   }else{
     let curState='',curProj='';
     for(const r of rows){
@@ -4364,8 +4411,7 @@ async function openPendingReport(){
 
 function exportPendingReport(){
   if(typeof XLSX==='undefined'){toast('XLSX não carregado','danger');return;}
-  const stateFilterEl=document.getElementById('proj-state-filter');
-  const stateFilter=(stateFilterEl?.value||'').trim().toUpperCase();
+  const stateFilter=msSel.proj;
   const rows=_collectPendingRows(stateFilter);
   const wb=XLSX.utils.book_new();
   const headers=['Estado','Projeto','Ticket','Expira','Footage','Utility','Resposta','Respondido em','Pendência','Ação?','Telefone(s)','Email'];
@@ -4409,14 +4455,13 @@ function exportPendingReport(){
   const now=new Date();
   const ts=now.getFullYear()+String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+
            '_'+String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0');
-  const suffix=stateFilter?'_'+stateFilter:'';
+  const suffix=stateFilter.length?'_'+stateFilter.join('-'):'';
   XLSX.writeFile(wb,`OneDrill_Pendencias${suffix}_${ts}.xlsx`);
   toast(`${rows.length} tickets em aberto · ${nAcao} utilities p/ ligar`,'success');
 }
 
 function showNoProjModal(){
-  const dsf=typeof dashStateVal!=='undefined'?dashStateVal:'';
-  const fT=filterTickets({state:dsf});
+  const fT=filterTickets({state:msSel.dash});
   const list=fT.filter(t=>!t.projectId&&t.status!=='Cancel'&&t.status!=='Closed')
     .sort((a,b)=>(a.expire||'').localeCompare(b.expire||''));
   let ov=document.getElementById('ov-no-proj');
@@ -4482,7 +4527,7 @@ function exportExpiring(){
 function exportFiltered(){
   const sr=(document.getElementById('tbl-srch')?.value||'').toLowerCase();
   const st=document.getElementById('tbl-stat')?.value||'';
-  const sta=document.getElementById('tbl-state')?.value||'';
+  const sta=msSel.tbl;
   const pr=document.getElementById('tbl-proj')?.value||'';
   const pm=document.getElementById('tbl-prime')?.value||'';
   const ut=document.getElementById('tbl-util')?.value||'';
@@ -5059,7 +5104,7 @@ function toggleInfoPanel(){
   document.getElementById('notif-panel')?.classList.remove('open');
   const open=panel.classList.toggle('open');
   if(open){
-    const fTickets=dashStateVal?tickets.filter(t=>t.state===dashStateVal&&!isSuperseded(t)):tickets.filter(t=>!isSuperseded(t));
+    const fTickets=tickets.filter(t=>!isSuperseded(t)&&_stMatch(msSel.dash,t.state));
     const recent=[...fTickets].sort((a,b)=>(b.history?.[b.history.length-1]?.ts||0)-(a.history?.[a.history.length-1]?.ts||0)).slice(0,10);
     let h='<div class="notif-section">📋 Atividade recente</div>';
     for(const t of recent){
@@ -5113,16 +5158,15 @@ function renderWeeklyProduction(fTickets){
 function renderAnalytics(){
   const el=document.getElementById('analytics-content');if(!el)return;
   const states=[...new Set(tickets.map(t=>t.state).filter(Boolean))].sort();
-  const dsf=dashStateVal;
   const scope=_analyticsScope||'all';
-  const sf='<select class="fi" onchange="dashStateVal=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px"><option value="">Todos estados</option>'+states.map(s=>'<option value="'+esc(s)+'"'+(dsf===s?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select>';
+  const sf=msBox('dash',states);
   const scopeSel='<select class="fi" onchange="_analyticsScope=this.value;renderAnalytics()" style="width:auto;min-width:120px;font-size:12px;padding:5px 8px">'
     +'<option value="all"'+(scope==='all'?' selected':'')+'>📊 Todos projetos</option>'
     +'<option value="active"'+(scope==='active'?' selected':'')+'>🟢 Só ativos</option>'
     +'<option value="completed"'+(scope==='completed'?' selected':'')+'>📁 Só concluídos</option>'
     +'</select>';
-  const fT=filterTickets({state:dsf,excludeCompleted:false});
-  const allProjs=dsf?projects.filter(p=>p.state===dsf):projects;
+  const fT=filterTickets({state:msSel.dash,excludeCompleted:false});
+  const allProjs=projects.filter(p=>_stMatch(msSel.dash,p.state));
   const fP=scope==='active'?allProjs.filter(p=>p.status!=='Completed'):scope==='completed'?allProjs.filter(p=>p.status==='Completed'):allProjs;
   const now=Date.now();const week=7*86400000;
   const ps=fP.map(p=>{
@@ -5916,7 +5960,7 @@ function renderNoShowReleasedAlert(fTickets){
 function renderWeeklyEvolution(fTickets){
   try{
     const now=Date.now(),week=7*864e5;
-    const allF=dashStateVal?tickets.filter(t=>t.state===dashStateVal):tickets;
+    const allF=tickets.filter(t=>_stMatch(msSel.dash,t.state));
     function countInRange(start,end,matchFn){return allF.filter(t=>(t.history||[]).some(h=>h.ts>=start&&h.ts<end&&matchFn(h))).length;}
     function isClear(h){const a=(h.action||'').toLowerCase();return(a.includes('auto 811')&&!a.includes('revertido')&&!a.includes('cancelado'))||a.includes('auto-clear')||(a.includes('status manual')&&a.includes('→ clear'));}
     function isOpen(h){const a=(h.action||'').toLowerCase();return a.includes('importado')||a.includes('ticket criado')||(a.includes('→ open')&&!a.includes('auto'));}
@@ -6212,7 +6256,7 @@ function renderTimeline(){
   let h='<div style="margin-bottom:16px">';
   h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
   h+='<h2 style="margin:0;font-size:18px;font-weight:700">📅 Timeline — Dig Window</h2>';
-  h+='<select class="fi" id="tl-state" onchange="renderTimeline()" style="width:auto;min-width:100px;font-size:12px;padding:4px 8px"><option value="">Todos estados</option>'+stateOpts.map(s=>'<option>'+esc(s)+'</option>').join('')+'</select>';
+  h+=msBox('tl',stateOpts);
   h+='<select class="fi" id="tl-proj" onchange="renderTimeline()" style="width:auto;min-width:140px;font-size:12px;padding:4px 8px"><option value="">Todos projetos</option>'+projOpts.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('')+'</select>';
   h+='<select class="fi" id="tl-status" onchange="renderTimeline()" style="width:auto;font-size:12px;padding:4px 8px"><option value="">Todos status</option><option>Open</option><option>Clear</option><option>Damage</option></select>';
   h+='</div>';
@@ -6226,12 +6270,12 @@ function renderTimeline(){
   h+='</div></div>';
 
   // Get active filters (preserve across re-renders)
-  const curState=document.getElementById('tl-state')?.value||'';
+  const curState=msSel.tl;
   const curProj=document.getElementById('tl-proj')?.value||'';
   const curStatus=document.getElementById('tl-status')?.value||'';
 
   let filtered=withExpire;
-  if(curState)filtered=filtered.filter(x=>x.t.state===curState);
+  if(curState.length)filtered=filtered.filter(x=>_stMatch(curState,x.t.state));
   if(curProj)filtered=filtered.filter(x=>x.t.projectId===curProj);
   if(curStatus)filtered=filtered.filter(x=>effectiveStatus(x.t)===curStatus);
 
@@ -6290,7 +6334,6 @@ function renderTimeline(){
   el.innerHTML=h;
 
   // Restore filter values after innerHTML
-  const tlS=document.getElementById('tl-state');if(tlS&&curState)tlS.value=curState;
   const tlP=document.getElementById('tl-proj');if(tlP&&curProj)tlP.value=curProj;
   const tlSt=document.getElementById('tl-status');if(tlSt&&curStatus)tlSt.value=curStatus;
 }

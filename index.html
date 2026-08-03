@@ -217,9 +217,7 @@
         <div class="proj-header">
           <div class="page-title">Projetos</div>
           <div class="proj-header-actions">
-            <select class="fi fi--min-120" id="proj-state-filter" data-filter="proj-state">
-              <option value="">Todos estados</option>
-            </select>
+            <span id="ms-proj-slot"></span>
             <button class="btn btn-primary hidden" id="btn-new-proj" data-action="new-project">+ Projeto</button>
           </div>
         </div>
@@ -334,13 +332,7 @@
           <option>Cancel</option>
           <option value="Sem Trajeto">Sem Trajeto</option>
         </select>
-        <select class="fi fi--max-120" id="tbl-state" data-filter="tbl-state">
-          <option value="">Todos estados</option>
-          <option>FL</option>
-          <option>IN</option>
-          <option>IL</option>
-          <option>WI</option>
-        </select>
+        <span id="ms-tbl-slot"></span>
         <select class="fi fi--max-180" id="tbl-proj" data-filter="tbl-proj"><option value="">Todos projetos</option></select>
         <select class="fi fi--max-150" id="tbl-prime" data-filter="tbl-prime"><option value="">Todos primes</option></select>
         <select class="fi fi--max-200" id="tbl-util" data-filter="tbl-utility"><option value="">Todas utilities</option></select>
@@ -387,11 +379,7 @@
           <div class="page-title">Contatos de Utilities</div>
           <div class="contacts-header-actions">
             <input class="fi fi--w-180" id="contacts-search" placeholder="Buscar utility..." data-filter="contacts-search">
-            <select class="fi fi--auto-width" id="contacts-state-filter" data-filter="contacts-state">
-              <option value="">Todos</option>
-              <optgroup label="Operação"><option>FL</option><option>IN</option><option>IL</option><option>WI</option></optgroup>
-              <optgroup label="Outros estados"><option>AL</option><option>AK</option><option>AZ</option><option>AR</option><option>CA</option><option>CO</option><option>CT</option><option>DC</option><option>DE</option><option>GA</option><option>HI</option><option>IA</option><option>ID</option><option>KS</option><option>KY</option><option>LA</option><option>MA</option><option>MD</option><option>ME</option><option>MI</option><option>MN</option><option>MO</option><option>MS</option><option>MT</option><option>NC</option><option>ND</option><option>NE</option><option>NH</option><option>NJ</option><option>NM</option><option>NV</option><option>NY</option><option>OH</option><option>OK</option><option>OR</option><option>PA</option><option>RI</option><option>SC</option><option>SD</option><option>TN</option><option>TX</option><option>UT</option><option>VA</option><option>VT</option><option>WA</option><option>WV</option><option>WY</option></optgroup>
-            </select>
+            <span id="ms-contacts-slot"></span>
             <select class="fi fi--auto-width" id="contacts-county-filter" data-filter="contacts-county" disabled title="Selecione um estado primeiro">
               <option value="">Todos counties</option>
             </select>
@@ -739,8 +727,8 @@
   <span id="tmsg"></span>
 </div>
 
-<script src="app.js?v=20260731auth"></script>
-<script src="jarvis.js?v=20260729u"></script>
+<script src="app.js?v=20260731auth2"></script>
+<script src="jarvis.js?v=20260731c"></script>
 
 <!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
 <script>

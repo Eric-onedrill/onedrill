@@ -1252,11 +1252,22 @@ function _applyScope(){
 }
 // Recarrega tickets/projects usando a sessão logada (respeita RLS/escopo).
 async function loadCoreData(){
-  const{data:p}=await sb.from('projects').select('*').order('name');
+  // Garante que a sessão está carregada antes de consultar (evita ler como anon logo após login)
+  try{ await sb.auth.getSession(); }catch(_e){}
+  // Projetos PRIMEIRO e atribui na hora — assim uma falha na carga de tickets não zera os projetos.
+  const pr=await sb.from('projects').select('*').order('name');
+  if(pr.error){ console.error('[loadCoreData] projects:',pr.error.message||pr.error); toast('Erro ao carregar projetos: '+(pr.error.message||pr.error),'danger'); }
+  if(pr.data){ projects=pr.data.map(dbToProject); }
   let all=[],from=0;const P=1000;
-  while(true){const{data:pg,error:et}=await sb.from('tickets').select('*').order('ticket').range(from,from+P-1);if(et||!pg||!pg.length)break;all=all.concat(pg);if(pg.length<P)break;from+=P;}
-  projects=(p||[]).map(dbToProject);
-  tickets=all.map(dbToTicket);
+  while(true){
+    const tr=await sb.from('tickets').select('*').order('ticket').range(from,from+P-1);
+    if(tr.error){ console.error('[loadCoreData] tickets:',tr.error.message||tr.error); toast('Erro ao carregar tickets: '+(tr.error.message||tr.error),'danger'); break; }
+    if(!tr.data||!tr.data.length) break;
+    all=all.concat(tr.data);
+    if(tr.data.length<P) break;
+    from+=P;
+  }
+  if(all.length) tickets=all.map(dbToTicket);
   _applyScope();
   rebuildSupersededSet();
 }
@@ -3273,7 +3284,7 @@ function renderProjects(){
     return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${clearFtP?` · <span style="color:var(--green);font-weight:700">${clearFtP.toLocaleString()} ft clear</span>`:''}${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="exportProjectReport('${p.id}')" style="background:#3b82f6;color:white;border-color:#3b82f6">📊 Relatório</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
-  const filterTag=sf?` · filtrado por ${esc(sf)}`:'';
+  const filterTag=msSel.proj.length?` · filtrado por ${esc(msSel.proj.join(', '))}`:'';
   const exportBar=`<div style="grid-column:1/-1;margin-bottom:12px;padding:12px 14px;background:linear-gradient(90deg,#1e40af 0%,#3b82f6 100%);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:white"><div><div style="font-weight:700;font-size:14px">📋 Clear pra trabalhar${filterTag}</div><div style="font-size:11px;opacity:0.9">Clear (próprio/carência) e Pendências em aberto — respeitam o filtro de estado acima</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="openPendingReport()" style="background:rgba(255,255,255,0.18);color:white;border:1px solid rgba(255,255,255,0.55);padding:8px 16px;font-weight:700;border-radius:6px">📞 Pendências</button><button class="btn" onclick="exportClearReport()" style="background:white;color:#1e40af;border:none;padding:8px 16px;font-weight:700;border-radius:6px">📥 Baixar Clear</button></div></div>`;
   g.innerHTML=exportBar+(active.length?active.map(renderCard).join(''):'<div style="color:var(--muted);font-size:13px">Nenhum projeto ativo.</div>');
 }

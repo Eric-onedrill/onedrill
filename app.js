@@ -2621,9 +2621,12 @@ function ticketExpiredEffective(t){
 
 async function setManualStatus(newStatus){
   const t=tickets.find(x=>x.id===currentDetailId);if(!t)return;
-  const old=t.status;const wasLocked=t.status_locked;
+  const old=t.status;const wasLocked=t.status_locked;const _oldCF=t.completedFeet||0;
   t.status=newStatus;t.status_locked=true;
+  // Ticket done = 100% produzido em campo: a baixa parcial vira o footage cheio.
+  if((newStatus==='Closed'||newStatus==='Completed')&&(t.footage||0)>0)t.completedFeet=t.footage;
   t.history=t.history||[];
+  if(t.completedFeet!==_oldCF)t.history.push({ts:Date.now(),action:`Progresso campo: ${_oldCF} → ${t.completedFeet} ft (ticket ${newStatus})`,color:'#16a34a'});
 
   // Determina ts do evento: pra Clear manual, usa data da última resposta real
   // (Clear/Private/Marked) entre as utilities — assim o ticket é contabilizado
@@ -3849,12 +3852,15 @@ async function saveTicket(){
       const projChanged=newProjId!==t.projectId;
       const oldExpireOld=t.expireOld||'';
       const oldCompFeet=t.completedFeet||0;
-      const newCompFeet=Math.max(0,parseInt(document.getElementById('tm-cf').value)||0);
+      const _foot=parseInt(document.getElementById('tm-f').value)||0;
+      let newCompFeet=Math.max(0,parseInt(document.getElementById('tm-cf').value)||0);
+      // Ticket done = 100% produzido em campo (baixa parcial vira footage cheio)
+      if((newStatus==='Closed'||newStatus==='Completed')&&_foot>0)newCompFeet=_foot;
       Object.assign(t,{
         ticket:tnum,projectId:newProjId,
         client:document.getElementById('tm-c').value,company:document.getElementById('tm-co').value,
         location:document.getElementById('tm-l').value,state:document.getElementById('tm-st').value,
-        footage:parseInt(document.getElementById('tm-f').value)||0,expire:normalizedExpire,
+        footage:_foot,expire:normalizedExpire,
         expireOld:normalizedExpireOld,completedFeet:newCompFeet,
         notes:document.getElementById('tm-notes').value,status:newStatus,
         tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,
@@ -3873,6 +3879,7 @@ async function saveTicket(){
     toast('Ticket atualizado!','success');
   }else{
     const t={id:null,ticket:tnum,projectId:document.getElementById('tm-proj').value,company:document.getElementById('tm-co').value||'One Drill',state:document.getElementById('tm-st').value||'FL',location:document.getElementById('tm-l').value||'',status:newStatus,expire:normalizedExpire,footage:parseInt(document.getElementById('tm-f').value)||0,completedFeet:Math.max(0,parseInt(document.getElementById('tm-cf').value)||0),client:document.getElementById('tm-c').value||'—',prime:document.getElementById('tm-prime').value,tipo:document.getElementById('tm-tipo').value,job:document.getElementById('tm-job').value,address:document.getElementById('tm-addr').value,notes:document.getElementById('tm-notes').value,fieldPath:null,_geocoded:null,history:[{ts:Date.now(),action:'Ticket criado',color:'#1a6cf0'}],attachments:[],pending:'',oldTicket2:'',statusOld:'',expireOld:'',status_locked:false,project_locked:!!document.getElementById('tm-proj').value};
+    if((newStatus==='Closed'||newStatus==='Completed')&&(t.footage||0)>0)t.completedFeet=t.footage;
     tickets.push(t);await saveTicketToDb(t);savedId=t.id;
     toast('Ticket criado!','success');
   }

@@ -787,7 +787,7 @@ async function addSecondNotice(ticketNum, targetTk){
   const iso=_snDateToIso(dateRaw)||new Date().toISOString().slice(0,10);
   const label=iso.split('-').reverse().join('/');
   t.history=t.history||[];
-  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')'+(isOld?' [ticket '+target+']':''),color:'#db2777',sn:{u:util,d:iso,n:n,src:'manual',tk:target}});
+  t.history.push({ts:Date.now(),action:'['+_ordEn(n).toUpperCase()+' NO-SHOW] '+util+' ('+label+')'+(isOld?' [ticket '+target+']':''),color:'#d97706',sn:{u:util,d:iso,n:n,src:'manual',tk:target}});
   const ok=await saveTicketToDb(t);
   if(ok){toast(_ordEn(n)+' no-show registrado: '+util+(isOld?' (ticket antigo '+target+')':''),'success');renderSecondNotices(t);}
   else{t.history.pop();toast('Erro ao salvar. Tente Refresh (⟳).','danger');}
@@ -825,10 +825,10 @@ async function renderSecondNotices(t){
   chain.forEach(o=>{if(o&&o!==cur&&!groups.some(g=>g.tk===o))groups.push({tk:o,old:true});});
   const renderRow=(x)=>{
     const d=x.date?x.date.split('-').reverse().join('/'):(x.ts?new Date(x.ts).toLocaleDateString('pt-BR'):'—');
-    const fiber=isFiberUtility(x.utility)?' <span style="font-size:9px;color:#db2777;font-weight:700">FIBRA</span>':'';
+    const fiber=isFiberUtility(x.utility)?' <span style="font-size:9px;color:#d97706;font-weight:700">FIBRA</span>':'';
     const src=x.source==='auto'?' <span style="font-size:9px;color:var(--muted)">(auto)</span>':'';
     const del=isAdmin?' <button class="btn btn-sm btn-danger" style="font-size:9px;padding:1px 5px" onclick="deleteSecondNotice(\''+esc(cur)+'\','+x.ts+')">×</button>':'';
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span><b style="color:#db2777">'+_ordEn(x.n)+'</b> '+esc(x.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px solid var(--border);font-size:12px"><span><b style="color:#d97706">'+_ordEn(x.n)+'</b> '+esc(x.utility)+fiber+src+'</span><span style="color:var(--text2)">'+d+del+'</span></div>';
   };
   let h='';
   groups.forEach(g=>{
@@ -1617,7 +1617,7 @@ function showPanel(t){
     +`<div class="mp-row"><span class="mp-key">Footage</span><span class="mp-val" style="cursor:pointer;color:var(--accent)" onclick="quickEditFootage(currentPanelId);return false;" title="Clique para editar">${fmtProgress(t)} ✏</span></div>`+miniProgressBar(t)
     +(t.tipo?`<div class="mp-row"><span class="mp-key">Tipo</span><span class="mp-val">${esc(t.tipo)}</span></div>`:'')
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(effStatusLabel(t))}${inGrace?' 🔄':''}</span></div>`
-    +(_isNoShowReleased(t)?`<div style="background:#fff3e0;border:1px solid #fed7aa;border-radius:var(--r);padding:6px 9px;margin:4px 0;font-size:10px;color:#b45309;font-weight:600">🟠 Liberado por no-show — necessário localizar a fibra em campo</div>`:'')
+    +(_isNoShowReleased(t)?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--r);padding:6px 9px;margin:4px 0;font-size:10px;color:#1d4ed8;font-weight:600">🔵 Liberado por no-show — necessário localizar a fibra em campo</div>`:'')
     +(()=>{const pu=getTicketPendingUtils(_currentTicketNum(t));if(!pu.length)return'';return'<div class="mp-row"><span class="mp-key">Pendentes</span><span class="mp-val"><div style="display:flex;flex-wrap:wrap;gap:3px">'+pu.map(p=>'<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:var(--red-bg);color:var(--red);font-family:var(--mono);white-space:nowrap">'+esc(p.utility_name.length>22?p.utility_name.substring(0,22)+'…':p.utility_name)+'</span>').join('')+'</div></span></div>';})()
     +`<div class="mp-row"><span class="mp-key">Expira</span><span class="mp-val"${isExp?' style="color:#dc2626;font-weight:700"':''}>${isStale?'⏳ aguardando sync':esc(t.expire||'—')}${isExp?(isExp==='grace'?' ⚠ CARÊNCIA VENCIDA':' ⚠ VENCIDO'):''}</span></div>`;
   document.getElementById('panel').classList.add('vis');
@@ -1925,7 +1925,7 @@ function openTicketDetail(id){
     +'<div style="font-size:11px;color:#6b21a8;margin-top:4px">Este ticket tem utilities com instalações privadas (3H). Contrate um locator privado antes de escavar.</div>'
     +'</div>':'';
 
-  const nsBanner=_isNoShowReleased(t)?'<div style="background:#fff3e0;border:2px solid #fed7aa;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:13px;font-weight:700;color:#d97706">🟠 LIBERADO POR NO-SHOW</div><div style="font-size:11px;color:#b45309;margin-top:4px">Fibra atingiu o 4º no-show e o resto está Clear. Status efetivo <strong>Clear</strong> — mas é necessário <strong>localizar a fibra em campo</strong> antes de escavar.</div></div>':'';
+  const nsBanner=_isNoShowReleased(t)?'<div style="background:#eff6ff;border:2px solid #bfdbfe;border-radius:var(--r);padding:10px 14px;margin-bottom:10px"><div style="font-size:13px;font-weight:700;color:#2563eb">🔵 LIBERADO POR NO-SHOW</div><div style="font-size:11px;color:#1d4ed8;margin-top:4px">Fibra atingiu o 4º no-show e o resto está Clear. Status efetivo <strong>Clear</strong> — mas é necessário <strong>localizar a fibra em campo</strong> antes de escavar.</div></div>':'';
   document.getElementById('det-info').innerHTML=expiredBanner+staleBanner+graceBannerDet+wpBanner+pvtBanner+nsBanner
     +`<div class="mp-row"><span class="mp-key">Status</span><span class="mp-val" style="color:${c};font-weight:700">${esc(effStatusLabel(t))}${inGrace?' <span style="font-size:10px;color:#7c3aed;font-weight:600">(🔄 carência)</span>':''}${t.status_locked?' 🔒':''}</span></div>`
     +`<div class="mp-row"><span class="mp-key">Empresa</span><span class="mp-val">${esc(t.company||'—')}</span></div>`
@@ -2511,7 +2511,7 @@ function _isNoShowReleased(t){
   return false;
 }
 // Cor / classe de badge / label do status considerando a liberação por no-show (laranja).
-function effColor(t){return _isNoShowReleased(t)?'#d97706':scol(effectiveStatus(t));}
+function effColor(t){return _isNoShowReleased(t)?'#2563eb':scol(effectiveStatus(t));}
 // Cor do ticket NO MAPA: um Clear (verde) a ≤4 dias do vencimento vira AMARELO (aviso de que
 // vai vencer). No-show (laranja) e demais status seguem effColor. Só usada no mapa — NÃO mexe
 // nas cores de lista/badges. Vencimento considerado: em carência (novo ainda não clareado),
@@ -2528,7 +2528,7 @@ function _daysToEffExpire(t){
 function mapColor(t){
   if(effectiveStatus(t)==='Clear'&&!_isNoShowReleased(t)){
     const days=_daysToEffExpire(t);
-    if(days!==null&&days<0)return '#7f1d1d';            // VINHO: Clear JÁ VENCIDO — em tese não é mais clear (NÃO pode ser verde no mapa)
+    if(days!==null&&days<0)return '#d97706';            // VINHO: Clear JÁ VENCIDO — em tese não é mais clear (NÃO pode ser verde no mapa)
     if(days!==null&&days>=0&&days<=4)return '#FFE600';   // amarelo FORTE/vivo: Clear vencendo em ≤4 dias
   }
   return effColor(t);
@@ -3206,11 +3206,11 @@ function renderDash(){
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clear+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+clearFt.toLocaleString()+' ft</div>'
   +'<div style="margin-top:3px">'+trend(clearWk,clearPrev,true)+'</div></div>'
-  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #7f1d1d;cursor:pointer" onclick="document.getElementById(\'dash-expired-card\')&&document.getElementById(\'dash-expired-card\').scrollIntoView({behavior:\'smooth\',block:\'center\'})">'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #d97706;cursor:pointer" onclick="openExpiredModal()">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Vencidos</div>'
-  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#7f1d1d">'+expired.length+'</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#d97706">'+expired.length+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">clear/open vencidos</div>'
-  +'<div style="margin-top:3px;font-size:10px;color:'+(expired.length?'#7f1d1d':'var(--muted)')+'">'+(expired.length?'regularizar':'em dia')+'</div></div>'
+  +'<div style="margin-top:3px;font-size:10px;color:'+(expired.length?'#d97706':'var(--muted)')+'">'+(expired.length?'regularizar':'em dia')+'</div></div>'
   +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6;cursor:pointer" onclick="showNoProjModal()">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem projeto</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+noProj.length+'</div>'
@@ -3243,25 +3243,6 @@ function renderDash(){
     return'<tr style="border-bottom:1px solid var(--border);cursor:pointer;background:'+urgBg+'" onclick="openTicketDetail('+t.id+')">'
     +'<td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td>'
     +'<td style="padding:4px 6px;font-weight:700;color:'+urgColor+'">'+d2+'d</td>'
-    +'<td style="padding:4px 6px;color:var(--text2)">'+loc+', '+esc(t.state)+'</td>'
-    +'<td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span></td>'
-    +'<td style="padding:4px 6px;font-family:var(--mono);color:var(--muted)">'+esc(t.expire)+'</td>'
-    +'</tr>';}).join('')+'</tbody></table></div>':'')
-  +'</div>'
-
-  // ── TICKETS VENCIDOS (índice pra regularizar) ──
-  +'<div id="dash-expired-card" style="background:var(--white);border:1px solid '+(expired.length?'#7f1d1d':'var(--border)')+';border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
-  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(expired.length?'8px':'0')+'">'
-  +'<span style="font-size:12px;font-weight:700;color:'+(expired.length?'#7f1d1d':'var(--green)')+'">'+(expired.length?'⛔ '+expired.length+' ticket(s) VENCIDO(S) — regularizar':'✅ Nenhum ticket vencido')+'</span>'
-  +(expired.length?'<button class="btn btn-sm" onclick="exportExpired()" style="background:#7f1d1d;color:white;border-color:#7f1d1d;font-size:11px">↓ Excel</button>':'')
-  +'</div>'
-  +(expired.length?'<div style="max-height:220px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px;font-weight:600">Ticket</th><th style="padding:4px 6px;font-weight:600">Vencido há</th><th style="padding:4px 6px;font-weight:600">Local</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600">Expirou</th></tr></thead><tbody>'
-  +expired.sort((a,b)=>_eod(a.expire)-_eod(b.expire)).map(t=>{
-    const dov=Math.floor((now-_eod(t.expire))/86400000);
-    const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
-    return'<tr style="border-bottom:1px solid var(--border);cursor:pointer;background:#fef2f2" onclick="openTicketDetail('+t.id+')">'
-    +'<td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td>'
-    +'<td style="padding:4px 6px;font-weight:700;color:#7f1d1d">'+dov+'d</td>'
     +'<td style="padding:4px 6px;color:var(--text2)">'+loc+', '+esc(t.state)+'</td>'
     +'<td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span></td>'
     +'<td style="padding:4px 6px;font-family:var(--mono);color:var(--muted)">'+esc(t.expire)+'</td>'
@@ -4440,6 +4421,43 @@ function exportExpired(){
   XLSX.utils.book_append_sheet(wb,ws,'Vencidos');
   XLSX.writeFile(wb,'OneDrill_Vencidos_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(f.length+' tickets vencidos exportados','success');
+}
+
+// Modal do tile "Vencidos" — lista clicável pra regularizar (abre ao clicar no box).
+function openExpiredModal(){
+  const now=Date.now();
+  const list=filterTickets({state:msSel.dash}).filter(t=>{
+    if(!t.expire||t.expire==='—')return false;
+    if(isSuperseded(t))return false;
+    if(_graceExtendsCoverage(t))return false;
+    if(expireIsStale(t))return false;
+    if(t.status==='Closed'||t.status==='Cancel')return false;
+    return (_eod(t.expire)-now)/86400000<0;
+  }).sort((a,b)=>_eod(a.expire)-_eod(b.expire));
+  let ov=document.getElementById('ov-expired');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ov-expired';ov.className='overlay';
+    ov.innerHTML='<div class="modal" style="max-width:720px"><div class="modal-header"><h3 id="exp-title"></h3><button class="modal-close" onclick="closeModal(\'ov-expired\')">×</button></div><div style="padding:0 16px 8px"><button class="btn btn-sm" onclick="exportExpired()" style="background:#d97706;color:white;border-color:#d97706;font-size:11px">↓ Excel</button></div><div id="exp-body" style="padding:0 16px 16px"></div></div>';
+    document.body.appendChild(ov);
+  }
+  document.getElementById('exp-title').textContent='Tickets vencidos — regularizar ('+list.length+')';
+  let rows='';
+  for(const t of list){
+    const dov=Math.floor((now-_eod(t.expire))/86400000);
+    const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
+    rows+='<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="closeModal(\'ov-expired\');openTicketDetail('+t.id+')">'
+      +'<td style="padding:5px 8px;font-family:var(--mono);font-size:11px;font-weight:600">'+esc(t.ticket)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px;font-weight:700;color:#d97706">'+dov+'d</td>'
+      +'<td style="padding:5px 8px;font-size:11px">'+loc+', '+esc(t.state)+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px"><span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span></td>'
+      +'<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);color:var(--muted)">'+esc(t.expire)+'</td></tr>';
+  }
+  const tbl=list.length?'<div style="max-height:440px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse">'
+    +'<thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:2px solid var(--border)"><th style="padding:5px 8px">Ticket</th><th style="padding:5px 8px">Vencido há</th><th style="padding:5px 8px">Local</th><th style="padding:5px 8px">Status</th><th style="padding:5px 8px">Expirou</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div>'
+    :'<div style="text-align:center;color:var(--muted);padding:20px">Nenhum ticket vencido ✓</div>';
+  document.getElementById('exp-body').innerHTML=tbl;
+  openModal('ov-expired');
 }
 
 function exportFiltered(){
@@ -5848,11 +5866,11 @@ function renderNoShowReleasedAlert(fTickets){
     list.push({t,utils:fib.length?fib:['(fibra no 4º no-show)']});
   }
   if(!list.length)return'';
-  return'<div style="background:#fff3e0;border:2px solid #fed7aa;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:14px">'
+  return'<div style="background:#eff6ff;border:2px solid #bfdbfe;border-radius:var(--r-lg);padding:12px 14px;margin-bottom:14px">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:700;color:#d97706">🟠 Liberado por No-Show (Fibra) ('+list.length+' ticket'+(list.length>1?'s':'')+')</span>'
+    +'<span style="font-size:12px;font-weight:700;color:#2563eb">🔵 Liberado por No-Show (Fibra) ('+list.length+' ticket'+(list.length>1?'s':'')+')</span>'
     +'</div>'
-    +'<div style="font-size:10px;color:#b45309;margin-bottom:8px">Fibra atingiu o 4º no-show e o resto está Clear → ticket liberado pra trabalhar. <strong>Localize a fibra em campo</strong> antes de escavar.</div>'
+    +'<div style="font-size:10px;color:#1d4ed8;margin-bottom:8px">Fibra atingiu o 4º no-show e o resto está Clear → ticket liberado pra trabalhar. <strong>Localize a fibra em campo</strong> antes de escavar.</div>'
     +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
     +list.map(({t,utils})=>{
       const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
@@ -5861,14 +5879,14 @@ function renderNoShowReleasedAlert(fTickets){
       // de ser laranja. Só usa o expire próprio quando o no-show não é via carência.
       const _inGrace=isRenewed(t)&&isInRenewalGrace(t);
       const venc=_inGrace?graceCutoverDate(t):((t.expire&&t.expire!=='—')?t.expire:'—');
-      return'<div style="background:white;border:1px solid #fed7aa;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
+      return'<div style="background:white;border:1px solid #bfdbfe;border-radius:var(--r);padding:8px 10px;cursor:pointer;min-width:220px;flex:1;max-width:320px" onclick="openTicketDetail('+t.id+')">'
         +'<div style="display:flex;justify-content:space-between;align-items:center">'
         +'<span style="font-family:var(--mono);font-weight:700;font-size:11px;color:var(--text)">'+esc(t.ticket)+'</span>'
         +'<span class="sbadge b-'+effStatusCls(t)+'" style="font-size:9px">'+esc(effStatusLabel(t))+'</span></div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+loc+', '+esc(t.state)+'</div>'
         +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;gap:6px">'
-        +'<span style="font-size:9px;color:#d97706;font-weight:600">'+utils.map(esc).join(', ')+'</span>'
-        +'<span style="font-size:9px;color:#d97706;font-weight:600;white-space:nowrap">'+(_inGrace?'🟠 laranja até ':'📅 vence ')+esc(venc||'—')+'</span>'
+        +'<span style="font-size:9px;color:#2563eb;font-weight:600">'+utils.map(esc).join(', ')+'</span>'
+        +'<span style="font-size:9px;color:#2563eb;font-weight:600;white-space:nowrap">'+(_inGrace?'🔵 azul até ':'📅 vence ')+esc(venc||'—')+'</span>'
         +'</div>'
         +'</div>';
     }).join('')

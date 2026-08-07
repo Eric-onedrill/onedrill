@@ -7562,16 +7562,13 @@ async def _scrape_diggers_ticket_detail(page, tnum, debug=False):
             except ValueError:
                 continue
 
-        if start_dt and duration_raw:
-            # Parse "30 DAYS" → 30
-            dur_match = re.search(r"(\d+)", duration_raw)
-            if dur_match:
-                dur_days = int(dur_match.group(1))
-                detail["duration_days"] = dur_days
-                expire_dt = start_dt + timedelta(days=dur_days)
-                detail["expire"] = expire_dt.strftime("%m/%d/%Y")
-                log.debug(f"[WI] {tnum}: expire calculado = {detail['expire']} "
-                          f"(start={clean} + {dur_days}d)")
+        if start_dt:
+            # Regra WI (Diggers, 2026-08-06): vence em 10 dias CORRIDOS a partir do
+            # Start Date. Regra de negócio fixa — ignora a "duration" do portal.
+            detail["duration_days"] = 10
+            expire_dt = start_dt + timedelta(days=10)
+            detail["expire"] = expire_dt.strftime("%m/%d/%Y")
+            log.debug(f"[WI] {tnum}: expire = {detail['expire']} (start={clean} + 10d regra WI)")
 
     # Se expire nao calculou, tenta extrair do body texto
     if not detail["expire"] and body:
@@ -7824,7 +7821,7 @@ async def import_wi(triggered_by="manual"):
         # ── FASE 4: Dados da grid + respostas via portal público ──
         # A grid do Excavator Search já tem: county, city, address, street, start_date.
         # O portal público dá: utility responses.
-        # Expire: calculado de start_date + 30 dias (duração padrão WI).
+        # Expire: calculado de start_date + 10 dias corridos (regra WI, 2026-08-06).
         # Não tenta clicar tickets na grid (ExtJS não abre detail ao clicar row).
 
         # Mapeia dados da grid por ticket number
@@ -7850,7 +7847,7 @@ async def import_wi(triggered_by="manual"):
             street = grid.get("street", "")
             address = f"{addr_num} {street}".strip() if (addr_num or street) else ""
 
-            # Start Date → expire (+30 dias padrão WI)
+            # Start Date → expire (+10 dias corridos, regra WI)
             # Store retorna JS Date string: "Wed May 20 2026 09:00:00 GMT-0400 (...)"
             start_raw = grid.get("start_date", "")
             expire = ""
@@ -7877,7 +7874,7 @@ async def import_wi(triggered_by="manual"):
                         except ValueError:
                             continue
                 if sdt:
-                    expire = (sdt + timedelta(days=30)).strftime("%m/%d/%Y")
+                    expire = (sdt + timedelta(days=10)).strftime("%m/%d/%Y")  # regra WI: 10 dias corridos do start (2026-08-06)
 
             # Location text (da grid OU do pub)
             location_text = pub.get("location_text", "")

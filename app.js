@@ -2528,6 +2528,7 @@ function _daysToEffExpire(t){
 function mapColor(t){
   if(effectiveStatus(t)==='Clear'&&!_isNoShowReleased(t)){
     const days=_daysToEffExpire(t);
+    if(days!==null&&days<0)return '#7f1d1d';            // VINHO: Clear JÁ VENCIDO — em tese não é mais clear (NÃO pode ser verde no mapa)
     if(days!==null&&days>=0&&days<=4)return '#FFE600';   // amarelo FORTE/vivo: Clear vencendo em ≤4 dias
   }
   return effColor(t);
@@ -3147,6 +3148,8 @@ function renderDash(){
   const noProj=fTickets.filter(t=>!t.projectId&&t.status!=='Cancel'&&t.status!=='Closed');
   const _sd=_soonDays||10;
   const soon=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(_graceExtendsCoverage(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);const diff=(d-Date.now())/86400000;return diff>=0&&diff<=_sd;});
+  // Vencidos: ativos (Open/Clear/Damage) cujo vencimento efetivo já passou — precisam regularizar.
+  const expired=fTickets.filter(t=>{if(!t.expire||t.expire==='—')return false;if(isSuperseded(t))return false;if(_graceExtendsCoverage(t))return false;if(expireIsStale(t))return false;if(t.status==='Closed'||t.status==='Cancel')return false;const d=_eod(t.expire);return (d-Date.now())/86400000<0;});
 
   function wCount(status,start,end){
     return fTickets.filter(t=>t.history&&t.history.some(h=>{
@@ -3203,11 +3206,11 @@ function renderDash(){
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green)">'+clear+'</div>'
   +'<div style="font-size:10px;color:var(--muted)">'+clearFt.toLocaleString()+' ft</div>'
   +'<div style="margin-top:3px">'+trend(clearWk,clearPrev,true)+'</div></div>'
-  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid var(--amber);cursor:pointer" onclick="nav(\'tickets\');setTimeout(()=>{document.getElementById(\'tbl-stat\').value=\'Damage\';renderTable();},100)">'
-  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Damage</div>'
-  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber)">'+damage+'</div>'
-  +'<div style="font-size:10px;color:var(--muted)">'+damageFt.toLocaleString()+' ft</div>'
-  +'<div style="margin-top:3px;font-size:10px;color:'+(damage>0?'var(--amber)':'var(--muted)')+'">'+( damage>0?'atenção':'sem mudança')+'</div></div>'
+  +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #7f1d1d;cursor:pointer" onclick="document.getElementById(\'dash-expired-card\')&&document.getElementById(\'dash-expired-card\').scrollIntoView({behavior:\'smooth\',block:\'center\'})">'
+  +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Vencidos</div>'
+  +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#7f1d1d">'+expired.length+'</div>'
+  +'<div style="font-size:10px;color:var(--muted)">clear/open vencidos</div>'
+  +'<div style="margin-top:3px;font-size:10px;color:'+(expired.length?'#7f1d1d':'var(--muted)')+'">'+(expired.length?'regularizar':'em dia')+'</div></div>'
   +'<div class="stat-card" style="padding:10px 12px;border-left:3px solid #3b82f6;cursor:pointer" onclick="showNoProjModal()">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Sem projeto</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono);color:#3b82f6">'+noProj.length+'</div>'
@@ -3240,6 +3243,25 @@ function renderDash(){
     return'<tr style="border-bottom:1px solid var(--border);cursor:pointer;background:'+urgBg+'" onclick="openTicketDetail('+t.id+')">'
     +'<td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td>'
     +'<td style="padding:4px 6px;font-weight:700;color:'+urgColor+'">'+d2+'d</td>'
+    +'<td style="padding:4px 6px;color:var(--text2)">'+loc+', '+esc(t.state)+'</td>'
+    +'<td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span></td>'
+    +'<td style="padding:4px 6px;font-family:var(--mono);color:var(--muted)">'+esc(t.expire)+'</td>'
+    +'</tr>';}).join('')+'</tbody></table></div>':'')
+  +'</div>'
+
+  // ── TICKETS VENCIDOS (índice pra regularizar) ──
+  +'<div id="dash-expired-card" style="background:var(--white);border:1px solid '+(expired.length?'#7f1d1d':'var(--border)')+';border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(expired.length?'8px':'0')+'">'
+  +'<span style="font-size:12px;font-weight:700;color:'+(expired.length?'#7f1d1d':'var(--green)')+'">'+(expired.length?'⛔ '+expired.length+' ticket(s) VENCIDO(S) — regularizar':'✅ Nenhum ticket vencido')+'</span>'
+  +(expired.length?'<button class="btn btn-sm" onclick="exportExpired()" style="background:#7f1d1d;color:white;border-color:#7f1d1d;font-size:11px">↓ Excel</button>':'')
+  +'</div>'
+  +(expired.length?'<div style="max-height:220px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)"><th style="padding:4px 6px;font-weight:600">Ticket</th><th style="padding:4px 6px;font-weight:600">Vencido há</th><th style="padding:4px 6px;font-weight:600">Local</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600">Expirou</th></tr></thead><tbody>'
+  +expired.sort((a,b)=>_eod(a.expire)-_eod(b.expire)).map(t=>{
+    const dov=Math.floor((now-_eod(t.expire))/86400000);
+    const loc=esc((t.location||'').replace(/\s*(Inside|Near).*/i,'').split(',')[0].trim());
+    return'<tr style="border-bottom:1px solid var(--border);cursor:pointer;background:#fef2f2" onclick="openTicketDetail('+t.id+')">'
+    +'<td style="padding:4px 6px;font-family:var(--mono);font-weight:600">'+esc(t.ticket)+'</td>'
+    +'<td style="padding:4px 6px;font-weight:700;color:#7f1d1d">'+dov+'d</td>'
     +'<td style="padding:4px 6px;color:var(--text2)">'+loc+', '+esc(t.state)+'</td>'
     +'<td style="padding:4px 6px"><span class="sbadge b-'+t.status.toLowerCase()+'" style="font-size:9px">'+esc(t.status)+'</span></td>'
     +'<td style="padding:4px 6px;font-family:var(--mono);color:var(--muted)">'+esc(t.expire)+'</td>'
@@ -4391,6 +4413,33 @@ function exportExpiring(){
   XLSX.utils.book_append_sheet(wb,ws,'Vencendo');
   XLSX.writeFile(wb,'OneDrill_Vencendo_'+days+'dias_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast(f.length+' tickets exportados','success');
+}
+
+function exportExpired(){
+  // Tickets ativos cujo vencimento efetivo JÁ passou (mesma regra do card "Vencidos" do dashboard).
+  const now=Date.now();
+  const f=filterTickets({}).filter(t=>{
+    if(!t.expire||t.expire==='—')return false;
+    if(isSuperseded(t))return false;
+    if(_graceExtendsCoverage(t))return false;
+    if(expireIsStale(t))return false;
+    if(t.status==='Closed'||t.status==='Cancel')return false;
+    return (_eod(t.expire)-now)/86400000<0;
+  }).sort((a,b)=>_eod(a.expire)-_eod(b.expire));
+  if(!f.length){toast('Nenhum ticket vencido.','warn');return;}
+  const wb=XLSX.utils.book_new();
+  const rows=[['Ticket #','Vencido há (dias)','Cliente','Prime','Estado','Local','Status','Footage','Expirou em','Tipo','Endereço','Job #','Projeto','Utilities Pendentes']];
+  for(const t of f){
+    const proj=projects.find(p=>p.id===t.projectId)?.name||'';
+    const pends=getTicketPendingUtils(String(t.ticket).trim()).map(u=>u.utility_name).join(', ');
+    const dov=Math.floor((now-_eod(t.expire))/86400000);
+    rows.push([t.ticket,dov,t.client,t.prime,t.state,t.location,t.status,t.footage,t.expire,t.tipo,t.address,t.job,proj,pends]);
+  }
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:14},{wch:16},{wch:20},{wch:16},{wch:7},{wch:20},{wch:8},{wch:9},{wch:12},{wch:24},{wch:24},{wch:12},{wch:30},{wch:34}];
+  XLSX.utils.book_append_sheet(wb,ws,'Vencidos');
+  XLSX.writeFile(wb,'OneDrill_Vencidos_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(f.length+' tickets vencidos exportados','success');
 }
 
 function exportFiltered(){

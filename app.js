@@ -6068,7 +6068,7 @@ async function renderSyncHealth(){
     const{data:rows,error}=await sb.from('sync_811_log').select('state,status,started_at').order('started_at',{ascending:false}).limit(40);
     if(error||!rows)return;
     const el=document.getElementById('sync-health-widget');if(!el)return;
-    const by={IN:[],FL:[],IL:[],WI:[]};
+    const by={IN:[],FL:[],IL:[],WI:[],KY:[]};
     for(const row of rows){if(by[row.state])by[row.state].push(row);}
     let h='';
     for(const[st,lg]of Object.entries(by)){

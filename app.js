@@ -82,7 +82,7 @@ let isAdmin=false,role='viewer',isSharedView=false,sharedProjectId=null,currentU
 let userScope='all',_recoveryMode=false,_setPwMode='first';
 let currentDetailId=null,currentPanelId=null,editingTicketId=null,editingProjectId=null,deletingProjectId=null;
 let sortCol='ticket',sortAsc=true;
-let mf={open:true,damage:true,clear:true,closed:false,cancel:false};
+let mf={open:true,damage:true,clear:true,closed:false,cancel:false,expired:true};
 let _graceFilterActive=false; // Toggle "🔄 Em carência" na aba Tickets — mostra só tickets renovados ainda em período de graça
 let map,satL,strL,hybL,mkrs=[],lines=[],labels=[];
 let shMap,shSatL,shStrL,shHybL,shMkrs=[],shLines=[],shLabels=[];
@@ -237,12 +237,17 @@ function filterTickets(opts={}){
     // deve aparecer quando filtro = Clear (visualmente esta Clear pro operador).
     // Closed/Cancel sao raw (effectiveStatus nao muda eles).
     if(statusFilter){
-      const sl=(effectiveStatus(t)||'').toLowerCase();
-      if(sl==='open'    && !statusFilter.open)    return false;
-      if(sl==='damage'  && !statusFilter.damage)  return false;
-      if(sl==='clear'   && !statusFilter.clear)   return false;
-      if(sl==='closed'  && !statusFilter.closed)  return false;
-      if(sl==='cancel'  && !statusFilter.cancel)  return false;
+      if(_isVencido(t)){
+        // Vencido (Open/Clear já vencido) é controlado SÓ pelo chip Vencidos.
+        if(!statusFilter.expired) return false;
+      }else{
+        const sl=(effectiveStatus(t)||'').toLowerCase();
+        if(sl==='open'    && !statusFilter.open)    return false;
+        if(sl==='damage'  && !statusFilter.damage)  return false;
+        if(sl==='clear'   && !statusFilter.clear)   return false;
+        if(sl==='closed'  && !statusFilter.closed)  return false;
+        if(sl==='cancel'  && !statusFilter.cancel)  return false;
+      }
     }
 
     // Projeto
@@ -1634,7 +1639,7 @@ function hiT(id){
 function toggleMF(key){
   mf[key]=!mf[key];
   const btn=document.getElementById('ft-'+key);
-  const oc={open:'on-open',damage:'on-damage',clear:'on-clear',closed:'on-closed',cancel:'on-cancel'};
+  const oc={open:'on-open',damage:'on-damage',clear:'on-clear',closed:'on-closed',cancel:'on-cancel',expired:'on-expired'};
   btn.className='ftog'+(mf[key]?' '+oc[key]:'');
   redrawAll();
 }
@@ -2511,15 +2516,17 @@ function _isNoShowReleased(t){
   return false;
 }
 // Cor / classe de badge / label do status considerando a liberação por no-show (laranja).
-// Clear que JÁ VENCEU: em tese não é mais Clear. Vira "Vencido" (laranja) em cor/label/classe.
-// Vence hoje ainda é Clear; a partir do dia seguinte (days<0) vira Vencido.
-function _isExpiredClear(t){
+// VENCIDO: ticket ativo (Open/Clear) cujo vencimento JÁ passou. Vira "Vencido" (laranja) em
+// cor/label/classe/filtro — não é mais Open/Clear. Vence hoje ainda vale; dia seguinte (days<0) = Vencido.
+// (Damage/Closed/Cancel não entram como vencido.)
+function _isVencido(t){
   if(_isNoShowReleased(t))return false;
-  if(effectiveStatus(t)!=='Clear')return false;
+  const s=effectiveStatus(t);
+  if(s!=='Open'&&s!=='Clear')return false;
   const d=_daysToEffExpire(t);
   return d!==null&&d<0;
 }
-function effColor(t){return _isNoShowReleased(t)?'#2563eb':(_isExpiredClear(t)?'#d97706':scol(effectiveStatus(t)));}
+function effColor(t){return _isNoShowReleased(t)?'#2563eb':(_isVencido(t)?'#d97706':scol(effectiveStatus(t)));}
 // Cor do ticket NO MAPA: um Clear (verde) a ≤4 dias do vencimento vira AMARELO (aviso de que
 // vai vencer). No-show (laranja) e demais status seguem effColor. Só usada no mapa — NÃO mexe
 // nas cores de lista/badges. Vencimento considerado: em carência (novo ainda não clareado),
@@ -2541,8 +2548,8 @@ function mapColor(t){
   }
   return effColor(t);
 }
-function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(_isExpiredClear(t)?'expired':(effectiveStatus(t)||'').toLowerCase());}
-function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':(_isExpiredClear(t)?'Vencido':effectiveStatus(t));}
+function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(_isVencido(t)?'expired':(effectiveStatus(t)||'').toLowerCase());}
+function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':(_isVencido(t)?'Vencido':effectiveStatus(t));}
 // Data em que o ticket foi liberado por no-show = data do no-show MAIS RECENTE (o que
 // completou o 4º). Usada pra bucketar no "Clareados Hoje" (vira clear efetivo nesse dia).
 function _noShowReleaseDateTs(t){
@@ -3317,7 +3324,7 @@ function renderProjects(){
     const _es=(t)=>effectiveStatus(t);
     // Vencido = ativo (Open/Clear/Damage) já passado do vencimento. Sai de Open/Clear e vai pro balde Vencidos.
     const _exp=(t)=>{const d=_daysToEffExpire(t);return d!==null&&d<0;};
-    const vencC=ts.filter(t=>['Open','Clear','Damage'].includes(_es(t))&&_exp(t)).length;
+    const vencC=ts.filter(t=>['Open','Clear'].includes(_es(t))&&_exp(t)).length;
     const openC=ts.filter(t=>_es(t)==='Open'&&!_exp(t)).length,clearC=ts.filter(t=>_es(t)==='Clear'&&!_exp(t)).length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
     const campoFt=ts.reduce((s,t)=>s+_producedFt(t),0);const pctCampoP=projTotal>0?Math.min(100,Math.round(campoFt/projTotal*100)):0;
@@ -3649,7 +3656,7 @@ function enterSharedView(pid){
   const ts=filterTickets({projectId:p.id});
   const _es=(t)=>effectiveStatus(t);
   const _exp=(t)=>{const d=_daysToEffExpire(t);return d!==null&&d<0;};
-  const vencC=ts.filter(t=>['Open','Clear','Damage'].includes(_es(t))&&_exp(t)).length;
+  const vencC=ts.filter(t=>['Open','Clear'].includes(_es(t))&&_exp(t)).length;
   const openC=ts.filter(t=>_es(t)==='Open'&&!_exp(t)).length;
   const clearC=ts.filter(t=>_es(t)==='Clear'&&!_exp(t)).length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);

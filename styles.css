@@ -2022,6 +2022,7 @@ body {
 .ftog.on-damage { background: var(--pink);  color: #33302a;  border-color: var(--pink-border); }
 .ftog.on-clear  { background: var(--green-bg);  color: var(--green);  border-color: var(--green-border); }
 .ftog.on-noshow { background: #fff3e0;  color: #d97706;  border-color: #fed7aa; }
+.ftog.on-expired { background: #fff3e0;  color: #d97706;  border-color: #fed7aa; }
 .ftog.on-closed { background: #f5f5f3;          color: #888;          border-color: var(--border2); }
 .ftog.on-cancel { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
 

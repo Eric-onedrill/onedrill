@@ -1679,6 +1679,7 @@ body {
 .b-clear  { background: var(--green-bg);  color: var(--green); }
 .b-noshow { background: #fff3e0;  color: #d97706; }
 .b-damage { background: var(--pink);  color: #33302a; }
+.b-expired { background: #fff3e0;  color: #d97706; }
 .b-closed { background: #f5f5f3;          color: #888; }
 .b-cancel { background: var(--purple-bg); color: var(--purple); }
 
@@ -2071,6 +2072,7 @@ body {
 
 .tcard.s-open::before   { background: var(--red); }
 .tcard.s-clear::before  { background: var(--green); }
+.s-expired::before { background: #d97706; }
 .tcard.s-noshow::before { background: #d97706; }
 .tcard.s-damage::before { background: var(--pink); }
 .tcard.s-closed::before { background: #ccc; }

@@ -2511,7 +2511,15 @@ function _isNoShowReleased(t){
   return false;
 }
 // Cor / classe de badge / label do status considerando a liberação por no-show (laranja).
-function effColor(t){return _isNoShowReleased(t)?'#2563eb':scol(effectiveStatus(t));}
+// Clear que JÁ VENCEU: em tese não é mais Clear. Vira "Vencido" (laranja) em cor/label/classe.
+// Vence hoje ainda é Clear; a partir do dia seguinte (days<0) vira Vencido.
+function _isExpiredClear(t){
+  if(_isNoShowReleased(t))return false;
+  if(effectiveStatus(t)!=='Clear')return false;
+  const d=_daysToEffExpire(t);
+  return d!==null&&d<0;
+}
+function effColor(t){return _isNoShowReleased(t)?'#2563eb':(_isExpiredClear(t)?'#d97706':scol(effectiveStatus(t)));}
 // Cor do ticket NO MAPA: um Clear (verde) a ≤4 dias do vencimento vira AMARELO (aviso de que
 // vai vencer). No-show (laranja) e demais status seguem effColor. Só usada no mapa — NÃO mexe
 // nas cores de lista/badges. Vencimento considerado: em carência (novo ainda não clareado),
@@ -2533,8 +2541,8 @@ function mapColor(t){
   }
   return effColor(t);
 }
-function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(effectiveStatus(t)||'').toLowerCase();}
-function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':effectiveStatus(t);}
+function effStatusCls(t){return _isNoShowReleased(t)?'noshow':(_isExpiredClear(t)?'expired':(effectiveStatus(t)||'').toLowerCase());}
+function effStatusLabel(t){return _isNoShowReleased(t)?'Clear · no-show':(_isExpiredClear(t)?'Vencido':effectiveStatus(t));}
 // Data em que o ticket foi liberado por no-show = data do no-show MAIS RECENTE (o que
 // completou o 4º). Usada pra bucketar no "Clareados Hoje" (vira clear efetivo nesse dia).
 function _noShowReleaseDateTs(t){
@@ -3307,12 +3315,15 @@ function renderProjects(){
     // status=Open mas effective=Clear devem aparecer como Clear no card.
     // Pra Closed/Cancel usa raw (effectiveStatus nao muda eles).
     const _es=(t)=>effectiveStatus(t);
-    const openC=ts.filter(t=>_es(t)==='Open').length,clearC=ts.filter(t=>_es(t)==='Clear').length,damageC=ts.filter(t=>_es(t)==='Damage').length,closedC=ts.filter(t=>t.status==='Closed').length;
+    // Vencido = ativo (Open/Clear/Damage) já passado do vencimento. Sai de Open/Clear e vai pro balde Vencidos.
+    const _exp=(t)=>{const d=_daysToEffExpire(t);return d!==null&&d<0;};
+    const vencC=ts.filter(t=>['Open','Clear','Damage'].includes(_es(t))&&_exp(t)).length;
+    const openC=ts.filter(t=>_es(t)==='Open'&&!_exp(t)).length,clearC=ts.filter(t=>_es(t)==='Clear'&&!_exp(t)).length,closedC=ts.filter(t=>t.status==='Closed').length;
     const ticketFt=ts.reduce((s,t)=>s+(t.footage||0),0);const projTotal=p.totalFeet||ticketFt||1;
     const campoFt=ts.reduce((s,t)=>s+_producedFt(t),0);const pctCampoP=projTotal>0?Math.min(100,Math.round(campoFt/projTotal*100)):0;
     // ft clear = footage dos tickets Clear MENOS o já produzido parcialmente (completedFeet)
     // = o que realmente sobra pra trabalhar nos clear.
-    const clearFtP=ts.filter(t=>_es(t)==='Clear').reduce((s,t)=>s+Math.max(0,(t.footage||0)-(t.completedFeet||0)),0);
+    const clearFtP=ts.filter(t=>_es(t)==='Clear'&&!_exp(t)).reduce((s,t)=>s+Math.max(0,(t.footage||0)-(t.completedFeet||0)),0);
     const openFtP=ts.filter(t=>_es(t)==='Open').reduce((s,t)=>s+(t.footage||0),0);
     const concluidoFt=ts.filter(t=>t.status==='Closed').reduce((s,t)=>s+(t.footage||0),0);
     const damageFtV=ts.filter(t=>_es(t)==='Damage').reduce((s,t)=>s+(t.footage||0),0);
@@ -3325,7 +3336,7 @@ function renderProjects(){
     const aggLocStr=(locsFiltered.length?locsFiltered:locations).join(', ')||p.state;
     // Prioriza a localidade descrita no modal (p.desc); só usa cidades agregadas dos tickets como fallback.
     const locStr=p.desc||aggLocStr;
-    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:var(--amber)">${damageC}</span><span class="pstat-lbl">Damage</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${clearFtP?` · <span style="color:var(--green);font-weight:700">${clearFtP.toLocaleString()} ft clear</span>`:''}${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="exportProjectReport('${p.id}')" style="background:#3b82f6;color:white;border-color:#3b82f6">📊 Relatório</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
+    return`<div class="pcard"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px"><div style="flex:1"><div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><div class="pcard-name">${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);font-family:var(--mono)">📍 ${esc(locStr)}</div></div></div><span class="status-pill pill-${p.status==='Active'?'active':'done'}" style="flex-shrink:0;margin-left:8px">${esc(p.status)}</span></div><div class="pcard-meta">${esc(p.client)} · ${esc(p.state)}</div><div class="prog-bar"><div style="width:${pctClear}%;background:var(--green)"></div><div style="width:${Math.min(pctOpen,100-pctClear)}%;background:var(--red)"></div><div style="width:${Math.min(pctDamage,100-pctClear-pctOpen)}%;background:#f59e0b"></div><div style="width:${Math.min(pctConcluido,100-pctClear-pctOpen-pctDamage)}%;background:var(--text)"></div></div>${campoFt?`<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#3b82f6;font-weight:600;margin-bottom:2px"><span>📐 Campo: ${campoFt.toLocaleString()} ft</span><span>${pctCampoP}%</span></div><div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${pctCampoP}%;height:100%;background:#3b82f6;border-radius:2px"></div></div></div>`:''}<div class="pcard-stats"><div class="pstat"><span class="pstat-val" style="color:var(--red)">${openC}</span><span class="pstat-lbl">Open</span></div><div class="pstat"><span class="pstat-val" style="color:var(--green)">${clearC}</span><span class="pstat-lbl">Clear</span></div><div class="pstat"><span class="pstat-val" style="color:#d97706">${vencC}</span><span class="pstat-lbl">Vencidos</span></div><div class="pstat"><span class="pstat-val" style="color:var(--muted)">${closedC}</span><span class="pstat-lbl">Closed</span></div><div class="pstat"><span class="pstat-val">${ts.length}</span><span class="pstat-lbl">Total</span></div></div><div style="font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">${ticketFt.toLocaleString()} ft${clearFtP?` · <span style="color:var(--green);font-weight:700">${clearFtP.toLocaleString()} ft clear</span>`:''}${p.totalFeet?' / '+p.totalFeet.toLocaleString()+' ft total':''}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="shareProject('${p.id}')" style="background:var(--accent);color:white;border-color:var(--accent)">📤 Compartilhar</button><button class="btn btn-sm" onclick="openProjectMap('${p.id}')">Ver no mapa</button><button class="btn btn-sm" onclick="exportProjectReport('${p.id}')" style="background:#3b82f6;color:white;border-color:#3b82f6">📊 Relatório</button>${isAdmin?`<button class="btn btn-sm" onclick="editProject('${p.id}')">Editar</button><button class="btn btn-sm btn-danger" onclick="openDelProj('${p.id}')">Excluir</button>`:''}</div></div>`;
   };
 
   const filterTag=msSel.proj.length?` · filtrado por ${esc(msSel.proj.join(', '))}`:'';
@@ -3636,9 +3647,11 @@ function enterSharedView(pid){
   document.getElementById('shared-proj-name').textContent=locs0+(locs0?' — ':'')+p.name+(p.client?' · '+p.client:'');
 
   const ts=filterTickets({projectId:p.id});
-  const openC=ts.filter(t=>t.status==='Open').length;
-  const clearC=ts.filter(t=>t.status==='Clear').length;
-  const damageC=ts.filter(t=>t.status==='Damage').length;
+  const _es=(t)=>effectiveStatus(t);
+  const _exp=(t)=>{const d=_daysToEffExpire(t);return d!==null&&d<0;};
+  const vencC=ts.filter(t=>['Open','Clear','Damage'].includes(_es(t))&&_exp(t)).length;
+  const openC=ts.filter(t=>_es(t)==='Open'&&!_exp(t)).length;
+  const clearC=ts.filter(t=>_es(t)==='Clear'&&!_exp(t)).length;
   const totalFt=ts.reduce((s,t)=>s+(t.footage||0),0);
   const shDoneFt=ts.reduce((s,t)=>s+(t.completedFeet||0),0);
   const shPctCampo=totalFt>0?Math.round(shDoneFt/totalFt*100):0;
@@ -3646,7 +3659,7 @@ function enterSharedView(pid){
     <div class="shared-stat"><span class="shared-stat-val">${ts.length}</span><span class="shared-stat-lbl">Total</span></div>
     <div class="shared-stat"><span class="shared-stat-val" style="color:var(--red)">${openC}</span><span class="shared-stat-lbl">Open</span></div>
     <div class="shared-stat"><span class="shared-stat-val" style="color:var(--green)">${clearC}</span><span class="shared-stat-lbl">Clear</span></div>
-    <div class="shared-stat"><span class="shared-stat-val" style="color:var(--amber)">${damageC}</span><span class="shared-stat-lbl">Damage</span></div>
+    <div class="shared-stat"><span class="shared-stat-val" style="color:#d97706">${vencC}</span><span class="shared-stat-lbl">Vencidos</span></div>
     <div class="shared-stat"><span class="shared-stat-val">${totalFt.toLocaleString()}</span><span class="shared-stat-lbl">Feet</span></div>`
     +(shDoneFt?`<div style="margin-top:6px;padding:6px 10px;background:var(--bg);border-radius:var(--r);font-size:11px"><div style="display:flex;justify-content:space-between;align-items:center;color:#3b82f6;font-weight:600;margin-bottom:3px"><span>📐 Progresso campo</span><span>${shPctCampo}%</span></div><div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${shPctCampo}%;height:100%;background:#3b82f6;border-radius:3px"></div></div><div style="text-align:center;font-size:10px;color:var(--muted);margin-top:3px">${shDoneFt.toLocaleString()} / ${totalFt.toLocaleString()} ft</div></div>`:'');
 

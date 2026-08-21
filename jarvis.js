@@ -89,43 +89,23 @@
     setTimeout(refreshVoices, 1500);
   }
 
-  // ── Voz NEURAL (Antônio) via motor Edge TTS da Microsoft ──
-  // MESMA voz em QUALQUER navegador (Chrome, Edge, celular). Grátis, sem instalar.
-  // Endpoint não-oficial (o mesmo do edge-tts). Se falhar, cai automático na voz do navegador.
-  const NEURAL_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-  const NEURAL_VOICE = 'pt-BR-AntonioNeural';
+  // ── Voz NEURAL (Antônio) via BACKEND (Supabase Edge Function "tts") ──
+  // O navegador NÃO consegue chamar o motor Edge TTS direto (a Microsoft recusa origem
+  // de site — testado). Então o áudio é gerado no SERVIDOR e o site só TOCA o mp3.
+  // MESMA voz em qualquer navegador. Se o backend não responder → voz do navegador (fallback).
+  const TTS_FN_URL = 'https://ofbqtaulvzeltfpqcjhh.supabase.co/functions/v1/bright-api';
+  const _ANON = ((document.querySelector('meta[name="supabase-anon-key"]') || {}).content) || '';
   let NEURAL_ON = true;
   let _curAudio = null;
-  const _xmlEsc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-  async function _secMsGec() {
-    let ticks = Math.floor(Date.now() / 1000) + 11644473600;
-    ticks -= ticks % 300; ticks *= 10000000;
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ticks + NEURAL_TOKEN));
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-  }
   async function speakNeural(text) {
-    if (!('WebSocket' in window) || !window.crypto || !crypto.subtle) throw new Error('sem WebSocket/crypto');
-    const gec = await _secMsGec();
-    const url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${NEURAL_TOKEN}&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=1-131.0.2903.86`;
-    const chunks = await new Promise((resolve, reject) => {
-      let ws; try { ws = new WebSocket(url); } catch (e) { return reject(e); }
-      ws.binaryType = 'arraybuffer';
-      const buf = [];
-      const to = setTimeout(() => { try { ws.close(); } catch (e) {} reject(new Error('timeout')); }, 5000);
-      ws.onopen = () => {
-        ws.send(`X-Timestamp:${new Date().toString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}`);
-        const rid = ((crypto.randomUUID && crypto.randomUUID()) || ('r' + Date.now())).replace(/-/g, '');
-        const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='pt-BR'><voice name='${NEURAL_VOICE}'><prosody rate='+6%'>${_xmlEsc(text)}</prosody></voice></speak>`;
-        ws.send(`X-RequestId:${rid}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${new Date().toString()}\r\nPath:ssml\r\n\r\n${ssml}`);
-      };
-      ws.onmessage = (ev) => {
-        if (typeof ev.data === 'string') { if (ev.data.includes('Path:turn.end')) { clearTimeout(to); try { ws.close(); } catch (e) {} resolve(buf); } }
-        else { const dv = new DataView(ev.data); const hlen = dv.getUint16(0); buf.push(ev.data.slice(2 + hlen)); }
-      };
-      ws.onerror = () => { clearTimeout(to); reject(new Error('ws error')); };
+    const r = await fetch(`${TTS_FN_URL}?rate=%2B6%25&text=${encodeURIComponent(text)}`, {
+      cache: 'no-store',
+      headers: _ANON ? { 'apikey': _ANON, 'Authorization': 'Bearer ' + _ANON } : {},
     });
-    if (!chunks.length) throw new Error('sem áudio');
-    return new Blob(chunks, { type: 'audio/mpeg' });
+    if (!r.ok) throw new Error('tts ' + r.status);
+    const blob = await r.blob();
+    if (!blob || !blob.size || /json/.test(blob.type)) throw new Error('sem áudio');
+    return blob;
   }
 
   // Transforma o texto pra FALA (fonética "Jarvis", IDs dígito a dígito, estados por extenso).
@@ -829,7 +809,7 @@
       const clr = has('liberad', 'clear', 'trabalhar'), op = has('aberto', 'open'), dm = has('dano', 'damage');
       const metric = clr ? (ts) => clearAvailableFt(ts) : op ? (ts) => ts.filter(t => effStatus(t) === 'Open').length : dm ? (ts) => ts.filter(t => effStatus(t) === 'Damage').length : (ts) => ts.length;
       const lbl = clr ? 'pés liberados' : op ? 'tickets abertos' : dm ? 'com dano' : 'tickets';
-      const ranked = ['FL', 'IN', 'IL', 'WI', 'KY'].map(st => ({ st, v: metric(visibleTickets().filter(t => norm(t.state) === norm(st))) })).sort((a, b) => asc ? a.v - b.v : b.v - a.v);
+      const ranked = ['FL', 'IN', 'IL', 'WI', 'KY', 'GA'].map(st => ({ st, v: metric(visibleTickets().filter(t => norm(t.state) === norm(st))) })).sort((a, b) => asc ? a.v - b.v : b.v - a.v);
       return { text: `Em ${lbl}: ${ranked.map(r => `${r.st} ${fmt(r.v)}`).join(', ')}.` };
     }
 

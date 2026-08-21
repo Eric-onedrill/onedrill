@@ -142,7 +142,7 @@ let _msDirty={};
 function _msLbl(key){const sel=msSel[key]||[];return !sel.length?'Todos estados':sel.length<=2?sel.map(esc).join(', '):sel.length+' estados';}
 function msBox(key,states,allLabel){
   const sel=msSel[key]||(msSel[key]=[]);
-  const opts=(states&&states.length)?states:['FL','IN','IL','WI','KY'];
+  const opts=(states&&states.length)?states:['FL','IN','IL','WI','KY','GA'];
   const rows=opts.map(s=>'<label class="ms-opt"><input type="checkbox" value="'+esc(s)+'" '+(sel.indexOf(s)>=0?'checked':'')+' onchange="msToggle(\''+key+'\',\''+esc(s)+'\',this.checked)">'+esc(s)+'</label>').join('');
   return '<span class="ms" id="ms-'+key+'">'
     +'<button type="button" class="fi ms-btn" onclick="msPop(\''+key+'\',event)">'+esc(_msLbl(key)||allLabel||'Todos estados')+' <span class="ms-cx">▾</span></button>'
@@ -1035,7 +1035,7 @@ function renderContacts(){
   const _slc=document.getElementById('ms-contacts-slot');
   if(_slc){
     const _cst=[...new Set(utilContacts.map(c=>c.state).filter(Boolean))];
-    const _op=['FL','IN','IL','WI','KY'].filter(s=>_cst.includes(s));
+    const _op=['FL','IN','IL','WI','KY','GA'].filter(s=>_cst.includes(s));
     const _ordered=_op.concat(_cst.filter(s=>!_op.includes(s)).sort());
     _slc.innerHTML=msBox('contacts',_ordered);
   }
@@ -3075,7 +3075,7 @@ function riskLabel(s){
 }
 
 function renderTable(){
-  const _sl=document.getElementById('ms-tbl-slot');if(_sl)_sl.innerHTML=msBox('tbl',['FL','IN','IL','WI','KY']);
+  const _sl=document.getElementById('ms-tbl-slot');if(_sl)_sl.innerHTML=msBox('tbl',['FL','IN','IL','WI','KY','GA']);
   const sr=(document.getElementById('tbl-srch').value||'').toLowerCase();
   const st=document.getElementById('tbl-stat').value;
   const sta=msSel.tbl;
@@ -6068,7 +6068,7 @@ async function renderSyncHealth(){
     const{data:rows,error}=await sb.from('sync_811_log').select('state,status,started_at').order('started_at',{ascending:false}).limit(40);
     if(error||!rows)return;
     const el=document.getElementById('sync-health-widget');if(!el)return;
-    const by={IN:[],FL:[],IL:[],WI:[],KY:[]};
+    const by={IN:[],FL:[],IL:[],WI:[],KY:[],GA:[]};
     for(const row of rows){if(by[row.state])by[row.state].push(row);}
     let h='';
     for(const[st,lg]of Object.entries(by)){
@@ -6094,7 +6094,7 @@ async function loadLastSync(){
     if(error||!rows||!rows.length){console.warn('[LastSync]',error?.message||'Nenhum registro');return;}
     const by={};for(const row of rows){if(row.finished_at&&!by[row.state])by[row.state]=row;}
     const parts=[];
-    for(const st of ['IN','FL','IL','WI','KY']){
+    for(const st of ['IN','FL','IL','WI','KY','GA']){
       const row=by[st];if(!row||!row.finished_at){parts.push(st+': —');continue;}
       const d=new Date(row.finished_at);const dm=Math.round((Date.now()-d.getTime())/60000);
       let ago;if(dm<2)ago='agora';else if(dm<60)ago=dm+'min atrás';else if(dm<120)ago='1h atrás';else if(dm<1440)ago=Math.round(dm/60)+'h atrás';else ago=Math.round(dm/1440)+'d atrás';
@@ -6123,7 +6123,7 @@ function renderHealthCard(){
   const h=window._syncHealth;
   if(!h){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Carregando...</div>';return;}
   let html='';
-  for(const st of ['IN','FL','IL','WI','KY']){
+  for(const st of ['IN','FL','IL','WI','KY','GA']){
     const row=h.states[st];
     if(!row){html+='<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:600">'+st+'</span> <span style="color:var(--muted)">— sem dados</span></div>';continue;}
     const d=new Date(row.finished_at);const dm=Math.round((Date.now()-d.getTime())/60000);

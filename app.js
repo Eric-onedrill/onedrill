@@ -529,7 +529,11 @@ function projectToDb(p){
     status:p.status||'Active', description:p.desc||'', total_feet:p.totalFeet||0,
     center_lat:p.centerCoords?p.centerCoords[0]:null,
     center_lon:p.centerCoords?p.centerCoords[1]:null,
-    is_manual:p._manual||false
+    is_manual:p._manual||false,
+    // O DEFAULT da coluna no banco é false, então projeto novo nascia FECHADO e o link
+    // compartilhado caía no login ("pede senha" no campo). Regra do Eric: TODO projeto
+    // nasce aberto pra leitura por link. Só fica fechado se algo setar shared=false.
+    shared:p.shared!==false
   };
 }
 
@@ -3569,12 +3573,64 @@ async function shareProject(pid){
   // que deixa qualquer usuário logado marcar como compartilhado um projeto que ele enxerga,
   // sem precisar de acesso de edição. (Antes de rodar o SQL do RLS a função ainda não existe;
   // o erro é ignorado e o link funciona igual, pois sem RLS o anon lê tudo.)
-  try{ const{error}=await sb.rpc('share_project',{pid:pid}); if(error)console.warn('[share]',error.message); else p.shared=true; }
-  catch(e){ console.warn('[share]',e); }
+  // Antes: o erro da RPC era só logado no console e o toast dizia "Link copiado!" de
+  // qualquer jeito — então um link que AINDA PEDIA SENHA parecia compartilhado.
+  // Agora: tenta a RPC, cai pro update direto (admin), CONFERE lendo de volta, e só
+  // afirma sucesso se o projeto estiver de fato aberto (shared=true).
+  let okShared=false;
+  try{ const{data,error}=await sb.rpc('share_project',{pid:pid}); if(!error&&data!==false)okShared=true; }
+  catch(e){ console.warn('[share] rpc',e); }
+  if(!okShared){
+    try{ const{error}=await sb.from('projects').update({shared:true}).eq('id',pid); if(!error)okShared=true; }
+    catch(e){ console.warn('[share] update',e); }
+  }
+  // confere de verdade (evita prometer link aberto sem estar)
+  try{
+    const{data:chk}=await sb.from('projects').select('shared').eq('id',pid).limit(1);
+    okShared=!!(chk&&chk[0]&&chk[0].shared===true);
+  }catch(e){ console.warn('[share] verify',e); }
+  p.shared=okShared;
   const url=window.location.origin+window.location.pathname+'?p='+encodeURIComponent(p.id);
+  const msgOk='Link copiado! Abre sem senha para quem receber.';
+  const msgBad='Link copiado, MAS não confirmei a liberação — pode pedir login. Avise a engenharia.';
+  const done=()=>toast(okShared?msgOk:msgBad,okShared?'success':'warn');
   if(navigator.clipboard){
-    navigator.clipboard.writeText(url).then(()=>toast('Link copiado! Quem tiver o link verá este projeto.','success')).catch(()=>{prompt('Copie o link:',url);});
-  }else{prompt('Copie o link:',url);}
+    navigator.clipboard.writeText(url).then(done).catch(()=>{prompt('Copie o link:',url);done();});
+  }else{prompt('Copie o link:',url);done();}
+}
+// ── LINK COMPARTILHADO: o link é do CAMPO e é INDEPENDENTE do sistema ──
+// Regra (Eric, 2026-08-24): quem abre ?p= NUNCA pode ver tela de senha nem voltar ao
+// menu. Antes, qualquer falha (banco fora, timeout de 4G ruim, projeto fechado)
+// caía no login-screen → o campo achava que precisava de senha e não conseguia entrar.
+// Agora todo caminho de falha do link mostra ESTA tela: recado claro + "Tentar de novo".
+function _sharedPidInUrl(){
+  try{ return new URLSearchParams(window.location.search).get('p')||''; }catch(_e){ return ''; }
+}
+function showFieldError(title,msg){
+  ['loading-screen','login-screen','app-shell'].forEach(id=>{
+    const el=document.getElementById(id); if(el){el.style.display='none';el.classList.add('hidden');}
+  });
+  document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
+  let el=document.getElementById('field-error-screen');
+  if(!el){
+    el=document.createElement('div');
+    el.id='field-error-screen';
+    el.setAttribute('style','position:fixed;inset:0;z-index:99999;display:flex;align-items:center;'
+      +'justify-content:center;padding:24px;background:#14110f;color:#f5f2ee;'
+      +'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;text-align:center');
+    document.body.appendChild(el);
+  }
+  el.innerHTML='<div style="max-width:420px">'
+    +'<img src="logo.png?v=2" alt="OneDrill" style="width:64px;height:64px;object-fit:contain;margin-bottom:14px">'
+    +'<div style="font-size:13px;letter-spacing:.18em;opacity:.6;margin-bottom:18px">ONEDRILL</div>'
+    +'<div style="font-size:19px;font-weight:700;margin-bottom:10px">'+esc(title)+'</div>'
+    +'<div style="font-size:14px;line-height:1.55;opacity:.85;margin-bottom:22px">'+esc(msg)+'</div>'
+    +'<button id="field-error-retry" style="background:#c9a227;color:#14110f;border:0;border-radius:8px;'
+    +'padding:12px 22px;font-size:15px;font-weight:700;cursor:pointer">Tentar de novo</button>'
+    +'<div style="font-size:12px;opacity:.5;margin-top:18px">Não é necessário senha para este link.</div>'
+    +'</div>';
+  const btn=document.getElementById('field-error-retry');
+  if(btn)btn.onclick=()=>location.reload();
 }
 function checkProjectUrl(){
   const params=new URLSearchParams(window.location.search);
@@ -3593,14 +3649,11 @@ function enterSharedView(pid){
   isSharedView=true;sharedProjectId=pid;
   const p=projects.find(x=>x.id===pid||x.name===pid);
   if(!p){
-    // ID inválido — mostra tela de login normal em vez de pular pro app
-    // (era enterViewer() antes, mas agora viewer pede senha; não faz sentido
-    // pedir senha em fallback de URL inválida).
-    toast('Projeto não encontrado','danger');
+    // ID inválido / projeto não visível pro link. NUNCA cair no login (o campo achava
+    // que precisava de senha). Mostra a tela do campo com recado e "Tentar de novo".
     isSharedView=false;sharedProjectId=null;
-    history.replaceState(null,'',window.location.pathname);
-    document.getElementById('login-screen').classList.remove('hidden');
-    document.getElementById('login-screen').style.display='flex';
+    showFieldError('Projeto não disponível',
+      'Este link não está apontando para um projeto ativo. Confirme o link com o escritório.');
     return;
   }
   sharedProjectId=p.id;
@@ -6234,8 +6287,26 @@ window.addEventListener('load',async()=>{
   // mesmo que o init do banco falhe (rede ruim) — senão o admin que esqueceu a senha trava.
   if(_recoveryMode||/type=recovery/.test(location.hash||'')){ document.getElementById('loading-screen').style.display='none'; showSetPasswordScreen('recovery'); return; }
   document.getElementById('loading-screen').style.display='none';
-  if(!ok){document.getElementById('login-screen').classList.remove('hidden');document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;}
+  if(!ok){
+    // Banco fora / timeout (4G ruim no campo). Se veio por LINK compartilhado, NUNCA
+    // mostrar login: 1 nova tentativa e, se falhar, tela do campo com "Tentar de novo".
+    if(_sharedPidInUrl()){
+      const ok2=await initSupabase();
+      if(!(ok2&&checkProjectUrl())){
+        showFieldError('Não foi possível carregar agora',
+          'Verifique a conexão de internet e toque em "Tentar de novo". Se continuar, avise o escritório.');
+      }
+      return;
+    }
+    document.getElementById('login-screen').classList.remove('hidden');document.getElementById('login-screen').style.display='flex';setTimeout(()=>toast('Aviso: erro ao conectar ao banco.','warn'),500);return;
+  }
   if(checkProjectUrl())return;
+  // Link compartilhado que não resolveu (projeto fechado/removido): tela do campo, não login.
+  if(_sharedPidInUrl()){
+    showFieldError('Projeto não disponível',
+      'Este link não está apontando para um projeto ativo. Confirme o link com o escritório.');
+    return;
+  }
   try{
     const{data:{session}}=await sb.auth.getSession();
     if(session){

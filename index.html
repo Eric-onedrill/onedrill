@@ -681,7 +681,7 @@
   <span id="tmsg"></span>
 </div>
 
-<script src="app.js?v=20260821ga"></script>
+<script src="app.js?v=20260824share"></script>
 <script src="jarvis.js?v=20260821ga"></script>
 
 <!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
@@ -716,7 +716,9 @@
     'try-login':             () => tryLogin(),
     'forgot-password':       () => forgotPassword(),
     'submit-new-pw':         () => submitNewPassword(),
-    'exit-shared':           () => exitSharedView(),
+    // 'exit-shared' REMOVIDO (2026-08-24): o link compartilhado é INDEPENDENTE do sistema.
+    // Esse gatilho chamava exitSharedView(), que abria a tela de LOGIN — ou seja, dava um
+    // caminho de volta ao menu/senha a partir do link do campo. Nenhum elemento o usava.
     'toggle-shared-panel':   () => toggleSharedPanel(),
     'sh-fit-all':            () => shFitAll(),
     'export-excel':          () => exportExcel(),

@@ -112,7 +112,7 @@
   function transformSpoken(text) {
     let s = text.replace(/j\.\s*a\.\s*r\.\s*v\.\s*i\.\s*s\.?/gi, SPOKEN_NAME).replace(/jarvis/gi, SPOKEN_NAME);
     s = s.replace(/\d{6,}/g, m => m.split('').join(' '));
-    s = s.replace(/\b(FL|IN|IL|WI)\b/g, m => ({ FL: 'Flórida', IN: 'Indiana', IL: 'Illinois', WI: 'Wisconsin' }[m]));
+    s = s.replace(/\b(FL|IN|IL|WI|KY|GA)\b/g, m => ({ FL: 'Flórida', IN: 'Indiana', IL: 'Illinois', WI: 'Wisconsin', KY: 'Kentucky', GA: 'Geórgia' }[m]));
     return s;
   }
   function _speakBrowser(spoken) {

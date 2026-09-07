@@ -3858,9 +3858,58 @@ async def cleanup_canceled(state):
 
 
 # ── │ SECTION: FILTER_SYNC │ CLEAR TICKET CACHE ───────────────────────────────
+def _ticket_expired_dead(t, grace_days=0):
+    """True se o ticket JÁ VENCEU (morto — não vale raspar).
+    grace_days=0 → vence hoje: ainda checa; a partir do dia seguinte: pula.
+    Nunca True p/ ticket sem expire, nem p/ renovado com expire STALE
+    (expire == expire_old: o renewTicket herdou a data do ANTIGO e o portal
+    ainda não devolveu a data real do novo — precisa raspar pra corrigir).
+
+    Fix 2026-08-27: antes isentava QUALQUER ticket com old_ticket2. Como o
+    old_ticket2 é permanente (o renewTicket renomeia o registro e o número
+    antigo fica gravado pra sempre), um ticket renovado nunca mais era podado
+    — vencido há meses, seguia sendo raspado 3x/dia e, se Clear, ainda furava
+    o cache de 24h pela regra renewed_clear. IN raspava 224 tickets p/ vigiar 1
+    aberto de verdade (218 já vencidos)."""
+    e = normalize_expire((t.get("expire") or "").strip())   # -> MM/DD/YYYY ou ''
+    if not e:
+        return False
+    if (t.get("old_ticket2") or "").strip():
+        eo = normalize_expire((t.get("expire_old") or "").strip())
+        if eo and eo == e:
+            return False   # renovação ainda sem a data real do portal
+    try:
+        d = datetime.strptime(e, "%m/%d/%Y").date()
+    except Exception:
+        return False
+    return d < (datetime.now().date() - timedelta(days=grace_days))
+
+
+_PROJ_INATIVOS_CACHE = None
+
+def _projetos_inativos():
+    """IDs de projetos que NAO estao Active (Completed/Paused/etc).
+    Cache por execucao — a lista de projetos e pequena e nao muda no meio do sync.
+    Falha de leitura devolve set() (conservador: na duvida, raspa)."""
+    global _PROJ_INATIVOS_CACHE
+    if _PROJ_INATIVOS_CACHE is not None:
+        return _PROJ_INATIVOS_CACHE
+    try:
+        projs = sb_get("projects", "&select=id,status")
+        _PROJ_INATIVOS_CACHE = {
+            p["id"] for p in (projs or [])
+            if (p.get("status") or "Active").strip().lower() != "active"
+        }
+    except Exception as e:
+        log.warning(f"[Filtro] Nao consegui ler projetos ({e}) — nao vou filtrar por projeto")
+        _PROJ_INATIVOS_CACHE = set()
+    return _PROJ_INATIVOS_CACHE
+
+
 def filter_tickets_for_sync(tickets, state):
     """Filtra tickets que realmente precisam de scraping.
 
+    - VENCIDOS (já passou o vencimento, não renovados): PULAR (ticket morto)
     - Open / Damage: SEMPRE verificar
     - Clear SEM expire: SEMPRE verificar (provavelmente ticket renovado
       que teve expire zerado — precisa buscar data nova no portal)
@@ -3869,6 +3918,25 @@ def filter_tickets_for_sync(tickets, state):
       tem state/ticket_num quebrado em algum canto)
     - Clear: Pular se TODAS utilities já responderam E último sync < CLEAR_CACHE_HOURS
     """
+    # FILTRO 1 (Eric, 2026-08-28): PROJETO ENCERRADO → não raspa mais.
+    # A rotina só olhava o ticket; se o projeto já foi concluído, não faz sentido ficar
+    # consultando o portal 3x/dia. Ticket SEM projeto continua sendo verificado (é o
+    # "sem projeto" que o Eric acompanha no painel e pode virar alocação nova).
+    inativos = _projetos_inativos()
+    if inativos:
+        fora = [t for t in tickets if (t.get("project_id") or "") in inativos]
+        if fora:
+            log.info(f"[{state}] {len(fora)} ticket(s) pulados — PROJETO encerrado")
+            tickets = [t for t in tickets if (t.get("project_id") or "") not in inativos]
+
+    # FILTRO 2: Vencidos (morto, não renovado) → fora do scraping. Grande economia no WI/IL.
+    expired = [t for t in tickets if _ticket_expired_dead(t)]
+    if expired:
+        nums = ", ".join(t["ticket"] for t in expired[:6])
+        extra = "" if len(expired) <= 6 else f" (+{len(expired)-6} mais)"
+        log.info(f"[{state}] {len(expired)} ticket(s) VENCIDOS pulados (não renovados): {nums}{extra}")
+    tickets = [t for t in tickets if not _ticket_expired_dead(t)]
+
     must_check = [t for t in tickets if t.get("status") in ("Open", "Damage")]
     clear_tickets = [t for t in tickets if t.get("status") == "Clear"]
 
@@ -3968,11 +4036,6 @@ async def sync_state(state, triggered_by="manual"):
             log.info(f"[{state}] Cache: {skipped} tickets Clear pulados (sem pendências, verificados recentemente)")
 
         checked = len(tickets_to_scrape)
-        if not tickets_to_scrape:
-            log.info(f"[{state}] Nenhum ticket precisa verificação agora ({len(all_tickets)} ativos, {skipped} em cache)")
-            log_finish(lid, 0, 0)
-            return
-
         nums = [t["ticket"] for t in tickets_to_scrape]
 
         # ── Inclui tickets ANTIGOS de renovações em carência (respostas podem ter atualizado) ──
@@ -3986,6 +4049,12 @@ async def sync_state(state, triggered_by="manual"):
             nums_set.add(old_num)
             grace_old_map[old_num] = t["id"]
             log.info(f"[{state}] Incluindo ticket antigo {old_num} (carência de {t['ticket']})")
+
+        # Guarda DEPOIS da carência: um ciclo sem tickets próprios ainda pode ter antigos a raspar.
+        if not nums:
+            log.info(f"[{state}] Nenhum ticket precisa verificação agora ({len(all_tickets)} ativos, {skipped} em cache)")
+            log_finish(lid, 0, 0)
+            return
 
         log.info(f"[{state}] {checked} tickets para verificar (de {len(all_tickets)} ativos)"
                  + (f" + {len(grace_old_map)} antigos em carência" if grace_old_map else ""))
@@ -4493,16 +4562,35 @@ async def sync_il(triggered_by="manual"):
             log.info(f"[IL] Cache: {skipped} tickets Clear pulados")
 
         checked = len(tickets_to_scrape)
-        if not tickets_to_scrape:
+        nums = [t["ticket"] for t in tickets_to_scrape]
+
+        # ── Inclui tickets ANTIGOS de renovações em carência (respostas ainda mudam) ──
+        # Fix 2026-08-27: só o sync_state (FL/IN) fazia isso. Aqui o número ANTIGO nunca
+        # era reconsultado depois da renovação, então as respostas dele congelavam no
+        # snapshot do dia da renovação — o app seguia mostrando "pendências do ticket
+        # antigo" com as utilities já respondidas no portal (e o inverso também).
+        grace_old_map = {}  # old_ticket_num → new_ticket_id
+        nums_set = set(nums)
+        for t in all_tickets:
+            in_grace, old_num = is_in_renewal_grace(t)
+            if not in_grace or not old_num or old_num in nums_set:
+                continue
+            nums.append(old_num)
+            nums_set.add(old_num)
+            grace_old_map[old_num] = t["id"]
+            log.info(f"[IL] Incluindo ticket antigo {old_num} (carência de {t['ticket']})")
+
+        # Guarda DEPOIS da carência: um ciclo sem tickets próprios ainda pode ter antigos a raspar.
+        if not nums:
             log.info(f"[IL] Nenhum ticket precisa verificação ({len(all_tickets)} ativos, {skipped} em cache)")
             log_finish(lid, 0, 0)
             return
 
-        nums = [t["ticket"] for t in tickets_to_scrape]
-        log.info(f"[IL] {checked} tickets para verificar (de {len(all_tickets)} ativos)")
+        log.info(f"[IL] {checked} tickets para verificar (de {len(all_tickets)} ativos)"
+                 + (f" + {len(grace_old_map)} antigos em carência" if grace_old_map else ""))
         results = await scrape_il(nums, tickets_data=tickets_to_scrape)
 
-        summary = save_to_supabase("IL", results, all_tickets)
+        summary = save_to_supabase("IL", results, all_tickets, grace_old_map=grace_old_map)
         log_finish(lid, checked, summary.responses_saved)
         log.info(f"[IL] CONCLUÍDO  {checked} verificados, {skipped} em cache | {summary}")
 
@@ -5332,18 +5420,44 @@ def _pdf_disk_map(state):
 
 
 def _ticket_has_pdf_on_disk(t, disk_map, min_bytes):
-    """True se existe arquivo PDF (>min_bytes) pro nº atual OU algum nº da cadeia de renovação."""
-    nums = [str(t.get("ticket") or "").strip()]
-    nums += [x.strip() for x in (t.get("old_ticket2") or "").split(" → ") if x.strip()]
-    for n in nums:
-        p = disk_map.get(n)
-        if p:
-            try:
-                if os.path.getsize(p) > min_bytes:
-                    return True
-            except OSError:
-                pass
-    return False
+    """True se JÁ existe em disco o PDF que ESTE ticket geraria AGORA (>min_bytes).
+
+    Mudança 2026-09-04 (pedido do Eric: "cada ticket mesmo que renovado precisa ser
+    salvo"): antes aceitava o PDF de QUALQUER número da cadeia de renovação, então um
+    ticket renovado nunca ganhava o PDF do número novo — ficava para sempre com o PDF
+    do número antigo (data de validade e respostas da época). Ex.: 205606399 estava só
+    com 152608446.pdf, e 197601725 só com 170605163.pdf.
+
+    Agora compara com o MESMO nome que `_compute_pdf_paths` usaria (via
+    `_pdf_query_number`): em carência o alvo é o nº ANTIGO (é dele que vêm as respostas
+    das utilities), fora da carência é o nº ATUAL. Assim cada geração da renovação ganha
+    o seu arquivo, sem re-salvar o mesmo PDF em todo ciclo."""
+    alvo = str(_pdf_query_number(t)[0] or "").strip()
+    if not alvo:
+        return False
+    p = disk_map.get(alvo)
+    if not p:
+        return False
+    try:
+        if os.path.getsize(p) <= min_bytes:
+            return False
+    except OSError:
+        return False
+
+    # O arquivo existe — mas o PDF é a EVIDÊNCIA do estado do ticket. Se o status mudou
+    # desde que ele foi salvo (Open→Clear, Clear→Cancel), o PDF em disco está retratando
+    # um estado que já não vale: gera de novo. Sem isso, incluir status não-terminais na
+    # rotina congelaria o PDF de um ticket Open mostrando pendências para sempre.
+    # Anexo antigo sem "status" (todos os salvos até 04/09/2026) não tem baseline de
+    # comparação → mantém, para não disparar re-geração em massa dos ~1.200 já existentes.
+    st_atual = (t.get("status") or "").strip()
+    for a in (t.get("attachments") or []):
+        if a.get("type") == "ticket_pdf" and a.get("name") == alvo + ".pdf":
+            st_pdf = (a.get("status") or "").strip()
+            if st_pdf and st_atual and st_pdf != st_atual:
+                return False
+            break
+    return True
 
 
 def _compute_pdf_paths(t, projects_map, renewal_groups, base_dir):
@@ -5470,7 +5584,10 @@ async def save_ticket_pdfs_il(force=False):
         log.error("[IL] PDF: IL_USER/IL_PASS não definidos no .env")
         return
 
-    all_tickets = sb_get("tickets", "&state=eq.IL&status=in.(Clear,Damage,Completed,Closed)&order=ticket")
+    # Eric 2026-09-04: TODOS os status. Antes so Clear/Damage/Completed/Closed, entao
+    # ticket Cancel nunca ganhava PDF — e ele FOI Clear antes de ser cancelado, essa
+    # evidencia precisa existir. Ex.: 205606399 e 190601494.
+    all_tickets = sb_get("tickets", "&state=eq.IL&order=ticket")
     if not all_tickets:
         log.info("[IL] PDF: nenhum ticket Clear/Damage/Completed/Closed")
         return
@@ -5707,7 +5824,8 @@ async def save_ticket_pdfs_il(force=False):
                             "name": pdf_filename,
                             "type": "ticket_pdf",
                             "saved_at": datetime.now().isoformat(),
-                            "size_kb": round(file_size / 1024, 1)
+                            "size_kb": round(file_size / 1024, 1),
+                            "status": (t.get("status") or "").strip(),   # p/ re-gerar quando o status mudar
                         }
                         if used_old:
                             att["old_ticket"] = query_tnum
@@ -5929,6 +6047,27 @@ async def scrape_diggers_ticket(page, tnum, retry=True, debug_dump=False):
         location_parts.append(county_match.group(1).strip() + " County")
     if location_parts:
         result["location_text"] = " / ".join(location_parts)
+
+    # ── 8b. Vencimento WI = Start Date + 10 dias corridos (regra WI) ─────────
+    # O portal público mostra "Start Date: MM/DD/YYYY hh:mm AM". Import já faz start+10;
+    # aqui garante que o SYNC também preencha/atualize (senão renovação fica sem expire p/ sempre).
+    _sd_txt = body
+    if not re.search(r"Start\s*Date", _sd_txt, re.I):
+        # Start Date fica no frame de info do ticket, que pode NÃO ser o result_frame lido acima.
+        for _fr in page.frames:
+            try:
+                _t = await _fr.locator("body").inner_text()
+            except Exception:
+                continue
+            if re.search(r"Start\s*Date", _t, re.I):
+                _sd_txt = _t; break
+    sd_match = re.search(r"Start\s*Date\s*:?\s*(\d{1,2}/\d{1,2}/\d{4})", _sd_txt)
+    if sd_match:
+        try:
+            _sdt = datetime.strptime(sd_match.group(1), "%m/%d/%Y")
+            result["expire_date"] = (_sdt + timedelta(days=10)).strftime("%m/%d/%Y")
+        except Exception:
+            pass
 
     # ── 9. Parse tabela Positive Response via JS dentro do frame ────────────
     js_extract = """() => {
@@ -6165,16 +6304,35 @@ async def sync_wi(triggered_by="manual"):
             log.info(f"[WI] Cache: {skipped} tickets Clear pulados")
 
         checked = len(tickets_to_scrape)
-        if not tickets_to_scrape:
+        nums = [t["ticket"] for t in tickets_to_scrape]
+
+        # ── Inclui tickets ANTIGOS de renovações em carência (respostas ainda mudam) ──
+        # Fix 2026-08-27: só o sync_state (FL/IN) fazia isso. Aqui o número ANTIGO nunca
+        # era reconsultado depois da renovação, então as respostas dele congelavam no
+        # snapshot do dia da renovação — o app seguia mostrando "pendências do ticket
+        # antigo" com as utilities já respondidas no portal (e o inverso também).
+        grace_old_map = {}  # old_ticket_num → new_ticket_id
+        nums_set = set(nums)
+        for t in all_tickets:
+            in_grace, old_num = is_in_renewal_grace(t)
+            if not in_grace or not old_num or old_num in nums_set:
+                continue
+            nums.append(old_num)
+            nums_set.add(old_num)
+            grace_old_map[old_num] = t["id"]
+            log.info(f"[WI] Incluindo ticket antigo {old_num} (carência de {t['ticket']})")
+
+        # Guarda DEPOIS da carência: um ciclo sem tickets próprios ainda pode ter antigos a raspar.
+        if not nums:
             log.info(f"[WI] Nenhum ticket precisa verificação ({len(all_tickets)} ativos, {skipped} em cache)")
             log_finish(lid, 0, 0)
             return
 
-        nums = [t["ticket"] for t in tickets_to_scrape]
-        log.info(f"[WI] {checked} tickets para verificar (de {len(all_tickets)} ativos)")
+        log.info(f"[WI] {checked} tickets para verificar (de {len(all_tickets)} ativos)"
+                 + (f" + {len(grace_old_map)} antigos em carência" if grace_old_map else ""))
         results = await scrape_wi(nums, tickets_data=tickets_to_scrape)
 
-        summary = save_to_supabase("WI", results, all_tickets)
+        summary = save_to_supabase("WI", results, all_tickets, grace_old_map=grace_old_map)
         log_finish(lid, checked, summary.responses_saved)
         log.info(f"[WI] CONCLUÍDO  {checked} verificados, {skipped} em cache | {summary}")
 
@@ -10098,7 +10256,10 @@ async def save_ticket_pdfs(state="FL", force=False):
       4. CDP Page.printToPDF com margins 0.5in → PDF idêntico ao "Save as PDF" do Chrome
     """
 
-    all_tickets = sb_get("tickets", f"&state=eq.{state}&status=in.(Clear,Damage,Completed,Closed)&order=ticket")
+    # Eric 2026-09-04: TODOS os status. Antes so Clear/Damage/Completed/Closed, entao
+    # ticket Cancel nunca ganhava PDF — e ele FOI Clear antes de ser cancelado, essa
+    # evidencia precisa existir. Ex.: 205606399 e 190601494.
+    all_tickets = sb_get("tickets", f"&state=eq.{state}&order=ticket")
     if not all_tickets:
         log.info(f"[{state}] PDF: nenhum ticket Clear/Damage/Completed/Closed")
         return
@@ -10280,7 +10441,8 @@ async def save_ticket_pdfs(state="FL", force=False):
                         "name": pdf_filename,
                         "type": "ticket_pdf",
                         "saved_at": datetime.now().isoformat(),
-                        "size_kb": round(file_size / 1024, 1)
+                        "size_kb": round(file_size / 1024, 1),
+                        "status": (t.get("status") or "").strip(),   # p/ re-gerar quando o status mudar
                     }
                     if used_old:
                         att["old_ticket"] = query_tnum
@@ -10331,7 +10493,10 @@ async def save_ticket_pdfs_wi(force=False):
     Estrutura: pdfs/WI/{PRIME}/{PROJECT}/{ticket}.pdf (ou subpasta de renovação).
     Damage duplicado em Damage/WI/{PRIME}/{PROJECT}/{ticket}.pdf.
     """
-    all_tickets = sb_get("tickets", "&state=eq.WI&status=in.(Clear,Damage,Completed,Closed)&order=ticket")
+    # Eric 2026-09-04: TODOS os status. Antes so Clear/Damage/Completed/Closed, entao
+    # ticket Cancel nunca ganhava PDF — e ele FOI Clear antes de ser cancelado, essa
+    # evidencia precisa existir. Ex.: 205606399 e 190601494.
+    all_tickets = sb_get("tickets", "&state=eq.WI&order=ticket")
     if not all_tickets:
         log.info("[WI] PDF: nenhum ticket Clear/Damage/Completed/Closed")
         return
@@ -10474,7 +10639,8 @@ async def save_ticket_pdfs_wi(force=False):
                         "name": pdf_filename,
                         "type": "ticket_pdf",
                         "saved_at": datetime.now().isoformat(),
-                        "size_kb": round(file_size / 1024, 1)
+                        "size_kb": round(file_size / 1024, 1),
+                        "status": (t.get("status") or "").strip(),   # p/ re-gerar quando o status mudar
                     }
                     if used_old:
                         att["old_ticket"] = query_tnum

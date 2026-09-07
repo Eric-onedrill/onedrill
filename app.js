@@ -69,7 +69,10 @@ function _eod(dateStr){
 
 /** Cor do status */
 function scol(s){
-  const m={open:'#dc2626',clear:'#16a34a',damage:'#C9C6BD',closed:'#1a1a18',cancel:'#6d28d9'};
+  // Damage: cinza ESCURO metálico (Eric 07/09/2026 — o #C9C6BD da marca "Cinza Tranquilo"
+  // sumia sobre imagem de satélite). #36454F = charcoal aço, escuro mas com tom frio que
+  // não se confunde com o closed (#1a1a18, quase preto quente).
+  const m={open:'#dc2626',clear:'#16a34a',damage:'#36454F',closed:'#1a1a18',cancel:'#6d28d9'};
   return m[(s||'').toLowerCase()]||'#9a9888';
 }
 function tipoDash(t){return(t||'').toLowerCase().includes('main')?null:'6,4';}

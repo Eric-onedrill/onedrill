@@ -540,6 +540,61 @@ function projectToDb(p){
   };
 }
 
+/* ─── Rede resiliente (2026-09-14) ────────────────────────────────────────────
+   O gateway do Supabase tem incidentes de "degraded performance" em que uma
+   fatia das requisições volta 500/502/504 ou simplesmente pendura — medido em
+   ~25% num episódio de 14/09/2026. O app desistia na PRIMEIRA falha: como o
+   boot carrega tudo de uma vez, bastava uma requisição da rajada tropeçar pra
+   zerar o dashboard inteiro ("erro ao conectar ao banco", cards em 0) ou o
+   login morrer com "failed to fetch" — mesmo com o banco intacto.
+
+   Este fetch repete o que é seguro repetir, com espera crescente (0,8s / 1,6s
+   / 3,2s + jitter, pra não sincronizar rajadas). Entra via `global.fetch` do
+   createClient, então vale pra TUDO: REST, Auth e Storage.
+
+   O que NÃO repete: POST em /rest/v1 (inserção — repetir duplicaria registro).
+   GET/HEAD e PATCH/PUT são idempotentes; POST de /auth (login, refresh) é
+   seguro repetir porque não cria nada. */
+const _NET_RETRY_STATUS = [408, 425, 429, 500, 502, 503, 504];
+
+function _netPodeRepetir(url, init){
+  const m = ((init && init.method) || "GET").toUpperCase();
+  if (m === "GET" || m === "HEAD" || m === "PATCH" || m === "PUT") return true;
+  if (m === "POST" && String(url).includes("/auth/v1/")) return true;
+  return false;                       // POST /rest/v1 = insert: nunca repete
+}
+
+function _netEspera(tentativa){
+  const base = 800 * Math.pow(2, tentativa);          // 0,8s → 1,6s → 3,2s
+  return new Promise(r => setTimeout(r, base + Math.random() * 400));
+}
+
+async function fetchResiliente(input, init){
+  const url = (typeof input === "string") ? input : (input && input.url) || "";
+  const podeRepetir = _netPodeRepetir(url, init);
+  const MAX = podeRepetir ? 3 : 0;
+  let ultimoErro = null;
+  for (let i = 0; i <= MAX; i++){
+    try{
+      const resp = await fetch(input, init);
+      if (_NET_RETRY_STATUS.includes(resp.status) && i < MAX){
+        console.warn(`[Rede] HTTP ${resp.status} — tentativa ${i+1}/${MAX} em ${url.split('?')[0]}`);
+        await _netEspera(i);
+        continue;
+      }
+      return resp;
+    }catch(e){                         // queda de rede / "failed to fetch"
+      ultimoErro = e;
+      if (i < MAX){
+        console.warn(`[Rede] falha de conexão — tentativa ${i+1}/${MAX}`);
+        await _netEspera(i);
+        continue;
+      }
+    }
+  }
+  throw ultimoErro || new Error("falha de rede");
+}
+
 async function initSupabase(){
   try{
     // Config explicita de auth (item login persistente):
@@ -553,7 +608,8 @@ async function initSupabase(){
         detectSessionInUrl:true,
         storage:window.localStorage,
         storageKey:'sb-onedrill-auth'
-      }
+      },
+      global:{fetch:fetchResiliente}   // repete 500/502/504 e queda de rede
     });
     // Listener pra detectar refresh/logout em qualquer aba
     sb.auth.onAuthStateChange((event,session)=>{
@@ -568,7 +624,11 @@ async function initSupabase(){
     });
     // Fix bug #13: 8s é agressivo demais em 4G no campo (tablets de supervisor em obra).
     // 15s dá margem mas ainda detecta servidor down em tempo razoável.
-    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),15000));
+    // 2026-09-14: 15s → 35s. Com o fetch resiliente, uma requisição que tropeça
+    // gasta até ~5,6s só nas re-tentativas; 15s abortava a carga no meio da
+    // recuperação e zerava o app à toa. 35s ainda detecta servidor fora, e é
+    // MUITO melhor esperar do que mostrar dashboard vazio com dados no banco.
+    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),35000));
     // Shared view (?p=ID): carrega SÓ o projeto do link + seus tickets (não os ~2000 da
     // empresa toda). Corta Disk IO — o supervisor deixa o link aberto o dia todo. 2026-08-03.
     const _sharedPid=new URLSearchParams(location.search).get('p');

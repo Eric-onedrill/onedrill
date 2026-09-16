@@ -5037,40 +5037,57 @@ function exportPrivateLocator(){
 }
 
 /* ═══════════ 24. GLOBAL SEARCH ═══════════ */
+/* Busca por ENDEREÇO (Eric, 16/09/2026). O endereço já era pesquisado, mas com
+   3 buracos que faziam parecer que não: (1) a cidade/county (`location`) ficava
+   de fora — "paducah" e "kiel" davam ZERO; (2) o match era substring do texto
+   inteiro, então "elmdale 1800" não achava o "1800 ELMDALE RD" (ordem trocada);
+   (3) o resultado não mostrava o endereço, então não dava pra saber que casou.
+   Agora: normaliza acento, quebra a busca em termos e exige TODOS (em qualquer
+   campo, em qualquer ordem) — "kiel 3rd" acha o 213 3RD ST de KIEL CITY. */
+function _gsNorm(s){
+  return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+}
 function globalSearch(q){
   const dd=document.getElementById('gsearch-dd');if(!dd)return;
-  q=(q||'').toLowerCase().trim();
-  if(!q||q.length<2){dd.innerHTML='';dd.classList.remove('has-results');return;}
+  const qn=_gsNorm(q).trim();
+  if(!qn||qn.length<2){dd.innerHTML='';dd.classList.remove('has-results');return;}
+  const termos=qn.split(/\s+/).filter(Boolean);
+  const casa=txt=>termos.every(t=>txt.includes(t));
   const results=[];
+  let totalTickets=0;
   for(const t of tickets){
-    if(results.length>=10)break;
     // Fix bug #7: (t.ticket||'') evita crash se ticket vier null. Adiciona job também (bug #22).
-    // Adiciona match em oldTicket2 (chain de tickets antigos renovados) — permite buscar pelo numero
-    // antigo e cair no ticket NOVO que carrega aquele historico. (issue: ticket renovado 20261906533)
-    const oldChain=(t.oldTicket2||t.old_ticket2||'').toLowerCase();
-    const matchOld=oldChain&&oldChain.includes(q);
-    if((t.ticket||'').toLowerCase().includes(q)||(t.client||'').toLowerCase().includes(q)||(t.address||'').toLowerCase().includes(q)||(t.prime||'').toLowerCase().includes(q)||(t.job||'').toLowerCase().includes(q)||matchOld){
-      const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
-      // Quando matchou pelo numero antigo, sub mostra "renovou ANTIGO → NOVO" pra deixar claro
-      const sub=matchOld
-        ?('🔄 renovou '+oldNum+' · '+(t.client||'')+' · '+(t.location||'')+' · '+effectiveStatus(t))
-        :((t.client||'')+' · '+(t.location||'')+' · '+effectiveStatus(t));
-      results.push({type:'ticket',id:t.id,title:t.ticket,sub,status:effectiveStatus(t)});
-    }
+    // Match em oldTicket2 (chain de renovação) permite buscar pelo numero ANTIGO e cair
+    // no ticket NOVO que carrega aquele historico. (issue: ticket renovado 20261906533)
+    const oldChain=_gsNorm(t.oldTicket2||t.old_ticket2||'');
+    const alvo=_gsNorm([t.ticket,t.client,t.address,t.location,t.prime,t.job].join(' '))+' '+oldChain;
+    if(!casa(alvo))continue;
+    totalTickets++;
+    if(results.length>=10)continue;                 // conta todos, mostra 10
+    const matchOld=!!oldChain&&casa(oldChain);
+    const oldNum=((t.oldTicket2||t.old_ticket2)||'').split(' → ')[0].trim();
+    const ondeEsta=[t.address,t.location].filter(x=>x&&String(x).trim()&&x!=='—').join(' · ');
+    const sub=(matchOld?('🔄 renovou '+oldNum+' · '):'')
+      +(ondeEsta?ondeEsta+' · ':'')+(t.client||'')+' · '+effectiveStatus(t);
+    results.push({type:'ticket',id:t.id,title:t.ticket,sub,status:effectiveStatus(t)});
   }
   for(const p of projects){
     if(results.length>=12)break;
-    if(p.name.toLowerCase().includes(q)||(p.client||'').toLowerCase().includes(q)){
+    if(casa(_gsNorm(p.name+' '+(p.client||'')+' '+(p.state||'')))){
       results.push({type:'project',id:p.id,title:p.name,sub:p.client+' · '+p.state});
     }
   }
   if(!results.length){dd.innerHTML='<div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">Nenhum resultado</div>';dd.classList.add('has-results');return;}
+  // Rua com muitos tickets: avisa que há mais, pra ninguém achar que só existem 10.
+  const maisTickets=totalTickets>10
+    ?'<div style="padding:7px 12px;color:var(--muted);font-size:11px;text-align:center;border-top:1px solid var(--border)">mostrando 10 de '+totalTickets+' tickets — refine a busca</div>'
+    :'';
   dd.innerHTML=results.map(r=>
     '<div class="gsr-item" onmousedown="'+(r.type==='ticket'?'openTicketDetail('+r.id+')':'openProjectMap(\''+r.id+'\')')+';document.getElementById(\'gsearch\').value=\'\';document.getElementById(\'gsearch-dd\').classList.remove(\'has-results\')">'
     +'<div class="gsr-num">'+(r.type==='ticket'?'🎫':'📁')+' '+esc(r.title)
     +(r.status?' <span class="sbadge b-'+r.status.toLowerCase()+'" style="font-size:9px">'+esc(r.status)+'</span>':'')
     +'</div><div class="gsr-sub">'+esc(r.sub)+'</div></div>'
-  ).join('');
+  ).join('')+maisTickets;
   dd.classList.add('has-results');
 }
 

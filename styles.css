@@ -130,7 +130,9 @@
   /* === INPUTS — anti-zoom Safari === */
   input.fi,
   input.finp,
+  select.fi,
   select.fsel,
+  select,
   textarea.ftxt {
     font-size: 16px !important;
   }
@@ -217,9 +219,13 @@
     grid-template-columns: 1fr;
   }
 
-  /* === Inputs gerais sem zoom Safari === */
-  input.fi, input.finp, select.fsel, textarea.ftxt {
-    font-size: 16px;
+  /* === Inputs gerais sem zoom Safari ===
+     29/09/2026: a regra mirava `select.fsel`, mas TODO select do app usa class="fi"
+     (7 ocorrencias) — nenhum estava protegido, e varios tem font-size inline de 11px.
+     Abaixo de 16px o iOS da zoom na pagina ao focar e nao desfaz. Por isso o !important
+     e o `select` puro: o tamanho vem de style inline, que so cede a !important. */
+  input.fi, input.finp, select.fi, select.fsel, select, textarea.ftxt {
+    font-size: 16px !important;
   }
 }
 
@@ -1817,9 +1823,20 @@ body {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
+  /* 29/09/2026: o dashboard montava esse grid com style INLINE de 6 colunas e sem classe,
+     entao os @media de .stat-grid (768px/480px) nunca pegavam — eram CSS morto e os KPIs
+     ficavam com ~52px de largura no celular. Agora a classe e usada de verdade; estas sao
+     as mesmas proporcoes que estavam no inline. */
+  grid-template-columns: 1fr 1.4fr 1.4fr 1.2fr 1.2fr 1.2fr;
+  gap: 8px;
   margin-bottom: 24px;
+}
+
+/* Grafico de 7 dias + lista de utilities: lado a lado no desktop, empilhado no celular */
+.dash-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
 }
 
 .stat-card {
@@ -3599,6 +3616,20 @@ tbody td {
   .stat-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 6px;
+  }
+
+  /* Grafico de 7 dias e utilities: um embaixo do outro (lado a lado sobrava ~148px
+     por coluna e as barras dos ultimos dias eram CORTADAS pelo overflow-x:hidden). */
+  .dash-split {
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+
+  /* Label do dia deixa de ser nowrap: era ela que travava a largura minima das barras */
+  .dash-card [style*="height:120px"] > div > div:last-child {
+    white-space: normal !important;
+    font-size: 8px !important;
+    line-height: 1.1 !important;
   }
 
   .stat-card {

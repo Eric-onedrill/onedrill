@@ -3280,7 +3280,7 @@ function renderDash(){
   +'</div>'
 
   // ── STAT CARDS
-  +'<div style="display:grid;grid-template-columns:1fr 1.4fr 1.4fr 1.2fr 1.2fr 1.2fr;gap:8px;margin-bottom:16px">'
+  +'<div class="stat-grid" style="margin-bottom:16px">'
   +'<div class="stat-card" style="padding:10px 12px;cursor:pointer" onclick="nav(\'tickets\')">'
   +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Total ativo</div>'
   +'<div style="font-size:20px;font-weight:700;font-family:var(--mono)">'+total+'</div>'
@@ -5607,7 +5607,7 @@ function renderClearedStats(fTickets){
     +_renderClearedCard('30d',c30.length,ft30,'últimos 30 dias',_clearedExpand==='30d')
     +'</div>'
     +_renderClearedExpand(_clearedExpand,cToday,c7,c30)
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px">'
+    +'<div class="dash-split" style="margin-top:12px">'
     +'<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Clareados por dia (últimos 7 dias)</div>'+barHtml+todayHtml+'</div>'
     +'<div>'+utilListHtml+'</div>'
     +'</div>'
@@ -5626,11 +5626,15 @@ function _renderClearedCard(key,count,ft,label,isActive){
   var txtColor=isHighlight?'var(--green)':'var(--text)';
   var labelColor=isHighlight?'var(--green)':'var(--muted)';
   var activeStyle=isActive?'box-shadow:0 0 0 2px var(--green);transform:translateY(-1px);':'';
-  return'<div onclick="toggleClearedExpand(\''+key+'\')" style="padding:12px;background:'+bg+';border:1px solid '+borderColor+';border-radius:var(--r);text-align:center;cursor:pointer;transition:all .15s;'+activeStyle+'" onmouseover="this.style.opacity=.85" onmouseout="this.style.opacity=1">'
+  // 29/09/2026: no celular a area expandida e escondida por CSS (a tabela estourava a
+  // tela), mas o card seguia dizendo "clique p/ expandir" e trocava pra "recolher" sem
+  // nada aparecer — toque em beco sem saida. Agora o card nao promete o que nao entrega.
+  var _mob=(typeof window!=='undefined')&&window.matchMedia&&window.matchMedia('(max-width:768px)').matches;
+  return'<div'+(_mob?'':' onclick="toggleClearedExpand(\''+key+'\')"')+' style="padding:12px;background:'+bg+';border:1px solid '+borderColor+';border-radius:var(--r);text-align:center;'+(_mob?'':'cursor:pointer;')+'transition:all .15s;'+(_mob?'':activeStyle)+'" onmouseover="this.style.opacity=.85" onmouseout="this.style.opacity=1">'
     +'<div style="font-size:22px;font-weight:700;font-family:var(--mono);color:'+txtColor+'">'+count+'</div>'
     +'<div style="font-size:10px;color:'+labelColor+'">'+esc(label)+'</div>'
     +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">'+ft.toLocaleString()+' ft</div>'
-    +'<div style="font-size:9px;color:var(--muted);margin-top:4px">'+(isActive?'▲ clique p/ recolher':'▼ clique p/ expandir')+'</div>'
+    +'<div style="font-size:9px;color:var(--muted);margin-top:4px">'+(_mob?'lista na aba Tickets':(isActive?'▲ clique p/ recolher':'▼ clique p/ expandir'))+'</div>'
     +'</div>';
 }
 

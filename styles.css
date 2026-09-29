@@ -4146,3 +4146,21 @@ tbody td {
     .main-area { height: calc(100dvh - 50px); }
   }
 }
+
+/* ═══ Anti-zoom iOS nos filtros de Tickets — 29/09/2026 ═══════════════════
+   Abaixo de 16px o Safari do iPhone da zoom na pagina ao focar o campo e NAO
+   desfaz ao sair. Havia 3 regras cravando 14px, uma delas com 2 IDs
+   (#pg-tickets #tbl-srch, styles.css:596) que vencia por especificidade.
+   Este bloco fica no FIM do arquivo e repete a especificidade de ID pra ganhar
+   a cascata sem precisar reescrever as regras antigas. */
+@media (max-width: 768px) {
+  #pg-tickets #tbl-srch,
+  #pg-tickets #tbl-stat,
+  #pg-tickets .tbar > input,
+  #pg-tickets .tbar > select,
+  #pg-tickets .tbar > button,
+  #pg-tickets .tbar input,
+  #pg-tickets .tbar select {
+    font-size: 16px !important;
+  }
+}

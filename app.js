@@ -2113,9 +2113,11 @@ function openTicketDetail(id){
     if(['Closed','Cancel','Completed'].indexOf(t.status)>=0)return;
     const d=_daysToEffExpire(t);
     if(d===null)return;
+    // So avisa o que exige acao. Antes TODO ticket aberto disparava um toast ("Vence em
+    // 23 dias"), o que no celular vira ruido em cima do conteudo. >7 dias nao e noticia.
     if(d<0)toast('⛔ Ticket VENCIDO há '+(-d)+' dia'+((-d)>1?'s':''),'danger');
     else if(d===0)toast('⚠ Vence HOJE!','danger');
-    else toast('🗓️ Vence em '+d+' dia'+(d>1?'s':''),d<=4?'warn':'info');
+    else if(d<=7)toast('🗓️ Vence em '+d+' dia'+(d>1?'s':''),d<=4?'warn':'info');
   })();
 }
 
@@ -2135,13 +2137,18 @@ function showExpiredAlert(t,kind){
     +'<div style="font-size:20px;font-weight:700;color:white">📞 LIGAR AO OFFICE</div>'
     +'<div style="font-size:14px;color:rgba(255,255,255,.8);margin-top:4px">Call the office before any work</div>'
     +'</div>'
-    +'<div style="font-size:13px;color:rgba(255,255,255,.5)">Toque para fechar</div>'
+    +'<button type="button" id="exp-alert-fechar" style="margin-top:4px;background:white;color:#b91c1c;border:0;border-radius:12px;padding:14px 34px;font-size:17px;font-weight:700;min-height:48px;cursor:pointer">Entendi, fechar</button>'
     +'</div>';
   Object.assign(el.style,{position:'fixed',top:'0',left:'0',width:'100%',height:'100%',background:'rgba(220,38,38,.92)',zIndex:'99999',cursor:'pointer',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',animation:'expFadeIn .3s ease'});
-  el.onclick=()=>{el.style.animation='expFadeOut .3s ease';setTimeout(()=>{el.remove();_expAlertEl=null;},280);};
+  const _fecha=()=>{el.style.animation='expFadeOut .3s ease';setTimeout(()=>{el.remove();if(_expAlertEl===el)_expAlertEl=null;},280);};
+  el.onclick=_fecha;
   document.body.appendChild(el);
   _expAlertEl=el;
-  setTimeout(()=>{if(_expAlertEl===el){el.style.animation='expFadeOut .3s ease';setTimeout(()=>{el.remove();if(_expAlertEl===el)_expAlertEl=null;},280);}},5000);
+  // Eric 29/09/2026: o aviso prendia a tela por 5s e "travava os botoes" do ticket no
+  // celular. Agora sai em 2s sozinho e tem botao grande pra fechar na hora. O aviso NAO
+  // foi enfraquecido: a tarja vermelha "NAO TRABALHAR" continua fixa DENTRO do ticket
+  // (expiredBanner), que e a que o operador ve enquanto trabalha.
+  setTimeout(()=>{if(_expAlertEl===el)_fecha();},2000);
 }
 
 // Inject CSS animations for expired alert (once)

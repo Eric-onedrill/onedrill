@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
 <meta name="supabase-url" content="https://ofbqtaulvzeltfpqcjhh.supabase.co">
 <meta name="supabase-anon-key" content="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mYnF0YXVsdnplbHRmcHFjamhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDMyMjAsImV4cCI6MjA4OTk3OTIyMH0.zPU8SCUAVrTOxp-cuKupXBt0QgRkxnLcpScwnHJKVWE">
-<link rel="stylesheet" href="styles.css?v=20260929mob2">
+<link rel="stylesheet" href="styles.css?v=20260929mob3">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
@@ -323,7 +323,11 @@
 
     <!-- Tickets table -->
     <div class="page" id="pg-tickets">
-      <div class="tbar">
+      <!-- Só aparece no celular: recolhe a barra de filtros, que empilhada ocupava
+           ~520px e empurrava o primeiro ticket pra fora da tela (29/09/2026). -->
+      <button type="button" class="tbar-toggle" id="tbar-toggle" data-action="toggle-tbar"
+              aria-expanded="false" aria-controls="tbar-tickets">🔎 Filtros</button>
+      <div class="tbar" id="tbar-tickets">
         <input class="fi fi--max-200" id="tbl-srch" placeholder="Buscar..." data-filter="tbl-search">
         <select class="fi fi--max-120" id="tbl-stat" data-filter="tbl-status">
           <option value="">Todos status</option>
@@ -681,7 +685,7 @@
   <span id="tmsg"></span>
 </div>
 
-<script src="app.js?v=20260929mob2"></script>
+<script src="app.js?v=20260929mob3"></script>
 <script src="jarvis.js?v=20260824ga2"></script>
 
 <!-- Event delegation bridge: maps data-* attributes to existing app.js functions -->
@@ -740,6 +744,14 @@
     'navigate-from-panel':   () => openNavigation(currentPanelId),
     'export-filtered':       () => exportFiltered(),
     'toggle-grace-filter':   () => toggleGraceFilter(),
+    'toggle-tbar':           () => {
+      const bar = document.getElementById('tbar-tickets');
+      const btn = document.getElementById('tbar-toggle');
+      if (!bar || !btn) return;
+      const aberto = bar.classList.toggle('tbar-open');
+      btn.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+      btn.textContent = aberto ? '✕ Fechar filtros' : '🔎 Filtros';
+    },
     'open-bulk-update':      () => openBulkUpdate(),
     'preview-bulk-update':   () => previewBulkUpdate(),
     'apply-bulk-update':     () => applyBulkUpdate(),

@@ -426,7 +426,9 @@
     padding: 4px !important;
   }
 
-  /* Mantem so Ticket(1) e Status(5). Esconde TODAS as outras. */
+  /* 29/09/2026: antes sobravam so Ticket(1) e Status(5) — escondia LOCAL e EXPIRA,
+     que sao justamente os dois campos de triagem em campo ("qual e este e quando vence").
+     Agora Local(4) e Expira(7) viram linhas DENTRO da celula do ticket. */
   #pg-tickets thead th:nth-child(2),
   #pg-tickets thead th:nth-child(3),
   #pg-tickets thead th:nth-child(4),
@@ -437,14 +439,35 @@
   #pg-tickets thead th:nth-child(10),
   #pg-tickets tbody td:nth-child(2),
   #pg-tickets tbody td:nth-child(3),
-  #pg-tickets tbody td:nth-child(4),
   #pg-tickets tbody td:nth-child(6),
-  #pg-tickets tbody td:nth-child(7),
   #pg-tickets tbody td:nth-child(8),
   #pg-tickets tbody td:nth-child(9),
   #pg-tickets tbody td:nth-child(10) {
     display: none !important;
   }
+
+  /* Local e Expira empilhados sob o numero, em fonte menor */
+  #pg-tickets tbody td:nth-child(4),
+  #pg-tickets tbody td:nth-child(7) {
+    display: block !important;
+    width: auto !important;
+    padding: 0 8px 2px !important;
+    border: 0 !important;
+    font-size: 11px !important;
+    color: var(--muted) !important;
+    white-space: normal !important;
+  }
+  #pg-tickets tbody tr {
+    display: grid !important;
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    padding: 6px 0 !important;
+    border-bottom: 1px solid var(--border) !important;
+  }
+  #pg-tickets tbody td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  #pg-tickets tbody td:nth-child(4) { grid-column: 1; grid-row: 2; }
+  #pg-tickets tbody td:nth-child(7) { grid-column: 1; grid-row: 3; }
+  #pg-tickets tbody td:nth-child(5) { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
 
   /* Ticket # com largura fixa proporcional */
   #pg-tickets thead th:nth-child(1),
@@ -452,7 +475,8 @@
     width: 55% !important;
     padding: 10px 8px !important;
     font-size: 13px !important;
-    word-break: break-all !important;
+    word-break: normal !important;
+    overflow-wrap: anywhere;
   }
 
   /* Status com largura restante, alinhado a direita */
@@ -652,6 +676,7 @@
   #pg-tickets .tbar > input,
   #pg-tickets .tbar > select,
   #pg-tickets .tbar > button {
+    font-size: 16px !important;   /* <16px = iOS da zoom na pagina e nao desfaz */
     height: 42px !important;
     line-height: 1.2 !important;
     padding: 8px 12px !important;
@@ -4063,3 +4088,61 @@ tbody td {
 .prog-campo-fill.pf-done { background:var(--green); }
 .prog-campo-fill.pf-mid  { background:#3b82f6; }
 .prog-campo-fill.pf-low  { background:var(--amber); }
+
+/* ═══ Barra de filtros recolhivel (Tickets) — 29/09/2026 ═══════════════════
+   No celular os 11 filtros viram 11 faixas de largura total (~520px de altura):
+   o usuario rolava uma tela inteira de filtros antes de ver o primeiro ticket.
+   Agora ficam atras de um botao. No desktop nada muda: o botao some e a barra
+   fica sempre visivel. */
+.tbar-toggle { display: none; }
+
+@media (max-width: 768px) {
+  .tbar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 44px;              /* alvo de toque confortavel */
+    margin: 0 0 6px;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    cursor: pointer;
+  }
+  .tbar-toggle[aria-expanded="true"] { background: var(--bg-alt, var(--bg)); }
+
+  /* fechada por padrao */
+  #pg-tickets .tbar {
+    display: none !important;
+  }
+  #pg-tickets .tbar.tbar-open {
+    display: block !important;
+  }
+
+  /* Acoes que so fazem sentido no desktop nao ocupam faixa no celular */
+  #pg-tickets .tbar [data-action="open-bulk-update"],
+  #pg-tickets .tbar .tbar-export {
+    display: none !important;
+  }
+
+  /* Filtro multi-estado acompanha a largura dos demais */
+  #pg-tickets .tbar .ms,
+  #pg-tickets .tbar .ms-btn {
+    display: block !important;
+    width: 100% !important;
+    text-align: left;
+  }
+}
+
+/* iOS Safari: 100vh inclui a barra do navegador e corta o fim da lista.
+   100dvh acompanha a area realmente visivel. */
+@supports (height: 100dvh) {
+  @media (max-width: 768px) {
+    .main-area { height: calc(100dvh - 50px); }
+  }
+}

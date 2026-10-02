@@ -493,7 +493,7 @@ function dbToTicket(r){
     id:r.id, ticket:r.ticket, projectId:r.project_id||'', company:r.company||'',
     state:r.state||'', location:r.location||'', status:r.status||'Open',
     expire:normalizeExpire(r.expire||''), footage:r.footage||0, client:r.client||'', prime:r.prime||'',
-    job:r.job||'', tipo:r.tipo||'', address:r.address||'', pending:r.pending||'',
+    job:r.job||'', tipo:r.tipo||'', address:r.address||'', pending:r.pending||'', soil:r.soil||null,
     oldTicket2:r.old_ticket2||'', statusOld:r.status_old||'', expireOld:normalizeExpire(r.expire_old||''),
     notes:r.notes||'', fieldPath:r.field_path||null,
     _geocoded:(r.geocoded_lat&&r.geocoded_lon)?[r.geocoded_lat,r.geocoded_lon]:null,
@@ -2106,7 +2106,7 @@ function openTicketDetail(id){
     const erb=document.getElementById('det-edit-renewal-btn');if(erb)erb.classList.add('hidden');
     document.getElementById('field-status-section').style.display='none';
   }
-  renderHistory(t);renderMiniMap(t);renderUtils(t);renderSecondNotices(t);openModal('ov-detail');
+  renderHistory(t);renderMiniMap(t);renderUtils(t);renderSoil(t);renderSecondNotices(t);openModal('ov-detail');
   // Popup de vencimento ao abrir — dias até vencer (pelo vencimento efetivo: carência usa o
   // cutover do antigo). Só pra tickets ativos (Closed/Cancel/Completed não têm prazo pra cavar).
   (function(){
@@ -3007,6 +3007,72 @@ function openFullMap(id){
     else if(t._geocoded)map.setView(t._geocoded,18);
     hiT(id);
   },200);
+}
+
+/* ═══════════ SOLO DO TRAJETO (USDA/NRCS SSURGO) ═══════════
+   Preenchido pelo analise_solo.py --commit, que amostra o trajeto desenhado a cada
+   25 ft, consulta o Soil Data Access e grava o resultado na coluna `soil`.
+   O SSURGO descreve o solo NATURAL: nao enxerga aterro de rua nem base compactada.
+   Por isso a observacao da equipe (soil.campo) SUBSTITUI o tipo do mapa, e o painel
+   mostra o conflito em vermelho quando as duas versoes divergem. */
+const SOIL_COR={'BOM':'#16a34a','BOM com ressalva':'#65a30d','REGULAR':'#d97706','RUIM':'#dc2626'};
+
+function renderSoil(t){
+  const el=document.getElementById('det-soil');
+  const badge=document.getElementById('soil-badge');
+  const sec=document.getElementById('soil-section');
+  if(!el)return;
+  const s=t.soil||t.solo;
+  if(!s||!s.guia){
+    if(badge)badge.textContent='';
+    el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:6px 0">'
+      +(t.fieldPath&&t.fieldPath.length>1
+        ? 'Sem análise ainda. Rode <span style="font-family:var(--mono)">analisar_SOLO.bat</span> para este projeto.'
+        : 'Desenhe o trajeto no mapa para o sistema analisar o solo.')
+      +'</div>';
+    return;
+  }
+  const g=s.guia, cor=SOIL_COR[g.missile]||'#777';
+  if(badge){
+    badge.innerHTML='<span style="background:'+cor+';color:#fff;padding:2px 8px;border-radius:10px;'
+      +'font-size:10px;font-weight:700;white-space:nowrap">MISSILE '+esc(g.missile)+'</span>';
+  }
+  const linha=(k,v)=>'<div style="margin:3px 0;font-size:12px"><b>'+k+':</b> '+esc(v)+'</div>';
+  let h='';
+  if(s.conflito){
+    h+='<div style="background:#fdecec;border:1.5px solid #dc2626;color:#991b1b;padding:7px 9px;'
+      +'border-radius:var(--r);margin-bottom:8px;font-size:12px;font-weight:600">'
+      +'O mapa dizia <b>'+esc(s.tipo_mapa)+'</b>, mas o campo mostrou <b>'+esc(s.tipo_final)+'</b>. '
+      +'Vale confiar no campo.</div>';
+  }
+  const nomeSolo=(s.trechos&&s.trechos[0]&&s.trechos[0].dados&&s.trechos[0].dados.muname)||'Sem dado do USDA';
+  h+='<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:9px 11px">'
+    +'<div style="font-weight:700;font-size:12px;margin-bottom:5px">'+esc(nomeSolo)
+    +' <span style="color:var(--muted);font-weight:400;font-size:11px">('
+    +(s.campo?'confirmado no campo':'pelo mapa do USDA')+')</span></div>'
+    +linha('Solo',g.solo)+linha('Cavar com pá',g.pa)+linha('Ponteira do HDD',g.ponteira)
+    +linha('Fluido',g.fluido)
+    +'<div style="margin:3px 0;font-size:12px"><b>Missile:</b> <span style="color:'+cor
+    +';font-weight:700">'+esc(g.missile)+'</span> — '+esc(g.missileTxt)+'</div>'
+    +'</div>';
+  if(s.campo&&s.campo.obs){
+    h+='<div style="background:#eef6ff;border:1px solid #9ec5f0;border-radius:var(--r);padding:7px 9px;'
+      +'margin-top:7px;font-size:12px"><b>Observação da equipe:</b> '+esc(s.campo.obs)
+      +(s.campo.fonte?'<div style="color:var(--muted);font-size:10px;margin-top:3px">'+esc(s.campo.fonte)+'</div>':'')
+      +'</div>';
+  }
+  if(s.alertas&&s.alertas.length){
+    h+='<ul style="margin:7px 0 0 16px;padding:0;font-size:11px;color:#92400e">'
+      +s.alertas.map(a=>'<li style="margin:2px 0">'+esc(a)+'</li>').join('')+'</ul>';
+  }
+  if(s.trechos&&s.trechos.length>1){
+    h+='<div style="margin-top:7px;font-size:11px;color:var(--muted)">Trechos: '
+      +s.trechos.map(x=>esc(x.ft+' ft ('+x.pct+'%)')).join(' · ')+'</div>';
+  }
+  h+='<div style="margin-top:7px;font-size:10px;color:var(--muted);line-height:1.4">'
+    +'Triagem de superfície (0–200&nbsp;cm) para planejar o HDD. Não substitui sondagem '
+    +'geotécnica nem a localização 811. Em rua e área urbana, confirme no campo.</div>';
+  el.innerHTML=h;
 }
 
 async function renderUtils(t){

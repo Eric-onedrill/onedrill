@@ -3136,7 +3136,18 @@ async function renderUtils(t){
       const rt=(u.response_text||'').toLowerCase();
       return rt.includes('not participating')||rt.includes('not service provider');
     };
-    data.forEach(u=>{ u._isNotPart=isNotPart(u); });
+    // Non-compliance registrado no 811 contra a utility. Fica no historico do ticket
+    // (campo `nc`), igual os no-shows usam `sn`. Eric 30/10/2026: o ticket virava Clear
+    // "por non-compliance" mas a utility continuava so "Pendente" — quem causou a
+    // liberacao nao aparecia. Agora ela leva o selo e a data.
+    const _ncMap={};
+    ((t&&t.history)||[]).forEach(h=>{
+      if(h&&h.nc&&h.nc.u)_ncMap[String(h.nc.u).toUpperCase().trim()]=h.nc;
+    });
+    data.forEach(u=>{
+      u._isNotPart=isNotPart(u);
+      u._nc=_ncMap[String(u.utility_name||'').toUpperCase().trim()]||null;
+    });
     const pending=data.filter(u=>u.status==='Pending');
     const cleared=data.filter(u=>(u.status==='Clear'||u.status==='Private')&&!u._isNotPart);
     const notpart=data.filter(u=>u._isNotPart);
@@ -3148,6 +3159,8 @@ async function renderUtils(t){
       if(pending.length)parts.push(`<span style="color:var(--red)">${pending.length} pendente${pending.length>1?'s':''}</span>`);
       if(marked.length)parts.push(`<span style="color:var(--amber)">${marked.length} marcada${marked.length>1?'s':''}</span>`);
       if(notpart.length)parts.push(`<span style="color:#d97706">⚠ ${notpart.length} não participa</span>`);
+      const _nNc=data.filter(u=>u._nc).length;
+      if(_nNc)parts.push(`<span style="color:#d97706">📋 ${_nNc} non-compliance</span>`);
       if(canceled.length)parts.push(`<span style="color:#dc2626">${canceled.length} cancelada${canceled.length>1?'s':''}</span>`);
       if(cleared.length)parts.push(`<span style="color:var(--green)">${cleared.length} clear</span>`);
       sm.innerHTML=parts.join(' · ');
@@ -3155,8 +3168,8 @@ async function renderUtils(t){
     const badgeClass={Pending:'ub-pending',Clear:'ub-clear',Marked:'ub-marked',Private:'ub-private',Unmarked:'ub-clear',Cancel:'ub-cancel'};
     const label={Pending:'Pendente',Clear:'Clear',Marked:'Marcado',Private:'Privado',Unmarked:'Desmarcado',Cancel:'Cancel'};
     // Override pra Not Participating: badge laranja + label especifico
-    const getBadgeClass=u=>u._isNotPart?'ub-notpart':(badgeClass[u.status]||'ub-pending');
-    const getLabel=u=>u._isNotPart?'⚠ Não Participa':(label[u.status]||u.status);
+    const getBadgeClass=u=>u._nc?'ub-notpart':(u._isNotPart?'ub-notpart':(badgeClass[u.status]||'ub-pending'));
+    const getLabel=u=>u._nc?'📋 Non-compliance':(u._isNotPart?'⚠ Não Participa':(label[u.status]||u.status));
     const order={Pending:0,Marked:1,Private:2,Cancel:3,Clear:4,Unmarked:5};
     data.sort((a,b)=>{
       // Not Participating sempre depois de Cancel e antes de Clear normal
@@ -3167,8 +3180,17 @@ async function renderUtils(t){
     el.innerHTML=graceBanner+data.map(u=>{
       const resp=(u.response_text||'').trim();
       let detail='';
+      if(u._nc){
+        const d=u._nc.d?String(u._nc.d).split('-').reverse().join('/'):'';
+        const ref=u._nc.ref?' · '+esc(u._nc.ref):'';
+        const st=u._nc.st==='confirmado'
+          ? 'Non-compliance registrado no Sunshine 811'+(d?' em '+d:'')
+          : 'Non-compliance enviado'+(d?' em '+d:'')+' — sem retorno do 811 ainda';
+        detail=`<div style="font-size:10px;color:#d97706;margin-top:2px;line-height:1.3;font-weight:600">📋 ${esc(st)}${ref}</div>`
+          +(resp?`<div style="font-size:10px;color:var(--muted);margin-top:1px;line-height:1.3">${esc(resp.length>70?resp.substring(0,70)+'…':resp)}</div>`:'');
+      }
       // Detail em LARANJA pro Not Participating (mais visivel)
-      if(resp && u._isNotPart){
+      else if(resp && u._isNotPart){
         const short=resp.length>80?resp.substring(0,80)+'…':resp;
         detail=`<div style="font-size:10px;color:#d97706;margin-top:2px;line-height:1.3;font-weight:600">⚠ ${esc(short)}</div>`;
       } else if(resp && u.status==='Cancel'){

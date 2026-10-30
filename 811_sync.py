@@ -6233,11 +6233,227 @@ async def scrape_diggers_ticket(page, tnum, retry=True, debug_dump=False):
     return result
 
 
-async def scrape_wi(ticket_numbers, tickets_data=None):
-    """Scrape batch de tickets WI no Diggers Hotline (público, sem login).
+# ══════════════════════════════════════════════════════════════════════════════
+#  WI — LEITURA PELO PORTAL LOGADO  (migração de 2026-10-12)
+#
+#  POR QUE MUDOU: entre 09/10 e 12/10 o Diggers DESATIVOU a consulta pública por
+#  número. A API que a tela "Find Tickets" usava responde 401 Unauthorized — e
+#  continua 401 mesmo com sessão logada. Não é rate-limit nem bloqueio temporário:
+#  aquele endpoint ("mp-noui-...", noui = no UI) simplesmente saiu do ar.
+#  Sintoma: todo ticket virava "não encontrado no Diggers" (falso negativo).
+#
+#  CAMINHO NOVO (o mesmo que o Eric faz na mão: View -> Responses):
+#    1. login no portal cliente
+#    2. Excavator Search por data — do dia 01 do MÊS ANTERIOR até hoje (regra do
+#       Eric). Devolve os tickets JÁ COM o id interno de cada um (cells[0]).
+#    3. abre /client/item/ticket/<id>?pr=true e lê o bloco "Positive Response".
+#  O ?pr=true é o mesmo truque que o ga_sync.py usa — GA e WI rodam na MESMA
+#  plataforma (Geocall), então o endereço vale nos dois.
+#
+#  Fazer "Excavator By Number" ticket a ticket também funciona, mas é frágil:
+#  o ExtJS perde o estado da árvore entre operações (vide cancelamento do Kiel).
+#  Uma busca só já entrega todos os ids de uma vez.
+# ══════════════════════════════════════════════════════════════════════════════
+WI_DETALHE_URL = "https://geocall.diggershotline.com/geocall/client/item/ticket/%s?pr=true"
+DIGGERS_CLIENT_HOME = "https://geocall.diggershotline.com/geocall/client"
 
-    Por enquanto roda SERIAL (1 aba) — portais legados costumam ter problemas
-    de concorrência. Se ficar lento, dá pra aumentar pra NUM_TABS depois.
+_WI_PR_DATA = re.compile(r"^([A-Z][a-z]+ \d{1,2}, \d{4} \d{1,2}:\d{2} [AP]M)\s*\|\|\s*(.+)$")
+
+
+def _wi_limpa_nome(nome, code):
+    """Tira o código do fim do nome da utility.
+    O portal mostra 'CHARTER COMMUNICATIONS SCG11'; o banco guarda
+    'CHARTER COMMUNICATIONS'. Sem isso cada utility viraria uma linha NOVA e o
+    ticket nunca mais fecharia (as antigas ficariam Pending pra sempre)."""
+    n = (nome or "").strip()
+    if code:
+        n = re.sub(r"\s*[-(]?\s*" + re.escape(code) + r"\s*\)?\s*$", "", n).strip(" -")
+    n = re.sub(r"\s*\([A-Z]{2,5}\d{1,4}\)\s*$", "", n).strip()
+    n = re.sub(r"\s+[A-Z]{2,5}\d{1,4}\s*$", "", n).strip(" -")
+    return n
+
+
+def _wi_parse_pr(texto):
+    """Lê a página de detalhe (?pr=true) e devolve o MESMO formato que o scraper
+    antigo entregava, pra `save_to_supabase` não precisar mudar."""
+    out = {"location_text": "", "responses": [], "expire_date": ""}
+
+    # ATENÇÃO: "Address:" aparece DUAS vezes na página — primeiro o da OneDrill
+    # (Contact Information) e depois o da OBRA (Work Information). Pegar o primeiro
+    # gravava "8803 futures Dr. suite 02" como local do ticket em todo WI.
+    _wi = texto.find("Work Information")
+    _trecho = texto[_wi:] if _wi >= 0 else texto
+    partes = []
+    for rot, suf in (("Address", ""), ("Place", ""), ("County", " County")):
+        m = re.search(r"^%s:\s*(.+)$" % rot, _trecho, re.M)
+        if m and m.group(1).strip():
+            partes.append(m.group(1).strip() + suf)
+    out["location_text"] = " / ".join(partes)
+
+    # Vencimento WI = Start Date + 10 dias corridos (mesma regra de antes)
+    m = re.search(r"Start Date:\s*(\d{2}/\d{2}/\d{4})", texto)
+    if m:
+        try:
+            out["expire_date"] = (datetime.strptime(m.group(1), "%m/%d/%Y")
+                                  + timedelta(days=10)).strftime("%m/%d/%Y")
+        except Exception:
+            pass
+
+    i = texto.find("Positive Response")
+    if i < 0:
+        return out
+    bloco = texto[i:]
+    fim = bloco.find("Work Site Polygon")
+    if fim > 0:
+        bloco = bloco[:fim]
+
+    atual = None
+    for linha in bloco.split("\n"):
+        if not linha.strip():
+            continue
+        md = _WI_PR_DATA.match(linha.strip())
+        if md and atual:
+            # Uma utility pode ter VÁRIAS respostas, e o portal NÃO as lista em ordem.
+            # Ex. real (CHARTER no 20264116975, visto em 19/10/2026):
+            #   October 12, 2026 2:15 PM || Marked - Complete        <- vale esta
+            #   October 12, 2026 2:11 PM || Marked - Complete
+            #   October 09, 2026 6:53 AM || Ongoing - Working with Excavator
+            # Antes eu sobrescrevia a cada linha, então ficava a ÚLTIMA do HTML — que é a
+            # mais VELHA — e a utility aparecia Pendente mesmo já tendo marcado.
+            # Agora fica a de data MAIS RECENTE. Mesmo bug que o GA teve (ultima_resposta_ga).
+            try:
+                quando = datetime.strptime(md.group(1), "%B %d, %Y %I:%M %p")
+            except Exception:
+                quando = None
+            anterior = atual.get("_dt")
+            if anterior is None or (quando and quando > anterior):
+                atual["status_raw"] = md.group(2).strip()
+                atual["_dt"] = quando
+                if quando:
+                    atual["responded_date"] = quando.strftime("%Y-%m-%d")
+            continue
+        campos = linha.split("\t")
+        if len(campos) >= 3 and campos[0].strip() and campos[0].strip() != "Status":
+            nome = _wi_limpa_nome(campos[2], campos[1].strip())
+            if not nome or not _is_valid_utility_name(nome):
+                continue
+            atual = {"utility": nome, "status_raw": campos[0].strip(),
+                     "status": None, "response": "", "comment": "",
+                     "responded_date": None, "_unrecognized": False}
+            out["responses"].append(atual)
+
+    # classify() só no fim: o status_raw pode ser sobrescrito pela linha de data
+    # ("... || Marked - Complete : Complete"), que é a versão completa.
+    for r in out["responses"]:
+        r.pop("_dt", None)
+        cls, unrec = classify(r["status_raw"])
+        r["status"] = cls
+        r["_unrecognized"] = unrec
+        r["response"] = r["status_raw"]
+    return out
+
+
+async def _wi_mapa_ids(page):
+    """{numero_do_ticket: id_interno} via Excavator Search.
+    Janela: dia 01 do MÊS ANTERIOR até hoje — regra do Eric (12/10/2026)."""
+    hoje = datetime.now()
+    ini = (hoje.replace(day=1) - timedelta(days=1)).replace(day=1)
+    achados = await _search_diggers_excavator(
+        page, ini.strftime("%m/%d/%Y"), hoje.strftime("%m/%d/%Y"), debug=False)
+    mapa = {}
+    for it in achados or []:
+        cells = it.get("cells") or []
+        if it.get("ticket") and cells and str(cells[0]).strip().isdigit():
+            mapa[it["ticket"]] = str(cells[0]).strip()
+    log.info(f"[WI] Mapa de ids: {len(mapa)} ticket(s) entre {ini:%m/%d/%Y} e {hoje:%m/%d/%Y}")
+    return mapa
+
+
+async def _wi_id_por_numero(page, tnum):
+    """Acha o id interno de UM ticket pelo 'Excavator By Number'.
+
+    Eric (12/10/2026): a busca por data tem dois riscos — ticket mais antigo que a
+    janela, e a paginação parar cedo (o fim é detectado por "só duplicatas"). Por
+    número não existe esse risco: pesquisa o ticket exato. Fica como REDE DE
+    SEGURANÇA de quem a busca por data não trouxe, mantendo o caminho rápido pros
+    demais (uma busca resolve ~140 ids de uma vez)."""
+    try:
+        await page.goto(DIGGERS_CLIENT_HOME, wait_until="domcontentloaded")
+        await page.wait_for_timeout(2500)
+        # Expande a árvore (Search -> Ticket) e clica em "Excavator By Number"
+        clicou = await page.evaluate("""() => {
+            const achaFolha = (txt) => [...document.querySelectorAll('*')].find(
+                e => e.children.length === 0 &&
+                     (e.textContent || '').trim().toLowerCase() === txt);
+            for (const alvo of ['search', 'ticket']) {
+                const el = achaFolha(alvo);
+                if (el) {
+                    const box = el.closest('div, tr, li, span') || el.parentElement;
+                    const mais = box && box.querySelector(
+                        'img[class*="plus"], img[class*="expand"], .x-tree-ec-icon, .x-tool-expand');
+                    (mais || el).click();
+                }
+            }
+            const byn = achaFolha('excavator by number');
+            if (byn) { byn.click(); return true; }
+            return false;
+        }""")
+        if not clicou:
+            return None
+        await page.wait_for_timeout(2500)
+        campo = page.locator('input[name="Number"], input[name="number"]').first
+        if not await campo.count():
+            _f, campo = await _wait_for_diggers_element(
+                page, 'input[name="Number"], input[name="number"]', timeout_s=10)
+            if not campo:
+                return None
+        await campo.click()
+        await campo.fill(str(tnum))
+        for sel in ['button:has-text("Ok")', 'button:has-text("OK")', 'input[value="Ok"]']:
+            b = page.locator(sel).first
+            if await b.count():
+                await b.click()
+                break
+        else:
+            await campo.press("Enter")
+        await page.wait_for_timeout(5000)
+        # a grid devolve 1 linha; o id interno é a 1ª célula
+        tid = await page.evaluate("""(tk) => {
+            for (const tr of document.querySelectorAll('tr')) {
+                const tds = [...tr.querySelectorAll('td')].map(td => (td.textContent||'').trim());
+                if (tds.some(v => v === tk)) {
+                    const num = tds.find(v => /^\\d{6,9}$/.test(v) && v !== tk);
+                    if (num) return num;
+                }
+            }
+            return null;
+        }""", str(tnum))
+        return tid
+    except Exception as e:
+        log.debug(f"[WI] {tnum}: by-number falhou: {str(e)[:80]}")
+        return None
+
+
+async def _wi_le_ticket(page, tnum, tid):
+    """Abre o detalhe logado e extrai as respostas."""
+    vazio = {"location_text": "", "responses": [], "expire_date": ""}
+    try:
+        await page.goto(WI_DETALHE_URL % tid, wait_until="domcontentloaded")
+        await page.wait_for_timeout(4500)
+        texto = await page.locator("body").inner_text()
+    except Exception as e:
+        log.error(f"[WI] {tnum}: erro abrindo detalhe ({tid}): {str(e)[:90]}")
+        return vazio
+    if tnum not in texto:
+        log.info(f"[WI] {tnum}: detalhe abriu mas não confere (id {tid})")
+        return vazio
+    return _wi_parse_pr(texto)
+
+
+async def scrape_wi(ticket_numbers, tickets_data=None):
+    """Scrape batch de tickets WI — portal LOGADO (ver bloco acima).
+
+    Roda SERIAL (1 aba): portais legados costumam ter problema de concorrência.
     """
     results = {}
     if not ticket_numbers:
@@ -6253,17 +6469,47 @@ async def scrape_wi(ticket_numbers, tickets_data=None):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
 
+        # Login + mapa de ids UMA vez, compartilhado por todas as abas.
+        # Contexto EXPLÍCITO: as abas seguintes precisam nascer na MESMA sessão
+        # (os cookies do login vivem no contexto, não no browser).
+        _ctx_logado = await browser.new_context()
+        _pg_login = await _ctx_logado.new_page()
+        _pg_login.set_default_timeout(60000)
+        if not await _login_diggers(_pg_login):
+            log.error("[WI] Login falhou — sem login não há como ler respostas (portal "
+                      "público saiu do ar em 10/2026). Confira WI_USER/WI_PASS no .env.")
+            await browser.close()
+            return results
+        mapa_ids = await _wi_mapa_ids(_pg_login)
+        await _pg_login.close()
+
+        faltando = [t for t in ticket_numbers if t not in mapa_ids]
+        if faltando:
+            log.info(f"[WI] {len(faltando)} ticket(s) fora da busca por data — "
+                     f"buscando um a um por número (Excavator By Number)")
+
         async def process_chunk(chunk, tab_id):
             tab_results = {}
-            page = await browser.new_page()
+            page = await _ctx_logado.new_page()   # mesma sessão logada
             page.set_default_timeout(30000)
 
             for idx, tnum in enumerate(chunk):
                 log.info(f"[WI][T{tab_id}] ({idx+1}/{len(chunk)}) Ticket {tnum}")
+                tid = mapa_ids.get(tnum)
+                if not tid:
+                    # Rede de segurança: a busca por data pode não trazer o ticket
+                    # (mais antigo que a janela, ou paginação parou cedo). Aqui a
+                    # busca é pelo número exato, então não há esse risco.
+                    tid = await _wi_id_por_numero(page, tnum)
+                    if tid:
+                        log.info(f"[WI] {tnum}: achado por número (id {tid})")
+                    else:
+                        log.warning(f"[WI] {tnum}: não achado nem por data nem por número")
+                        continue      # não grava vazio — preserva o que já existe
                 try:
-                    debug = (idx < 2)
-                    result = await scrape_diggers_ticket(page, tnum, debug_dump=debug)
+                    result = await _wi_le_ticket(page, tnum, tid)
                     tab_results[tnum] = result
+                    log.info(f"[WI] {tnum}: {len(result['responses'])} utilities")
                 except Exception as e:
                     log.error(f"[WI][T{tab_id}] {tnum}: ERRO → {e}")
                     tab_results[tnum] = {"location_text": "", "responses": [], "expire_date": ""}
